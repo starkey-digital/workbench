@@ -591,13 +591,20 @@ describe('AgentChat', () => {
 		expect(chat.status).toBe('live');
 		chat.dispose();
 	});
-	it('waits for any running pane before the first snapshot', async () => {
-		const chat = new AgentChat(body, fakeApi(), {
-			pane: () => ({ status: 'starting', generation: 0 })
-		});
+	it('stays starting while the host starts the pane, however long, spending no retries', async () => {
+		const socketUrl = spyUrl();
+		let pane: PaneProcess = { status: 'starting', generation: 0 };
+		const chat = new AgentChat(body, fakeApi(socketUrl), { pane: () => pane });
 		await vi.waitFor(() => expect(FakeSocket.last).not.toBeNull());
-		FakeSocket.last!.drop(GONE);
-		expect(chat.status).toBe('reconnecting');
+		for (let i = 0; i < 20; i++) {
+			FakeSocket.last!.drop(GONE);
+			expect(chat.status).toBe('starting');
+			await vi.advanceTimersByTimeAsync(1000);
+		}
+		expect(socketUrl).toHaveBeenCalledTimes(21);
+		pane = { status: 'running', generation: 1 };
+		FakeSocket.last!.emit(snapshot());
+		expect(chat.status).toBe('live');
 		chat.dispose();
 	});
 	it('ends at once when the pane runs the spawn it attached to, or has exited', async () => {

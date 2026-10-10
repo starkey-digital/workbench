@@ -67,6 +67,8 @@ const MAX_RECONNECT_ATTEMPTS = 8;
 const RELAUNCH_ATTEMPTS = 5;
 /** How the server closes a socket opened on a session that isn't running. */
 const SESSION_GONE = 4404;
+/** How often a chat whose pane the host is still starting tries to attach. */
+const STARTING_POLL_MS = 1000;
 
 /** The pane's process as the host's workspace snapshot shows it. */
 export type PaneProcess = Pick<WorkspacePane, 'status' | 'generation'>;
@@ -303,6 +305,13 @@ export class AgentChat {
 	/** The server has no such session: wait for a relaunch, else it ended. */
 	private notRunning(): void {
 		const pane = this.pane();
+		// Still starting on the host (`claude` booting, its plugin not attached
+		// yet): no retry is spent, and a failed start shows as the pane's exit.
+		if (pane?.status === 'starting' && this.status === 'starting') {
+			if (this.retryTimer) clearTimeout(this.retryTimer);
+			this.retryTimer = setTimeout(() => void this.connect(), STARTING_POLL_MS);
+			return;
+		}
 		const newer =
 			(pane?.status === 'starting' || pane?.status === 'running') &&
 			pane.generation > (this.attachedGeneration ?? -1);
