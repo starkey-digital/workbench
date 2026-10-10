@@ -212,6 +212,45 @@ describe('AgentChat', () => {
 		chat.dispose();
 	});
 
+	it('sends a message already sent mid-turn now: the turn stops and Claude answers it', async () => {
+		const { chat, ws } = await connected();
+		ws.emit({ t: 'update', changes: [], meta: meta(true) });
+		chat.prompt('also check the logs');
+		expect(chat.pending[0].midTurn).toBe(true);
+		ws.emit({
+			t: 'update',
+			changes: [[0, { kind: 'user', id: 'u1', text: 'also check the logs', timestamp: '' }]],
+			meta: meta(true)
+		});
+		expect(chat.unread).toEqual(['u1']);
+		chat.sendNow();
+		expect(ws.sent.at(-1)).toEqual({
+			t: 'prompt',
+			text: 'Please answer the message I sent while you were working.',
+			now: true
+		});
+		expect(chat.unread).toEqual([]);
+		expect(chat.pending).toEqual([]);
+		chat.dispose();
+	});
+
+	it('sends a queued message now by stopping the turn, and forgets unread ones when it ends', async () => {
+		const { chat, ws } = await connected();
+		ws.emit({ t: 'update', changes: [], meta: meta(true) });
+		chat.prompt('queued');
+		chat.sendNow();
+		expect(ws.sent.at(-1)).toEqual({ t: 'interrupt' });
+		ws.emit({
+			t: 'update',
+			changes: [[0, { kind: 'user', id: 'u1', text: 'queued', timestamp: '' }]],
+			meta: meta(true)
+		});
+		expect(chat.unread).toEqual(['u1']);
+		ws.emit({ t: 'update', changes: [], meta: meta(false) });
+		expect(chat.unread).toEqual([]);
+		chat.dispose();
+	});
+
 	it('shows a prompt at once and drops it when Claude echoes it', async () => {
 		const { chat, ws } = await connected();
 		expect(chat.prompt('  fix the build  ')).toBe(true);

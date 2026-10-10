@@ -56,6 +56,8 @@ export interface PendingPrompt {
 	after: number;
 	/** Absolute index the next item had when it was sent. */
 	at: number;
+	/** Sent while a Claude turn ran: it joins that turn, read after its current step. */
+	midTurn: boolean;
 }
 
 /** First retry after a drop; each failed one doubles it, up to the cap. */
@@ -76,6 +78,8 @@ export type PaneProcess = Pick<WorkspacePane, 'status' | 'generation'>;
 const WAKE_RECONNECT_MS = 10_000;
 /** How long the `@` menu's file list is reused before it's fetched again. */
 const FILES_TTL_MS = 30_000;
+/** Core's `QUEUED_NUDGE`: a hidden prompt asking for an answer to messages a turn didn't read. */
+const QUEUED_NUDGE = 'Please answer the message I sent while you were working.';
 
 export interface TaskOutput {
 	text: string;
@@ -114,6 +118,8 @@ export class AgentChat {
 	/** A rejected action (bad mode, write failed); cleared on the next success. */
 	notice = $state<string | null>(null);
 	pending = $state.raw<PendingPrompt[]>([]);
+	/** Messages sent during the running turn that it hasn't read yet, by their user item's id. */
+	unread = $state.raw<string[]>([]);
 	/** When the current turn started (client clock), for the elapsed timer. */
 	busySince = $state<number | null>(null);
 	/** The session's id, then any new id `/clear` moved it to. The pane follows it. */
@@ -440,7 +446,10 @@ export class AgentChat {
 
 	private setMeta(meta: TranscriptMeta): void {
 		if (meta.busy && !this.meta?.busy) this.busySince = Date.now();
-		if (!meta.busy) this.busySince = null;
+		if (!meta.busy) {
+			this.busySince = null;
+			this.unread = [];
+		}
 		this.markSeen(meta.tasks.map((t) => t.id));
 		this.meta = meta;
 	}
@@ -468,6 +477,7 @@ export class AgentChat {
 		const noticeSince = (at: number) =>
 			this.items.some((i, k) => i.kind === 'notice' && this.start + k >= at);
 		const previews: Record<string, string[]> = {};
+		const joined: string[] = [];
 		const matched = this.echoedUsers;
 		const available = new Set(users.map((user) => user.id));
 		for (const id of matched) if (!available.has(id)) matched.delete(id);
@@ -477,11 +487,13 @@ export class AgentChat {
 				.find((u) => u.kind === 'user' && !matched.has(u.id) && same(u.text, p.text));
 			if (echo) matched.add(echo.id);
 			if (echo && p.previews.length > 0) previews[echo.id] = p.previews;
+			if (echo && p.midTurn) joined.push(echo.id);
 			return !echo && !(idle && p.text.startsWith('/') && noticeSince(p.at));
 		});
 		if (Object.keys(previews).length > 0) {
 			this.imagePreviews = { ...this.imagePreviews, ...previews };
 		}
+		if (joined.length > 0 && this.meta?.busy) this.unread = [...this.unread, ...joined];
 	}
 
 	get title(): string {
@@ -517,6 +529,18 @@ export class AgentChat {
 	/** Whether a prompt may end the running turn instead of joining it (the TUI's send now). */
 	get canSendNow(): boolean {
 		return this.agent === 'claude' && Boolean(this.meta?.busy);
+	}
+
+	/**
+	 * Send now for messages already sent mid-turn (the TUI's ctrl+enter, after
+	 * the fact): the turn stops, and Claude answers what it hadn't read. A
+	 * message still queued behind the turn just runs next.
+	 */
+	sendNow(): void {
+		if (!this.canSendNow) return;
+		if (this.unread.length > 0) this.send({ t: 'prompt', text: QUEUED_NUDGE, now: true });
+		else this.interrupt();
+		this.unread = [];
 	}
 
 	prompt(
@@ -573,7 +597,8 @@ export class AgentChat {
 				previews: images.map(previewUrl),
 				files: files.map((f) => f.name),
 				after: this.userTexts().length,
-				at: this.start + this.items.length
+				at: this.start + this.items.length,
+				midTurn: this.canSendNow
 			}
 		];
 		this.busySince ??= Date.now();

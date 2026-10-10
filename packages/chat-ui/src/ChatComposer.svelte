@@ -3,32 +3,24 @@
 	import type { Attachment } from 'svelte/attachments';
 	import { watch } from 'runed';
 	import ArrowUpIcon from '@lucide/svelte/icons/arrow-up';
-	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import MicIcon from '@lucide/svelte/icons/mic';
 	import PaperclipIcon from '@lucide/svelte/icons/paperclip';
 	import SquareIcon from '@lucide/svelte/icons/square';
-	import ZapIcon from '@lucide/svelte/icons/zap';
 	import XIcon from '@lucide/svelte/icons/x';
 	import { cn } from '@workbench/ui';
-	import * as DropdownMenu from '@workbench/ui/dropdown-menu';
 	import type {
 		AgentKind,
 		ChatAttachment,
 		ChatFile,
 		ChatImage,
-		CodexMode,
-		PermissionMode,
 		SlashCommand
 	} from '@workbench/types';
 	import {
 		agentName,
 		insertCommand,
-		isRiskyMode,
 		isWholeCommand,
 		matchCommands,
-		modeLabel,
-		modeOptions,
 		slashQuery
 	} from './chat-format';
 	import ChatMenu from './ChatMenu.svelte';
@@ -43,14 +35,12 @@
 		draft = $bindable(''),
 		images = $bindable<ChatImage[]>([]),
 		files = $bindable<ChatFile[]>([]),
-		mode,
 		busy,
 		stoppable,
 		sendNow = false,
 		disabledReason,
 		onSend,
 		onStop,
-		onMode,
 		controls,
 		commands = [],
 		onCommand,
@@ -64,11 +54,10 @@
 		images?: ChatImage[];
 		/** PDF and text attachments for either agent. */
 		files?: ChatFile[];
-		mode: PermissionMode | CodexMode | null;
 		busy: boolean;
-		/** Whether Stop shows: also while only background agents run (the chat is idle). */
+		/** Whether Stop shows (in Send's place, with an empty draft): also while only background agents run. */
 		stoppable: boolean;
-		/** Whether Send now shows (Ctrl/⌘+Enter): ends the running turn instead of joining it. */
+		/** Whether Ctrl/⌘+Enter sends now: ends the running turn instead of joining it. */
 		sendNow?: boolean;
 		/** Set when nothing can be sent right now; shown as the placeholder. */
 		disabledReason: string | null;
@@ -80,8 +69,7 @@
 			now: boolean
 		) => boolean | Promise<boolean>;
 		onStop: () => void;
-		onMode: (mode: PermissionMode | CodexMode) => void;
-		/** More pickers for the toolbar (model, effort). */
+		/** The toolbar's leading controls (the options menu). */
 		controls?: Snippet;
 		/** For the `/` menu. */
 		commands?: SlashCommand[];
@@ -94,7 +82,6 @@
 	} = $props();
 
 	const name = $derived(agentName(agent));
-	const modes = $derived(modeOptions(agent));
 	const placeholder = $derived(
 		agent === 'codex'
 			? 'Message Codex, / for skills, @ for files, or attach a file'
@@ -188,11 +175,10 @@
 	}
 
 	let sending = $state(false);
-	const canSend = $derived(
-		!sending &&
-			!disabledReason &&
-			(draft.trim().length > 0 || images.length > 0 || files.length > 0)
-	);
+	const hasDraft = $derived(draft.trim().length > 0 || images.length > 0 || files.length > 0);
+	const canSend = $derived(!sending && !disabledReason && hasDraft);
+	/** Send's place holds Stop while something runs and there's nothing to send. */
+	const stopping = $derived(stoppable && !hasDraft);
 
 	/** Grow with the text up to ~8 lines, then scroll. */
 	const autosize: Attachment<HTMLTextAreaElement> = (node) => {
@@ -425,40 +411,6 @@
 		<p class="px-3.5 pb-1 text-[11px] text-wb-err" role="alert">{dictation.error}</p>
 	{/if}
 	<div class="flex items-center gap-1.5 px-2 pb-2">
-		<DropdownMenu.Root>
-			<DropdownMenu.Trigger>
-				{#snippet child({ props })}
-					<button
-						{...props}
-						type="button"
-						disabled={disabledReason !== null}
-						class={cn(
-							'flex min-w-0 items-center gap-1 rounded-md px-2 py-1 text-xs whitespace-nowrap hover:bg-wb-panel2 focus-visible:ring-1 focus-visible:ring-wb-accent focus-visible:outline-none disabled:opacity-50',
-							isRiskyMode(mode) ? 'text-wb-err' : 'text-wb-ink-mute'
-						)}
-						title={agent === 'codex' ? 'Approvals and sandbox' : 'Permission mode'}
-					>
-						<span class="truncate">{modeLabel(mode, agent)}</span>
-						<ChevronDownIcon class="size-3 shrink-0" />
-					</button>
-				{/snippet}
-			</DropdownMenu.Trigger>
-			<DropdownMenu.Content align="start" class="w-64">
-				<DropdownMenu.RadioGroup
-					value={mode ?? (agent === 'codex' ? '' : 'default')}
-					onValueChange={(value) => onMode(value as PermissionMode | CodexMode)}
-				>
-					{#each modes as option (option.mode)}
-						<DropdownMenu.RadioItem value={option.mode} class="flex-col items-start gap-0">
-							<span class={cn(option.risky && 'text-wb-err')}>
-								{option.label}
-							</span>
-							<span class="text-[11px] text-muted-foreground">{option.hint}</span>
-						</DropdownMenu.RadioItem>
-					{/each}
-				</DropdownMenu.RadioGroup>
-			</DropdownMenu.Content>
-		</DropdownMenu.Root>
 		{@render controls?.()}
 		<button
 			type="button"
@@ -495,43 +447,32 @@
 				<MicIcon class={cn('size-4', dictation.busy && 'text-wb-accent')} />
 			</button>
 		{/if}
-		{#if stoppable}
+		{#if stopping}
 			<button
 				type="button"
-				class="flex size-7 shrink-0 items-center justify-center rounded-lg border border-wb-hair bg-wb-panel2 text-wb-ink-mute hover:text-wb-ink focus-visible:ring-1 focus-visible:ring-wb-accent focus-visible:outline-none"
+				class="flex size-8 shrink-0 items-center justify-center rounded-lg border border-wb-hair bg-wb-panel2 text-wb-ink hover:brightness-110 focus-visible:ring-2 focus-visible:ring-wb-accent/50 focus-visible:outline-none"
 				title="Stop (Esc)"
 				aria-label="Stop"
 				onclick={onStop}
 			>
-				<SquareIcon class="size-2.5 fill-current" />
+				<SquareIcon class="size-3 fill-current" />
 			</button>
-		{/if}
-		{#if sendNow}
+		{:else}
 			<button
 				type="button"
-				class="flex size-7 shrink-0 items-center justify-center rounded-lg border border-wb-hair bg-wb-panel2 text-wb-ink-mute hover:text-wb-ink focus-visible:ring-1 focus-visible:ring-wb-accent focus-visible:outline-none disabled:opacity-30"
-				aria-label="Send now"
-				title={`Send now (${sendNowKey}): stops this turn, running commands move to the background`}
+				class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-wb-accent text-wb-accent-ink transition-opacity hover:brightness-110 focus-visible:ring-2 focus-visible:ring-wb-accent/50 focus-visible:outline-none disabled:opacity-30"
+				aria-label={busy ? 'Queue message' : 'Send'}
+				title={busy
+					? `${name} will read this after the current step${sendNow ? ` (${sendNowKey} sends it now)` : ''}`
+					: enterSends
+						? 'Send (Enter)'
+						: 'Send'}
 				disabled={!canSend}
-				onclick={() => send(true)}
+				onclick={() => send()}
 			>
-				<ZapIcon class="size-3.5" />
+				<ArrowUpIcon class="size-4" />
 			</button>
 		{/if}
-		<button
-			type="button"
-			class="flex size-7 shrink-0 items-center justify-center rounded-lg bg-wb-accent text-wb-accent-ink transition-opacity hover:brightness-110 focus-visible:ring-2 focus-visible:ring-wb-accent/50 focus-visible:outline-none disabled:opacity-30"
-			aria-label={busy ? 'Queue message' : 'Send'}
-			title={busy
-				? `${name} will read this after the current step`
-				: enterSends
-					? 'Send (Enter)'
-					: 'Send'}
-			disabled={!canSend}
-			onclick={() => send()}
-		>
-			<ArrowUpIcon class="size-3.5" />
-		</button>
 	</div>
 </div>
 
