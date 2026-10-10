@@ -425,14 +425,18 @@ export const register: Register = (on) => {
 				});
 			} else {
 				// Not awaited: it resolves when its turn starts, and polling must go
-				// on meanwhile (approval answers, interrupts).
-				void $.prompt.submit({ text: withAttachments(text, files), asUser: true }).catch(() => {
-					// A replaced turn sent no `result`; nothing replaced it after all.
-					if (owedResult && !runningTurn) {
-						owedResult = false;
-						emit({ type: 'result', subtype: 'success', is_error: false });
+				// on meanwhile (approval answers, interrupts). Marked here: this
+				// plugin's own `prompt.submit` hook doesn't see the submit it raises.
+				void $.prompt.submit({ text: withAttachments(text, files), asUser: true }).then(
+					() => (chatTurn = true),
+					() => {
+						// A replaced turn sent no `result`; nothing replaced it after all.
+						if (owedResult && !runningTurn) {
+							owedResult = false;
+							emit({ type: 'result', subtype: 'success', is_error: false });
+						}
 					}
-				});
+				);
 			}
 		};
 
