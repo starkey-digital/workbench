@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ChatTarget, TranscriptMeta } from '@workbench/types';
+import { QUEUED_NUDGE, type ChatTarget, type TranscriptMeta } from '@workbench/types';
 import type { AgentApi } from './agent-api';
 import { AgentChat, type PaneProcess } from './agent-chat.svelte';
 import { ChatDraft } from './chat-draft.svelte';
@@ -212,42 +212,36 @@ describe('AgentChat', () => {
 		chat.dispose();
 	});
 
-	it('sends a message already sent mid-turn now: the turn stops and Claude answers it', async () => {
+	it('sends a message the running turn has not read now: the turn stops and Claude answers it', async () => {
 		const { chat, ws } = await connected();
-		ws.emit({ t: 'update', changes: [], meta: meta(true) });
-		chat.prompt('also check the logs');
-		expect(chat.pending[0].midTurn).toBe(true);
-		ws.emit({
-			t: 'update',
-			changes: [[0, { kind: 'user', id: 'u1', text: 'also check the logs', timestamp: '' }]],
-			meta: meta(true)
-		});
+		const unread = { ...meta(true), unreadQueued: ['u1'] };
+		ws.emit({ t: 'update', changes: [], meta: unread });
 		expect(chat.unread).toEqual(['u1']);
 		chat.sendNow();
-		expect(ws.sent.at(-1)).toEqual({
-			t: 'prompt',
-			text: 'Please answer the message I sent while you were working.',
-			now: true
-		});
+		expect(ws.sent.at(-1)).toEqual({ t: 'prompt', text: QUEUED_NUDGE, now: true });
 		expect(chat.unread).toEqual([]);
-		expect(chat.pending).toEqual([]);
+		chat.sendNow();
+		expect(ws.sent).toHaveLength(1);
 		chat.dispose();
 	});
 
-	it('sends a queued message now by stopping the turn, and forgets unread ones when it ends', async () => {
+	it('offers Send now only for messages no model request has read', async () => {
 		const { chat, ws } = await connected();
 		ws.emit({ t: 'update', changes: [], meta: meta(true) });
-		chat.prompt('queued');
 		chat.sendNow();
-		expect(ws.sent.at(-1)).toEqual({ t: 'interrupt' });
-		ws.emit({
-			t: 'update',
-			changes: [[0, { kind: 'user', id: 'u1', text: 'queued', timestamp: '' }]],
-			meta: meta(true)
-		});
-		expect(chat.unread).toEqual(['u1']);
-		ws.emit({ t: 'update', changes: [], meta: meta(false) });
+		expect(ws.sent).toEqual([]);
+		ws.emit({ t: 'update', changes: [], meta: { ...meta(true), unreadQueued: ['u1'] } });
+		ws.emit({ t: 'update', changes: [], meta: meta(true) });
 		expect(chat.unread).toEqual([]);
+		chat.dispose();
+	});
+
+	it('keeps Send now when the nudge could not be sent', async () => {
+		const { chat, ws } = await connected();
+		ws.emit({ t: 'update', changes: [], meta: { ...meta(true), unreadQueued: ['u1'] } });
+		ws.readyState = 3;
+		chat.sendNow();
+		expect(chat.unread).toEqual(['u1']);
 		chat.dispose();
 	});
 
@@ -630,7 +624,7 @@ describe('AgentChat', () => {
 		expect(chat.status).toBe('live');
 		chat.dispose();
 	});
-	it('stays starting while the host starts the pane, however long, spending no retries', async () => {
+	it('stays starting while the host starts the pane, spending no retries', async () => {
 		const socketUrl = spyUrl();
 		let pane: PaneProcess = { status: 'starting', generation: 0 };
 		const chat = new AgentChat(body, fakeApi(socketUrl), { pane: () => pane });
@@ -644,6 +638,19 @@ describe('AgentChat', () => {
 		pane = { status: 'running', generation: 1 };
 		FakeSocket.last!.emit(snapshot());
 		expect(chat.status).toBe('live');
+		chat.dispose();
+	});
+	it('gives up on a start that never attaches after two minutes', async () => {
+		const chat = new AgentChat(body, fakeApi(), {
+			pane: () => ({ status: 'starting', generation: 0 })
+		});
+		await vi.waitFor(() => expect(FakeSocket.last).not.toBeNull());
+		for (let i = 0; i < 120; i++) {
+			FakeSocket.last!.drop(GONE);
+			await vi.advanceTimersByTimeAsync(1000);
+		}
+		FakeSocket.last!.drop(GONE);
+		expect(chat.status).toBe('reconnecting');
 		chat.dispose();
 	});
 	it('ends at once when the pane runs the spawn it attached to, or has exited', async () => {

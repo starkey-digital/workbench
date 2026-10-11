@@ -743,7 +743,16 @@ export interface TranscriptMeta {
 	promptSuggestion?: string;
 	/** Claude only: the active `/goal`, until it's met or cleared. */
 	goal?: GoalInfo;
+	/** Claude only: ids of user items put into the running turn that no model request has read yet. */
+	unreadQueued?: string[];
 }
+
+/**
+ * The hidden prompt asking Claude to answer messages its turn didn't read.
+ * Core (`claude_transcript::QUEUED_NUDGE`) and the plugin (`hooks/lines.ts`)
+ * match it exactly; a core test checks the copies agree.
+ */
+export const QUEUED_NUDGE = 'Please answer the message I sent while you were working.';
 
 /** A Claude session's `/goal`: it keeps taking turns until the condition holds. */
 export interface GoalInfo {

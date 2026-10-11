@@ -55,7 +55,7 @@
 		/** PDF and text attachments for either agent. */
 		files?: ChatFile[];
 		busy: boolean;
-		/** Whether Stop shows (in Send's place, with an empty draft): also while only background agents run. */
+		/** Whether Stop shows (beside Send once there's a draft): also while only background agents run. */
 		stoppable: boolean;
 		/** Whether Ctrl/⌘+Enter sends now: ends the running turn instead of joining it. */
 		sendNow?: boolean;
@@ -177,8 +177,6 @@
 	let sending = $state(false);
 	const hasDraft = $derived(draft.trim().length > 0 || images.length > 0 || files.length > 0);
 	const canSend = $derived(!sending && !disabledReason && hasDraft);
-	/** Send's place holds Stop while something runs and there's nothing to send. */
-	const stopping = $derived(stoppable && !hasDraft);
 
 	/** Grow with the text up to ~8 lines, then scroll. */
 	const autosize: Attachment<HTMLTextAreaElement> = (node) => {
@@ -447,7 +445,7 @@
 				<MicIcon class={cn('size-4', dictation.busy && 'text-wb-accent')} />
 			</button>
 		{/if}
-		{#if stopping}
+		{#if stoppable}
 			<button
 				type="button"
 				class="flex size-8 shrink-0 items-center justify-center rounded-lg border border-wb-hair bg-wb-panel2 text-wb-ink hover:brightness-110 focus-visible:ring-2 focus-visible:ring-wb-accent/50 focus-visible:outline-none"
@@ -457,7 +455,9 @@
 			>
 				<SquareIcon class="size-3 fill-current" />
 			</button>
-		{:else}
+		{/if}
+		<!-- While something runs, Send shows only once there's a message to queue. -->
+		{#if !stoppable || hasDraft}
 			<button
 				type="button"
 				class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-wb-accent text-wb-accent-ink transition-opacity hover:brightness-110 focus-visible:ring-2 focus-visible:ring-wb-accent/50 focus-visible:outline-none disabled:opacity-30"

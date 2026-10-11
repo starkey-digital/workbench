@@ -1318,6 +1318,34 @@ fn plugin_framing_stays_out_of_the_chat() {
 }
 
 #[test]
+fn the_plugin_and_chat_ui_send_the_nudge_core_hides() {
+    let quoted = format!("'{QUEUED_NUDGE}'");
+    assert!(include_str!("../../../../plugins/workbench/hooks/lines.ts").contains(&quoted));
+    assert!(include_str!("../../../../packages/types/src/workbench.ts").contains(&quoted));
+}
+
+#[test]
+fn a_prompt_put_into_a_turn_is_unread_until_a_request_reads_it() {
+    let mut t = Transcript::default();
+    let queued = || {
+        json!({"type":"user","uuid":"q1","workbench_queued":true,
+            "message":{"role":"user","content":"also the logs"}})
+    };
+    t.apply(&user("p1", json!("fix it")));
+    t.apply(&queued());
+    assert_eq!(t.meta().unread_queued, ["q1"]);
+    t.apply(&json!({"type":"workbench_queued_read"}));
+    assert!(t.meta().unread_queued.is_empty());
+
+    t.apply(&queued());
+    t.apply(&json!({"type":"result","subtype":"success","is_error":false}));
+    assert!(
+        t.meta().unread_queued.is_empty(),
+        "the turn's end clears it"
+    );
+}
+
+#[test]
 fn a_pick_resolves_through_the_model_list() {
     let mut t = Transcript::default();
     t.apply(

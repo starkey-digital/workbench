@@ -63,8 +63,10 @@
 		agent === 'claude' && accounts.length > 0 ? accountChoices(accounts, defaultAccountName) : []
 	);
 	const account = $derived(choices.find((c) => c.id === accountId) ?? choices[0]);
-	/** The trigger names what matters most: a risky mode, else the model. */
-	const summary = $derived(risky ? modeLabel(mode, agent) : (model?.displayName ?? 'Options'));
+	/** Each agent's everyday mode; any other (plan, bypass) is worth seeing at a glance. */
+	const usualMode = $derived(mode === null || mode === (agent === 'codex' ? 'auto' : 'default'));
+	/** The trigger names what matters most: an unusual mode, else the model. */
+	const summary = $derived(usualMode ? (model?.displayName ?? 'Options') : modeLabel(mode, agent));
 </script>
 
 {#snippet current(value: string, danger = false)}

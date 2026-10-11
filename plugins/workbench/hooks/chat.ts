@@ -1,4 +1,9 @@
-import type { PermissionRequestDecision, Register, TurnStepInput } from 'claude-code';
+import type {
+	PermissionRequestDecision,
+	PromptSubmitResult,
+	Register,
+	TurnStepInput
+} from 'claude-code';
 import * as server from './link';
 import { PendingAsks } from './asks';
 import { notifiedJob, startJob, stoppedJobs } from './jobs';
@@ -95,6 +100,13 @@ const runningSkills = new Map<string, { skill: string; before: Set<string> }>();
 // Whether the latest prompt came from a chat: what it asks waits for a chat's
 // answer even before one has it open (a phone in the background).
 let chatTurn = false;
+// Marks a turn this plugin submits for the chat as the chat's: its own
+// `prompt.submit` hook doesn't see the submit it raises. A refused one isn't.
+const chatSubmit = (submitted: Promise<PromptSubmitResult>) =>
+	submitted.then((r) => {
+		if (!r.drop) chatTurn = true;
+		return r;
+	});
 // The chat's latest command: whether it started a turn or compaction or got its
 // `result` (`answered`), and whether `$.command.run` has resolved (`settled`).
 type ChatCommand = { answered: boolean; settled: boolean };
@@ -420,22 +432,23 @@ export const register: Register = (on) => {
 				emit({
 					type: 'user',
 					uuid: `wbmod-queued-${++askSeq}`,
+					workbench_queued: true,
 					session_id: server.current()?.sessionId,
 					message: { role: 'user', content: text }
 				});
 			} else {
-				// Not awaited: it resolves when its turn starts, and polling must go
-				// on meanwhile (approval answers, interrupts). Marked here: this
-				// plugin's own `prompt.submit` hook doesn't see the submit it raises.
-				void $.prompt.submit({ text: withAttachments(text, files), asUser: true }).then(
-					() => (chatTurn = true),
-					() => {
-						// A replaced turn sent no `result`; nothing replaced it after all.
-						if (owedResult && !runningTurn) {
-							owedResult = false;
-							emit({ type: 'result', subtype: 'success', is_error: false });
-						}
+				// A replaced turn sent no `result`; nothing replaced it after all.
+				const unowe = () => {
+					if (owedResult && !runningTurn) {
+						owedResult = false;
+						emit({ type: 'result', subtype: 'success', is_error: false });
 					}
+				};
+				// Not awaited: it resolves when its turn starts, and polling must go
+				// on meanwhile (approval answers, interrupts).
+				void chatSubmit($.prompt.submit({ text: withAttachments(text, files), asUser: true })).then(
+					(r) => r.drop && unowe(),
+					unowe
 				);
 			}
 		};
@@ -617,6 +630,7 @@ export const register: Register = (on) => {
 		await server.rekey(() => $.session.id());
 		const sessionId = server.current()?.sessionId ?? '';
 		// This request carries every row appended so far.
+		if (injected.length > 0) emit({ type: 'workbench_queued_read' });
 		injected = [];
 		// The TUI picked another effort: the chat's is dropped (and the server forgets it).
 		let effortCleared = false;
@@ -873,7 +887,7 @@ export const register: Register = (on) => {
 			if (e.reason === 'aborted' || !unread) return next(e);
 			// The unread prompts are in the conversation already; only ask for an answer.
 			echoed.add(QUEUED_NUDGE);
-			void $.prompt.submit({ text: QUEUED_NUDGE, asUser: true });
+			void chatSubmit($.prompt.submit({ text: QUEUED_NUDGE, asUser: true })).catch(() => {});
 		}
 		return next(e);
 	});

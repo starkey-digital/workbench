@@ -32,10 +32,11 @@ const HANDLED: &[&str] = &[
     "system:model_refusal_no_fallback",
     "prompt_suggestion",
     // The plugin's own: an MCP elicitation the terminal asks, and its answer;
-    // a changed slash command list.
+    // a changed slash command list; a running turn read the prompts put into it.
     super::TERMINAL_ELICITATION,
     super::TERMINAL_ELICITATION_ANSWERED,
     "workbench_commands",
+    "workbench_queued_read",
     // JSONL only
     "attachment",
     "ai-title",

@@ -20,6 +20,7 @@ import type {
 	TranscriptMeta,
 	WorkspacePane
 } from '@workbench/types';
+import { QUEUED_NUDGE } from '@workbench/types';
 import type { AgentApi } from './agent-api';
 import {
 	activity,
@@ -56,8 +57,6 @@ export interface PendingPrompt {
 	after: number;
 	/** Absolute index the next item had when it was sent. */
 	at: number;
-	/** Sent while a Claude turn ran: it joins that turn, read after its current step. */
-	midTurn: boolean;
 }
 
 /** First retry after a drop; each failed one doubles it, up to the cap. */
@@ -71,6 +70,8 @@ const RELAUNCH_ATTEMPTS = 5;
 const SESSION_GONE = 4404;
 /** How often a chat whose pane the host is still starting tries to attach. */
 const STARTING_POLL_MS = 1000;
+/** Polls (2 min) before a start that never attaches (`claude` failed in a live shell) counts as failed. */
+const MAX_STARTING_POLLS = 120;
 
 /** The pane's process as the host's workspace snapshot shows it. */
 export type PaneProcess = Pick<WorkspacePane, 'status' | 'generation'>;
@@ -78,8 +79,6 @@ export type PaneProcess = Pick<WorkspacePane, 'status' | 'generation'>;
 const WAKE_RECONNECT_MS = 10_000;
 /** How long the `@` menu's file list is reused before it's fetched again. */
 const FILES_TTL_MS = 30_000;
-/** Core's `QUEUED_NUDGE`: a hidden prompt asking for an answer to messages a turn didn't read. */
-const QUEUED_NUDGE = 'Please answer the message I sent while you were working.';
 
 export interface TaskOutput {
 	text: string;
@@ -118,8 +117,8 @@ export class AgentChat {
 	/** A rejected action (bad mode, write failed); cleared on the next success. */
 	notice = $state<string | null>(null);
 	pending = $state.raw<PendingPrompt[]>([]);
-	/** Messages sent during the running turn that it hasn't read yet, by their user item's id. */
-	unread = $state.raw<string[]>([]);
+	/** The newest unread message Send now was pressed for: its chip is spent. */
+	private sentNowFor = $state<string | null>(null);
 	/** When the current turn started (client clock), for the elapsed timer. */
 	busySince = $state<number | null>(null);
 	/** The session's id, then any new id `/clear` moved it to. The pane follows it. */
@@ -174,6 +173,7 @@ export class AgentChat {
 	private retryTimer: ReturnType<typeof setTimeout> | null = null;
 	/** Retries since the last snapshot; sets the next backoff delay. */
 	private reconnectAttempts = 0;
+	private startingPolls = 0;
 	/** `exited` because retries ran out, not because the session ended. */
 	private lostConnection = false;
 	private disposed = false;
@@ -263,6 +263,7 @@ export class AgentChat {
 		this.status = 'starting';
 		this.error = null;
 		this.reconnectAttempts = 0;
+		this.startingPolls = 0;
 		this.lostConnection = false;
 		return this.connect();
 	}
@@ -313,7 +314,11 @@ export class AgentChat {
 		const pane = this.pane();
 		// Still starting on the host (`claude` booting, its plugin not attached
 		// yet): no retry is spent, and a failed start shows as the pane's exit.
-		if (pane?.status === 'starting' && this.status === 'starting') {
+		if (
+			pane?.status === 'starting' &&
+			this.status === 'starting' &&
+			this.startingPolls++ < MAX_STARTING_POLLS
+		) {
 			if (this.retryTimer) clearTimeout(this.retryTimer);
 			this.retryTimer = setTimeout(() => void this.connect(), STARTING_POLL_MS);
 			return;
@@ -380,6 +385,7 @@ export class AgentChat {
 				this.setMeta(msg.meta);
 				this.status = msg.exited ? 'exited' : 'live';
 				this.reconnectAttempts = 0;
+				this.startingPolls = 0;
 				this.relaunched = false;
 				this.attachedGeneration = this.pane()?.generation;
 				this.settlePending();
@@ -446,10 +452,7 @@ export class AgentChat {
 
 	private setMeta(meta: TranscriptMeta): void {
 		if (meta.busy && !this.meta?.busy) this.busySince = Date.now();
-		if (!meta.busy) {
-			this.busySince = null;
-			this.unread = [];
-		}
+		if (!meta.busy) this.busySince = null;
 		this.markSeen(meta.tasks.map((t) => t.id));
 		this.meta = meta;
 	}
@@ -477,7 +480,6 @@ export class AgentChat {
 		const noticeSince = (at: number) =>
 			this.items.some((i, k) => i.kind === 'notice' && this.start + k >= at);
 		const previews: Record<string, string[]> = {};
-		const joined: string[] = [];
 		const matched = this.echoedUsers;
 		const available = new Set(users.map((user) => user.id));
 		for (const id of matched) if (!available.has(id)) matched.delete(id);
@@ -487,13 +489,11 @@ export class AgentChat {
 				.find((u) => u.kind === 'user' && !matched.has(u.id) && same(u.text, p.text));
 			if (echo) matched.add(echo.id);
 			if (echo && p.previews.length > 0) previews[echo.id] = p.previews;
-			if (echo && p.midTurn) joined.push(echo.id);
 			return !echo && !(idle && p.text.startsWith('/') && noticeSince(p.at));
 		});
 		if (Object.keys(previews).length > 0) {
 			this.imagePreviews = { ...this.imagePreviews, ...previews };
 		}
-		if (joined.length > 0 && this.meta?.busy) this.unread = [...this.unread, ...joined];
 	}
 
 	get title(): string {
@@ -531,16 +531,21 @@ export class AgentChat {
 		return this.agent === 'claude' && Boolean(this.meta?.busy);
 	}
 
+	/** Messages put into the running turn that no model request has read yet, by user item id. */
+	get unread(): string[] {
+		const ids = this.meta?.unreadQueued ?? [];
+		return ids[ids.length - 1] === this.sentNowFor ? [] : ids;
+	}
+
 	/**
-	 * Send now for messages already sent mid-turn (the TUI's ctrl+enter, after
-	 * the fact): the turn stops, and Claude answers what it hadn't read. A
-	 * message still queued behind the turn just runs next.
+	 * Send now for messages already put into the running turn (the TUI's
+	 * ctrl+enter, after the fact): the turn stops, and Claude answers what it
+	 * hadn't read. Background work keeps running.
 	 */
 	sendNow(): void {
-		if (!this.canSendNow) return;
-		if (this.unread.length > 0) this.send({ t: 'prompt', text: QUEUED_NUDGE, now: true });
-		else this.interrupt();
-		this.unread = [];
+		const last = this.unread[this.unread.length - 1];
+		if (!this.canSendNow || !last) return;
+		if (this.send({ t: 'prompt', text: QUEUED_NUDGE, now: true })) this.sentNowFor = last;
 	}
 
 	prompt(
@@ -597,8 +602,7 @@ export class AgentChat {
 				previews: images.map(previewUrl),
 				files: files.map((f) => f.name),
 				after: this.userTexts().length,
-				at: this.start + this.items.length,
-				midTurn: this.canSendNow
+				at: this.start + this.items.length
 			}
 		];
 		this.busySince ??= Date.now();
@@ -891,6 +895,7 @@ export class AgentChat {
 		if (this.disposed || ended) return;
 		if (this.retryTimer) clearTimeout(this.retryTimer);
 		this.reconnectAttempts = 0;
+		this.startingPolls = 0;
 		this.lostConnection = false;
 		this.error = null;
 		const old = this.ws;

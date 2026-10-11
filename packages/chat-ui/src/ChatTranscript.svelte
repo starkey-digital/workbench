@@ -57,11 +57,7 @@
 	const blocks = $derived(groupBlocks([...chat.historyItems, ...chat.items]));
 	const lastId = $derived(chat.items[chat.items.length - 1]?.id);
 	/** The newest message the running turn hasn't read, which carries Send now. */
-	const sendNowId = $derived.by(() => {
-		if (!chat.canSendNow) return undefined;
-		const queued = chat.pending.filter((p) => p.midTurn);
-		return queued[queued.length - 1]?.id ?? chat.unread[chat.unread.length - 1];
-	});
+	const sendNowId = $derived(chat.canSendNow ? chat.unread[chat.unread.length - 1] : undefined);
 </script>
 
 {#snippet sendNow()}
@@ -286,9 +282,6 @@
 				<div class="rounded-2xl rounded-br-md bg-wb-panel2 px-3.5 py-2 whitespace-pre-wrap">
 					{prompt.text}
 				</div>
-			{/if}
-			{#if sendNowId === prompt.id}
-				{@render sendNow()}
 			{/if}
 		</div>
 	{/each}
