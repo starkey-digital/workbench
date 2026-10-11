@@ -18,7 +18,7 @@ export { default as ChatCache } from './ChatCache.svelte';
 export { default as ChatCacheHint } from './ChatCacheHint.svelte';
 export { default as ChatComposer } from './ChatComposer.svelte';
 export { default as ChatDock } from './ChatDock.svelte';
-export { default as ChatModelPicker } from './ChatModelPicker.svelte';
+export { default as ChatOptions } from './ChatOptions.svelte';
 export { default as ChatPlan } from './ChatPlan.svelte';
 export { default as ChatSuggestions } from './ChatSuggestions.svelte';
 export { default as ChatTasks } from './ChatTasks.svelte';

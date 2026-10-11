@@ -20,6 +20,7 @@ import type {
 	TranscriptMeta,
 	WorkspacePane
 } from '@workbench/types';
+import { QUEUED_NUDGE } from '@workbench/types';
 import type { AgentApi } from './agent-api';
 import {
 	activity,
@@ -67,6 +68,10 @@ const MAX_RECONNECT_ATTEMPTS = 8;
 const RELAUNCH_ATTEMPTS = 5;
 /** How the server closes a socket opened on a session that isn't running. */
 const SESSION_GONE = 4404;
+/** How often a chat whose pane the host is still starting tries to attach. */
+const STARTING_POLL_MS = 1000;
+/** Polls (2 min) before a start that never attaches (`claude` failed in a live shell) counts as failed. */
+const MAX_STARTING_POLLS = 120;
 
 /** The pane's process as the host's workspace snapshot shows it. */
 export type PaneProcess = Pick<WorkspacePane, 'status' | 'generation'>;
@@ -112,6 +117,8 @@ export class AgentChat {
 	/** A rejected action (bad mode, write failed); cleared on the next success. */
 	notice = $state<string | null>(null);
 	pending = $state.raw<PendingPrompt[]>([]);
+	/** The newest unread message Send now was pressed for: its chip is spent. */
+	private sentNowFor = $state<string | null>(null);
 	/** When the current turn started (client clock), for the elapsed timer. */
 	busySince = $state<number | null>(null);
 	/** The session's id, then any new id `/clear` moved it to. The pane follows it. */
@@ -166,6 +173,7 @@ export class AgentChat {
 	private retryTimer: ReturnType<typeof setTimeout> | null = null;
 	/** Retries since the last snapshot; sets the next backoff delay. */
 	private reconnectAttempts = 0;
+	private startingPolls = 0;
 	/** `exited` because retries ran out, not because the session ended. */
 	private lostConnection = false;
 	private disposed = false;
@@ -255,6 +263,7 @@ export class AgentChat {
 		this.status = 'starting';
 		this.error = null;
 		this.reconnectAttempts = 0;
+		this.startingPolls = 0;
 		this.lostConnection = false;
 		return this.connect();
 	}
@@ -303,6 +312,17 @@ export class AgentChat {
 	/** The server has no such session: wait for a relaunch, else it ended. */
 	private notRunning(): void {
 		const pane = this.pane();
+		// Still starting on the host (`claude` booting, its plugin not attached
+		// yet): no retry is spent, and a failed start shows as the pane's exit.
+		if (
+			pane?.status === 'starting' &&
+			this.status === 'starting' &&
+			this.startingPolls++ < MAX_STARTING_POLLS
+		) {
+			if (this.retryTimer) clearTimeout(this.retryTimer);
+			this.retryTimer = setTimeout(() => void this.connect(), STARTING_POLL_MS);
+			return;
+		}
 		const newer =
 			(pane?.status === 'starting' || pane?.status === 'running') &&
 			pane.generation > (this.attachedGeneration ?? -1);
@@ -365,6 +385,7 @@ export class AgentChat {
 				this.setMeta(msg.meta);
 				this.status = msg.exited ? 'exited' : 'live';
 				this.reconnectAttempts = 0;
+				this.startingPolls = 0;
 				this.relaunched = false;
 				this.attachedGeneration = this.pane()?.generation;
 				this.settlePending();
@@ -508,6 +529,23 @@ export class AgentChat {
 	/** Whether a prompt may end the running turn instead of joining it (the TUI's send now). */
 	get canSendNow(): boolean {
 		return this.agent === 'claude' && Boolean(this.meta?.busy);
+	}
+
+	/** Messages put into the running turn that no model request has read yet, by user item id. */
+	get unread(): string[] {
+		const ids = this.meta?.unreadQueued ?? [];
+		return ids[ids.length - 1] === this.sentNowFor ? [] : ids;
+	}
+
+	/**
+	 * Send now for messages already put into the running turn (the TUI's
+	 * ctrl+enter, after the fact): the turn stops, and Claude answers what it
+	 * hadn't read. Background work keeps running.
+	 */
+	sendNow(): void {
+		const last = this.unread[this.unread.length - 1];
+		if (!this.canSendNow || !last) return;
+		if (this.send({ t: 'prompt', text: QUEUED_NUDGE, now: true })) this.sentNowFor = last;
 	}
 
 	prompt(
@@ -857,6 +895,7 @@ export class AgentChat {
 		if (this.disposed || ended) return;
 		if (this.retryTimer) clearTimeout(this.retryTimer);
 		this.reconnectAttempts = 0;
+		this.startingPolls = 0;
 		this.lostConnection = false;
 		this.error = null;
 		const old = this.ws;

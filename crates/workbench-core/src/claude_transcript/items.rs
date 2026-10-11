@@ -327,6 +327,11 @@ pub struct TranscriptMeta {
     /// The session's active `/goal`, until it's met or cleared.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub goal: Option<GoalInfo>,
+    /// User items a terminal's plugin put into the running turn that no model
+    /// request has read yet (its `workbench_queued` echoes, until its
+    /// `workbench_queued_read` or the turn's end): the chat's Send now targets.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unread_queued: Vec<String>,
 }
 
 fn is_zero(n: &u32) -> bool {

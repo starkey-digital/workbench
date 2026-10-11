@@ -255,6 +255,8 @@ impl Transcript {
             Some("workbench_commands") => {
                 applied.commands = self.read_commands(obj.get("commands"))
             }
+            // The plugin's: a model request read the prompts put into its turn.
+            Some("workbench_queued_read") => self.meta.unread_queued.clear(),
             Some(TERMINAL_ELICITATION) => self.apply_terminal_elicitation(obj, &mut changed),
             Some(TERMINAL_ELICITATION_ANSWERED) => {
                 self.answer_terminal_elicitation(obj, &mut changed)
@@ -370,6 +372,9 @@ impl Transcript {
         }
         if self.meta.busy && !before.busy {
             self.meta.prompt_suggestion = None;
+        }
+        if !self.meta.busy {
+            self.meta.unread_queued.clear();
         }
         applied.items = changed;
         applied.meta = self.meta != before;
@@ -1075,6 +1080,11 @@ impl Transcript {
         };
         self.skill_bodies_due.clear();
         let timestamp = str_at(obj, "timestamp").unwrap_or_default().to_string();
+        if obj.get("workbench_queued") == Some(&Value::Bool(true))
+            && !self.meta.unread_queued.contains(&id)
+        {
+            self.meta.unread_queued.push(id.clone());
+        }
         self.upsert(
             TranscriptItem::User {
                 id,

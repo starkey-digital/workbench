@@ -5,12 +5,11 @@
 	import type { AgentChat } from './agent-chat.svelte';
 	import { accountChoices, agentName, limitNotice } from './chat-format';
 	import { promptSuggestions } from './artifacts';
-	import ChatAccountPicker from './ChatAccountPicker.svelte';
 	import ChatCacheHint from './ChatCacheHint.svelte';
 	import ChatComposer from './ChatComposer.svelte';
 	import ChatCompacting from './ChatCompacting.svelte';
 	import ChatGoal from './ChatGoal.svelte';
-	import ChatModelPicker from './ChatModelPicker.svelte';
+	import ChatOptions from './ChatOptions.svelte';
 	import ChatPlan from './ChatPlan.svelte';
 	import ChatSuggestions from './ChatSuggestions.svelte';
 	import CodexControls from './CodexControls.svelte';
@@ -132,7 +131,6 @@
 		bind:draft={chat.draft.text}
 		bind:images={chat.draft.images}
 		bind:files={chat.draft.files}
-		mode={chat.mode}
 		busy={Boolean(chat.meta?.busy) && chat.live}
 		stoppable={chat.stoppable}
 		sendNow={chat.canSendNow && chat.live}
@@ -142,24 +140,22 @@
 		{commands}
 		{onCommand}
 		loadFiles={() => chat.listFiles()}
-		onMode={(mode) => chat.setMode(mode)}
 		{popover}
 	>
 		{#snippet controls()}
-			{#if switchable}
-				<ChatAccountPicker
-					{accounts}
-					{defaultAccountName}
-					accountId={chat.accountId}
-					disabled={disabledReason !== null || Boolean(chat.meta?.busy)}
-					onAccount={(id) => chat.setAccount(id)}
-				/>
-			{/if}
-			<ChatModelPicker
+			<ChatOptions
+				agent={chat.agent}
+				mode={chat.mode}
 				meta={chat.meta}
 				disabled={disabledReason !== null}
+				accounts={switchable ? accounts : []}
+				{defaultAccountName}
+				accountId={chat.accountId}
+				accountDisabled={Boolean(chat.meta?.busy)}
+				onMode={(mode) => chat.setMode(mode)}
 				onModel={(model) => chat.setModel(model)}
 				onEffort={(effort) => chat.setEffort(effort)}
+				onAccount={(id) => chat.setAccount(id)}
 			/>
 		{/snippet}
 	</ChatComposer>

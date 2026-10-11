@@ -5,6 +5,7 @@
 	import HistoryIcon from '@lucide/svelte/icons/history';
 	import PaperclipIcon from '@lucide/svelte/icons/paperclip';
 	import RotateCwIcon from '@lucide/svelte/icons/rotate-cw';
+	import ZapIcon from '@lucide/svelte/icons/zap';
 	import { cn } from '@workbench/ui';
 	import type { AgentChat } from './agent-chat.svelte';
 	import ChatActivity from './ChatActivity.svelte';
@@ -55,7 +56,21 @@
 
 	const blocks = $derived(groupBlocks([...chat.historyItems, ...chat.items]));
 	const lastId = $derived(chat.items[chat.items.length - 1]?.id);
+	/** The newest message the running turn hasn't read, which carries Send now. */
+	const sendNowId = $derived(chat.canSendNow ? chat.unread[chat.unread.length - 1] : undefined);
 </script>
+
+{#snippet sendNow()}
+	<button
+		type="button"
+		class="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-wb-ink-mute hover:bg-wb-panel2 hover:text-wb-ink focus-visible:ring-1 focus-visible:ring-wb-accent focus-visible:outline-none"
+		title="Stop the current step so {name} answers this now; running commands move to the background"
+		onclick={() => chat.sendNow()}
+	>
+		<ZapIcon class="size-3" />
+		Send now
+	</button>
+{/snippet}
 
 {#snippet step(block: StepBlock)}
 	{#if block.kind === 'quiet'}
@@ -219,6 +234,9 @@
 				{/if}
 				{#if chat.rewind?.messageId === block.item.id}
 					<ChatRewind {chat} {cwd} onRestorePrompt={onStarter} />
+				{/if}
+				{#if sendNowId === user.id}
+					{@render sendNow()}
 				{/if}
 			</div>
 		{:else if block.item.kind === 'text'}
