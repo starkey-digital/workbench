@@ -1280,7 +1280,19 @@ async fn chat_session_streams_a_turn_and_relays_an_approval() {
         }
     };
 
-    assert_eq!(next_json(&mut ws).await["t"], "snapshot");
+    let first = next_json(&mut ws).await;
+    assert_eq!(first["t"], "snapshot");
+    assert_eq!(
+        first["resync"], true,
+        "clients learn they may ask to resync"
+    );
+    // A resync answers with a fresh snapshot on the same socket.
+    ws.send(Message::Text(json!({"t":"resync"}).to_string()))
+        .await
+        .unwrap();
+    let again = next_json(&mut ws).await;
+    assert_eq!(again["t"], "snapshot");
+    assert_eq!(again["sessionId"], first["sessionId"]);
     ws.send(Message::Text(
         json!({"t":"prompt","text":"hello"}).to_string(),
     ))
