@@ -29,8 +29,7 @@ const QUIET_TOOLS = new Set(['Read', 'Grep', 'Glob', 'LS', 'ToolSearch']);
 const PLAN_TOOLS = new Set(['TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList']);
 
 export type StepBlock =
-	| { kind: 'item'; item: TranscriptItem }
-	| { kind: 'quiet'; id: string; tools: ToolItem[] };
+	{ kind: 'item'; item: TranscriptItem } | { kind: 'quiet'; id: string; tools: ToolItem[] };
 
 export type ChatBlock =
 	| StepBlock

@@ -1,12 +1,7 @@
 import { parseTerminalControlFrame } from '@workbench/transport';
 
 export type TerminalStatus =
-	| 'connecting'
-	| 'open'
-	| 'reconnecting'
-	| 'taken_over'
-	| 'exited'
-	| 'revoked';
+	'connecting' | 'open' | 'reconnecting' | 'taken_over' | 'exited' | 'revoked';
 
 /**
  * Status implied by a text frame, or null when it isn't a control frame (and so

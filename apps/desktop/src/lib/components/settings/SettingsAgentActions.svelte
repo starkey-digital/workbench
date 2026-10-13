@@ -154,8 +154,7 @@
 							class="min-h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-xs ring-offset-background outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
 							value={action.prompt}
 							placeholder="Review this PR looking for regressions, weak abstractions, and missing tests."
-							oninput={(event) => updateActionText(action.id, 'prompt', event)}
-						></textarea>
+							oninput={(event) => updateActionText(action.id, 'prompt', event)}></textarea>
 					</div>
 				</div>
 			{/each}

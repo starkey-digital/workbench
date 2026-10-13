@@ -406,12 +406,7 @@ export type AgentActionTarget = 'claude' | 'codex' | 'both';
 
 /** Modes accepted by the Claude CLI's `--permission-mode` flag. */
 export type ClaudePermissionMode =
-	| 'default'
-	| 'acceptEdits'
-	| 'plan'
-	| 'dontAsk'
-	| 'auto'
-	| 'bypassPermissions';
+	'default' | 'acceptEdits' | 'plan' | 'dontAsk' | 'auto' | 'bypassPermissions';
 
 /** Codex `approval_policy` override; `default` leaves Codex's own config in charge. */
 export type CodexApprovalPolicy = 'default' | 'on-request' | 'never';
@@ -547,12 +542,7 @@ export interface TranscriptPatchHunk {
 export type ApprovalDecision = 'allow' | 'alwaysAllow' | 'deny';
 
 export type PermissionMode =
-	| 'default'
-	| 'acceptEdits'
-	| 'plan'
-	| 'auto'
-	| 'dontAsk'
-	| 'bypassPermissions';
+	'default' | 'acceptEdits' | 'plan' | 'auto' | 'dontAsk' | 'bypassPermissions';
 
 export type TranscriptItem =
 	| {

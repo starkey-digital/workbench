@@ -229,7 +229,23 @@ describe('NotificationStore', () => {
 			);
 		});
 
-		it('has nothing to take down when resolved (the plugin cannot remove on desktop)', async () => {
+		it('focuses the pane when its notification is clicked', async () => {
+			const workspaces = mockWorkspaces();
+			const { sessions, holder } = mockSessions();
+			new NotificationStore(workspaces, sessions);
+			await settle();
+			holder.fire?.({ paneId: PANE, sessionId: 'sess-pane' });
+			await settle();
+
+			const { id } = sendNotification.mock.calls[0][0] as { id: number };
+			const onClick = (onAction.mock.calls[0] as unknown as [(e: unknown) => void])[0];
+			onClick({ actionId: 'tap', inputValue: null, notification: { id } });
+			await settle();
+
+			expect(workspaces.focusPane).toHaveBeenCalledWith(PANE);
+		});
+
+		it('has nothing to take down when resolved (only the native path removes)', async () => {
 			const { sessions, holder } = mockSessions();
 			new NotificationStore(mockWorkspaces(), sessions);
 			await settle();

@@ -61,7 +61,7 @@
 			/>
 		</label>
 	{/if}
-	<ul class="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-1">
+	<ul class="min-h-0 flex-1 scrollbar-thin overflow-y-auto p-1">
 		{#if sessions === null}
 			<li class="px-2.5 py-3 text-xs text-wb-ink-soft">Looking for earlier conversations…</li>
 		{:else if shown.length === 0}

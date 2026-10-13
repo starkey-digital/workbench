@@ -9,16 +9,14 @@ import type { WorkspaceUi } from './workspace-ui';
 
 /** A snapshot's workspace as the desktop renders it, with this device's choices. */
 export function workspaceView(w: ServerWorkspace, ui: WorkspaceUi): ProjectWorkspace {
-	const tabs = w.tabs.map(
-		(t): TerminalTabState => ({
-			id: t.id,
-			// An AI tab shows its session's title once it has one.
-			label: (t.kind !== 'shell' && t.panes[0]?.title) || t.label,
-			split: t.split,
-			type: t.kind,
-			panes: t.panes.map((p) => paneView(p, ui))
-		})
-	);
+	const tabs = w.tabs.map((t): TerminalTabState => ({
+		id: t.id,
+		// An AI tab shows its session's title once it has one.
+		label: (t.kind !== 'shell' && t.panes[0]?.title) || t.label,
+		split: t.split,
+		type: t.kind,
+		panes: t.panes.map((p) => paneView(p, ui))
+	}));
 	const active = ui.activeTabs[w.id];
 	return {
 		id: w.id,

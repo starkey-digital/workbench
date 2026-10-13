@@ -84,8 +84,7 @@
 		placeholder={amend ? 'Amended commit message' : 'Commit message'}
 		class="w-full resize-none rounded-md border border-wb-hair bg-wb-bg px-2.5 py-2 text-xs leading-[1.45] text-wb-ink outline-none placeholder:text-wb-ink-soft focus:border-wb-accent focus:ring-[3px] focus:ring-wb-accent-soft"
 		bind:value={message}
-		{onkeydown}
-	></textarea>
+		{onkeydown}></textarea>
 	<div class="flex">
 		<button
 			type="button"

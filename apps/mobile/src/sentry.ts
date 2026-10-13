@@ -15,6 +15,10 @@ export function initSentry(): void {
 		environment: 'production',
 		tracesSampleRate: 0,
 		// Request URLs and console lines can carry server addresses and pairing links.
-		integrations: [Sentry.breadcrumbsIntegration({ console: false, fetch: false, xhr: false })]
+		// Sentry 11 records console lines in its own `Console` integration.
+		integrations: (defaults) => [
+			...defaults.filter((i) => i.name !== 'Console'),
+			Sentry.breadcrumbsIntegration({ fetch: false, xhr: false })
+		]
 	});
 }

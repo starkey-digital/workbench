@@ -61,6 +61,12 @@ jobs:
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
 
+      # vitest 5 and jsdom 30 need Node 22.12+; don't rely on the image's default.
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
       - name: Install dependencies
         run: bun install
 
@@ -159,6 +165,12 @@ jobs:
 
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
+
+      # vitest 5 and jsdom 30 need Node 22.12+; don't rely on the image's default.
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable

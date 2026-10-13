@@ -78,8 +78,8 @@ export class NotificationStore {
 			this.enabled = false;
 		}
 
-		onAction((notification) => {
-			const id = typeof notification.id === 'number' ? notification.id : NaN;
+		onAction(({ notification }) => {
+			const id = typeof notification?.id === 'number' ? notification.id : NaN;
 			if (!Number.isFinite(id)) return;
 			const paneId = this.idToPane.get(id);
 			if (!paneId) return;
@@ -121,7 +121,8 @@ export class NotificationStore {
 
 	/**
 	 * Take down a session's notification once nobody is needed. Only the native
-	 * macOS path can: `tauri-plugin-notification` has no removal on desktop.
+	 * macOS path does: `tauri-plugin-notification` removes only on Linux and the
+	 * BSDs, and only notifications shown while an `onAction` listener exists.
 	 */
 	private async withdraw(target: AttentionTarget): Promise<void> {
 		await this.ready;
@@ -186,7 +187,8 @@ export class NotificationStore {
 		for (let i = 0; i < paneId.length; i++) {
 			hash = (hash * 31 + paneId.charCodeAt(i)) | 0;
 		}
-		return Math.abs(hash);
+		// The plugin's id must fit an i32; Math.abs(-2^31) doesn't.
+		return hash & 0x7fffffff;
 	}
 
 	private async focusPane(paneId: string): Promise<void> {
