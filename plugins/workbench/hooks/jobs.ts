@@ -27,10 +27,18 @@ function report(id: string, status: string, summary?: string): Line | undefined 
 	};
 }
 
-/** A `task-notification` delivery: the real outcome (completed, failed, killed). */
-export function notifiedJob(text: string): Line | undefined {
+/**
+ * A `task-notification` delivery: the real outcome (completed, failed, killed).
+ * Sent for any task it names, even one this load didn't start: a plugin reload
+ * forgets its jobs. `tracked` names the subagents whose task this load ends
+ * itself, so their notification can't override that (a chat's Stop).
+ */
+export function notifiedJob(
+	text: string,
+	tracked: (id: string) => boolean = () => false
+): Line | undefined {
 	const note = taskNotification(text);
-	return note && jobs.has(note.id) ? report(note.id, note.status, note.summary) : undefined;
+	return note && !tracked(note.id) ? report(note.id, note.status, note.summary) : undefined;
 }
 
 /**

@@ -420,9 +420,21 @@ impl Transcript {
         true
     }
 
-    fn task_mut(&mut self, id: &str) -> &mut TaskInfo {
+    /// The task an event names. Past its start, a subagent's task is also found
+    /// by its agent id (`output_id`): that's what a reloaded plugin's
+    /// notification names, having forgotten which task the agent ran for.
+    fn task_mut(&mut self, id: &str, start: bool) -> &mut TaskInfo {
         let tasks = &mut self.meta.tasks;
-        let i = match tasks.iter().position(|t| t.id == id) {
+        let found = tasks.iter().position(|t| t.id == id).or_else(|| {
+            (!start)
+                .then(|| {
+                    tasks
+                        .iter()
+                        .position(|t| t.output_id.as_deref() == Some(id))
+                })
+                .flatten()
+        });
+        let i = match found {
             Some(i) => i,
             None => {
                 tasks.push(TaskInfo {
@@ -441,8 +453,9 @@ impl Transcript {
         let Some(id) = str_at(obj, "task_id") else {
             return;
         };
-        let progress = str_at(obj, "subtype") == Some("task_progress");
-        let task = self.task_mut(id);
+        let subtype = str_at(obj, "subtype");
+        let progress = subtype == Some("task_progress");
+        let task = self.task_mut(id, subtype == Some("task_started"));
         let text = |k| str_at(obj, k).filter(|s| !s.is_empty()).map(String::from);
         // A progress event's description is the current step, not the task's name.
         match text("description") {
