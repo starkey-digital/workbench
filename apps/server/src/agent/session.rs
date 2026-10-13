@@ -85,7 +85,6 @@ pub struct AgentSession {
     /// work done outside the driver lock, so readers (the session list, an
     /// attach) never wait on file IO while changes still apply in order.
     writer: Mutex<()>,
-    stdin: Mutex<Option<ChildStdin>>,
     outgoing: Mutex<Option<mpsc::SyncSender<String>>>,
     outgoing_bytes: AtomicUsize,
     /// `None` for a session fed by a terminal's plugin: there is no process of ours.
@@ -94,6 +93,9 @@ pub struct AgentSession {
     pid: Option<u32>,
     link: Option<Arc<ModLink>>,
     exited: AtomicBool,
+    /// Set as `finish` begins: the stdin writer gives up a stalled write, and
+    /// the pid, soon reaped, is no longer ours to signal.
+    closing: AtomicBool,
     task_files: Mutex<HashMap<String, PathBuf>>,
     stderr_tail: Mutex<String>,
     /// The CLI, for messages: `codex`, or `claude` in a terminal.
@@ -330,13 +332,13 @@ impl AgentSession {
             keepalive_turn: AtomicBool::new(false),
             frames: Frames::new(),
             writer: Mutex::new(()),
-            stdin: Mutex::new(stdin),
             outgoing: Mutex::new(outgoing),
             outgoing_bytes: AtomicUsize::new(0),
             pid: child.as_ref().map(Child::id),
             child: Mutex::new(child),
             link,
             exited: AtomicBool::new(false),
+            closing: AtomicBool::new(false),
             task_files: Mutex::new(HashMap::new()),
             stderr_tail: Mutex::new(String::new()),
             program,
@@ -354,24 +356,28 @@ impl AgentSession {
         session
             .frames
             .start_flusher(move || flusher.upgrade().map(|s| s.flush()).is_some());
-        if let Some(receiver) = receiver {
+        if let (Some(receiver), Some(mut stdin)) = (receiver, stdin) {
             let writer = Arc::downgrade(&session);
             std::thread::spawn(move || {
+                // The pipe is this thread's alone and closes when it ends: once
+                // `finish` takes `outgoing`, or a write fails or is given up.
+                #[cfg(unix)]
+                set_nonblocking(&stdin);
                 while let Ok(line) = receiver.recv() {
                     let Some(session) = writer.upgrade() else {
                         break;
                     };
-                    let result = session.write_line(&line);
+                    let result =
+                        write_line(&mut stdin, &line, || session.closing.load(Ordering::SeqCst));
                     session
                         .outgoing_bytes
                         .fetch_sub(line.len(), Ordering::SeqCst);
                     if let Err(e) = result {
-                        session.fail_io("write", e);
+                        if !session.closing.load(Ordering::SeqCst) {
+                            session.fail_io("write", format!("{e}"));
+                        }
                         break;
                     }
-                }
-                if let Some(session) = writer.upgrade() {
-                    lock(&session.stdin).take();
                 }
             });
             let timer = Arc::downgrade(&session);
@@ -658,22 +664,13 @@ impl AgentSession {
         result
     }
 
-    fn write_line(&self, msg: &str) -> Result<()> {
-        let mut stdin = lock(&self.stdin);
-        let Some(pipe) = stdin.as_mut() else {
-            bail!("the session has stopped");
-        };
-        writeln!(pipe, "{msg}").with_context(|| format!("write to {}", self.program))?;
-        pipe.flush()
-            .with_context(|| format!("flush to {}", self.program))
-    }
-
     fn fail_io(&self, what: &str, error: impl std::fmt::Display) {
         self.frames.fail(
             json!({"t":"error","message":format!("Invalid {} {what}: {error}", self.program)})
                 .to_string(),
         );
-        if let Some(pid) = self.pid {
+        // Once `finish` began, the pid may be reaped and reused.
+        if let Some(pid) = self.pid.filter(|_| !self.closing.load(Ordering::SeqCst)) {
             #[cfg(unix)]
             unsafe {
                 libc::killpg(pid as libc::pid_t, libc::SIGKILL);
@@ -1123,6 +1120,7 @@ impl AgentSession {
     }
 
     fn finish(&self) {
+        self.closing.store(true, Ordering::SeqCst);
         lock(&self.outgoing).take();
         let _ = std::fs::remove_dir_all(super::attachment::attachment_dir(&self.id()));
         // Until the leader is reaped below its pid still names its process
@@ -1140,9 +1138,6 @@ impl AgentSession {
                 .args(["/T", "/F", "/PID", &pid.to_string()])
                 .output();
         }
-        // End the process before taking the pipe lock: the writer may be
-        // blocked because a broken CLI closed stdout and stopped reading stdin.
-        lock(&self.stdin).take();
         let code = lock(&self.child)
             .as_mut()
             .and_then(|c| c.wait().ok())
@@ -1219,6 +1214,56 @@ fn strip_ansi(line: &str) -> String {
         }
     }
     out
+}
+
+/// One line to the CLI's stdin. On Unix the pipe is non-blocking, so a CLI
+/// that stopped reading can't hold the writer past `stop`: the kill doesn't
+/// always break its write, since a child forked as the group was signalled
+/// can outlive it holding stdin's read end.
+fn write_line(pipe: &mut ChildStdin, msg: &str, stop: impl Fn() -> bool) -> std::io::Result<()> {
+    let line = format!("{msg}\n");
+    let mut buf = line.as_bytes();
+    while !buf.is_empty() {
+        match pipe.write(buf) {
+            Ok(0) => return Err(std::io::ErrorKind::WriteZero.into()),
+            Ok(n) => buf = &buf[n..],
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                if stop() {
+                    return Err(std::io::Error::other("the session has stopped"));
+                }
+                #[cfg(unix)]
+                wait_writable(pipe, 100);
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_nonblocking(pipe: &ChildStdin) {
+    use std::os::fd::AsRawFd;
+    let fd = pipe.as_raw_fd();
+    unsafe {
+        let flags = libc::fcntl(fd, libc::F_GETFL);
+        if flags >= 0 {
+            libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+        }
+    }
+}
+
+#[cfg(unix)]
+fn wait_writable(pipe: &ChildStdin, timeout_ms: i32) {
+    use std::os::fd::AsRawFd;
+    let mut fd = libc::pollfd {
+        fd: pipe.as_raw_fd(),
+        events: libc::POLLOUT,
+        revents: 0,
+    };
+    unsafe {
+        libc::poll(&mut fd, 1, timeout_ms);
+    }
 }
 
 /// A malicious/misbehaving CLI cannot allocate an unbounded line. Return an
