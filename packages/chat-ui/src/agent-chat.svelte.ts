@@ -28,6 +28,7 @@ import {
 	applyChanges,
 	awaitsAnswer,
 	chatTitle,
+	earlierItems,
 	isRunning,
 	latestTodos
 } from './chat-format';
@@ -77,6 +78,8 @@ const MAX_STARTING_POLLS = 120;
 export type PaneProcess = Pick<WorkspacePane, 'status' | 'generation'>;
 /** Hidden this long (a sleeping phone or laptop), the socket may be dead while it still reads open. */
 const WAKE_RECONNECT_MS = 10_000;
+/** The least time between two `resync`s, so focus flicker doesn't refetch the transcript. */
+const RESYNC_MIN_MS = 5_000;
 /** How long the `@` menu's file list is reused before it's fetched again. */
 const FILES_TTL_MS = 30_000;
 
@@ -198,6 +201,9 @@ export class AgentChat {
 	sends = $state(0);
 	readonly draft: ChatDraft;
 	private hiddenAt = 0;
+	/** When the last snapshot came, or a resync was asked for. */
+	private resyncedAt = 0;
+	private canResync = false;
 	private readonly reconnectOnWake: boolean;
 	private readonly pane: () => PaneProcess | null | undefined;
 	/** The pane's spawn the last snapshot came from; a newer one is a relaunch to wait for. */
@@ -208,7 +214,8 @@ export class AgentChat {
 	/**
 	 * `draft`: hosts that keep the composer beyond this chat pass their own.
 	 * `reconnectOnWake`: re-attach when the page shows again after a long sleep
-	 * (a phone), since the socket can read open after the server let it go.
+	 * (a phone), since the socket can read open after the server let it go, and
+	 * `resync` after a short one.
 	 * `pane`: the pane's process from the host's snapshot. A session that isn't
 	 * running is waited for only while the pane runs a newer spawn than the one
 	 * attached to (a restart from any device); otherwise the chat ends at once.
@@ -240,6 +247,7 @@ export class AgentChat {
 	private onVisibility = () => {
 		if (document.hidden) this.hiddenAt = Date.now();
 		else if (Date.now() - this.hiddenAt > WAKE_RECONNECT_MS) this.reconnect();
+		else this.resync();
 	};
 
 	/**
@@ -366,7 +374,8 @@ export class AgentChat {
 				this.artifactWaiters.get(msg.id)?.(msg.content);
 				this.artifactWaiters.delete(msg.id);
 				break;
-			case 'snapshot':
+			case 'snapshot': {
+				const earlier = msg.sessionId === this.sessionId ? earlierItems(this.items, msg) : [];
 				// `/clear` re-keys to a new, empty transcript. The `/clear` and prompts
 				// queued after it echo only in the new one.
 				if (msg.sessionId !== this.sessionId) {
@@ -377,8 +386,10 @@ export class AgentChat {
 					this.pending = this.pending.slice(clear + 1).map((p) => ({ ...p, after: 0, at: 0 }));
 				}
 				this.sessionId = msg.sessionId;
-				this.start = msg.start;
-				this.items = msg.items;
+				this.items = [...earlier, ...msg.items];
+				this.start = msg.start - earlier.length;
+				this.canResync = !!msg.resync;
+				this.resyncedAt = Date.now();
 				this.commands = msg.commands;
 				this.cachePolicy = msg.cachePolicy ?? { compactOnExpiry: false };
 				if (msg.claudeAccountId !== undefined) this.followAccount(msg.claudeAccountId ?? undefined);
@@ -390,6 +401,7 @@ export class AgentChat {
 				this.attachedGeneration = this.pane()?.generation;
 				this.settlePending();
 				break;
+			}
 			case 'update':
 				this.items = applyChanges(this.items, this.start, msg.changes);
 				this.markSeen(
@@ -888,6 +900,19 @@ export class AgentChat {
 	 */
 	reconnect(): void {
 		this.reattach();
+	}
+
+	/**
+	 * Ask for a fresh snapshot when the chat is shown again, so a view that
+	 * drifted from the server (a turn shown as still thinking, subagents
+	 * missing) is put right. Same socket: nothing in flight is dropped. Only a
+	 * live chat on a server that offers it, and at most every few seconds.
+	 */
+	resync(): void {
+		if (!this.canResync || this.status !== 'live' || this.ws?.readyState !== WebSocket.OPEN) return;
+		if (Date.now() - this.resyncedAt < RESYNC_MIN_MS) return;
+		this.resyncedAt = Date.now();
+		this.send({ t: 'resync' });
 	}
 
 	private reattach(): void {

@@ -838,6 +838,8 @@ export type AgentServerMsg =
 			exited: boolean;
 			/** The Claude login the chat runs under (`null`: the default); absent from older servers. */
 			claudeAccountId?: string | null;
+			/** The server answers `{t:'resync'}` with a fresh snapshot; absent from older servers. */
+			resync?: boolean;
 	  }
 	| { t: 'cachePolicy'; policy: CachePolicy }
 	/** `[index, item]` pairs that were added or changed. */
@@ -893,6 +895,8 @@ export interface ChatFile {
 export type ChatAttachment = ({ kind: 'image' } & ChatImage) | ({ kind: 'file' } & ChatFile);
 
 export type AgentClientMsg =
+	/** Ask for a fresh snapshot on this socket. */
+	| { t: 'resync' }
 	| { t: 'codex'; requestId: string; action: CodexAction; params?: Record<string, unknown> }
 	| { t: 'artifacts'; id: string }
 	| {

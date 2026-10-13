@@ -521,6 +521,50 @@ describe('AgentChat', () => {
 		expect(FakeSocket.last).not.toBe(ws);
 		chat.dispose();
 	});
+	it('resync asks for a fresh snapshot on the same socket, at most every 5s', async () => {
+		const { chat, ws } = await connected();
+		ws.emit({ ...snapshot(), resync: true, meta: meta(true) });
+		chat.resync();
+		expect(ws.sent).toEqual([]); // just got a snapshot
+
+		await vi.advanceTimersByTimeAsync(5000);
+		chat.resync();
+		expect(ws.sent).toEqual([{ t: 'resync' }]);
+		ws.emit({ ...snapshot(), resync: true });
+		expect(chat.meta?.busy).toBe(false);
+		expect(chat.status).toBe('live');
+		expect(FakeSocket.last).toBe(ws);
+
+		chat.resync();
+		expect(ws.sent).toHaveLength(1);
+		chat.dispose();
+	});
+	it('resync does nothing on a server without it, or a chat that is not live', async () => {
+		const { chat, ws } = await connected();
+		await vi.advanceTimersByTimeAsync(5000);
+		chat.resync();
+		expect(ws.sent).toEqual([]);
+
+		ws.emit({ ...snapshot(), resync: true });
+		ws.drop();
+		await vi.advanceTimersByTimeAsync(5000);
+		const retrying = FakeSocket.last!;
+		chat.resync();
+		expect(retrying.sent).toEqual([]);
+		chat.dispose();
+	});
+	it('a same-session snapshot keeps the earlier items the chat already shows', async () => {
+		const text = (id: string) => ({ kind: 'text' as const, id, text: id });
+		const { chat, ws } = await connected();
+		ws.emit({ ...snapshot(), items: [text('a'), text('b'), text('c')] });
+		ws.emit({ ...snapshot(), start: 1, items: [text('b'), text('c'), text('d')] });
+		expect(chat.items.map((i) => i.id)).toEqual(['a', 'b', 'c', 'd']);
+		// A snapshot sharing nothing (a rewind past the window) replaces them.
+		ws.emit({ ...snapshot(), start: 5, items: [text('x')] });
+		expect(chat.items.map((i) => i.id)).toEqual(['x']);
+		chat.dispose();
+	});
+
 	it('backs off on abnormal closes (1006) like any other drop', async () => {
 		const { chat, ws } = await connected();
 		ws.drop(1006);
@@ -1004,7 +1048,7 @@ describe('AgentChat host lifecycle', () => {
 		other.dispose();
 	});
 
-	it('re-attaches after the page was hidden a while, and stops listening once disposed', async () => {
+	it('resyncs when the page shows again, re-attaches after a long hide, and stops listening once disposed', async () => {
 		const doc = Object.assign(new EventTarget(), { hidden: false });
 		vi.stubGlobal('document', doc);
 		const chat = new AgentChat(body, fakeApi(), { reconnectOnWake: true });
@@ -1017,7 +1061,8 @@ describe('AgentChat host lifecycle', () => {
 			items: [],
 			meta: meta(),
 			commands: [],
-			exited: false
+			exited: false,
+			resync: true
 		});
 		const output = chat.fullOutput('t1');
 		const wake = (hiddenFor: number) => {
@@ -1027,8 +1072,10 @@ describe('AgentChat host lifecycle', () => {
 			doc.hidden = false;
 			doc.dispatchEvent(new Event('visibilitychange'));
 		};
-		wake(2_000);
+		// A short hide asks for a fresh snapshot on the same socket.
+		wake(6_000);
 		expect(chat.status).toBe('live');
+		expect(ws.sent).toContainEqual({ t: 'resync' });
 		wake(60_000);
 		expect(chat.status).toBe('reconnecting');
 		await expect(output).resolves.toBeNull();

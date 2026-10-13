@@ -485,6 +485,17 @@ async fn stream(
     loop {
         if running.is_none() {
             if let Some(text) = queued.pop_front() {
+                // The client's view drifted: start it over, as when it falls behind.
+                if is_resync(&text) {
+                    let Some((snapshot, fresh)) = subscribe(&session).await else {
+                        return;
+                    };
+                    rx = fresh;
+                    if !ws_send(&mut socket, Message::Text(snapshot)).await {
+                        return;
+                    }
+                    continue;
+                }
                 // Restarts (a rewind, a mode switch), saving attachments and the
                 // task-output directory walk block, so keep them off the async workers.
                 let (worker, state) = (session.clone(), state.clone());
@@ -553,6 +564,11 @@ async fn stream(
             }
         }
     }
+}
+
+/// `{"t":"resync"}`; checked before the full parse so large prompts aren't parsed twice.
+fn is_resync(text: &str) -> bool {
+    text.len() < 64 && serde_json::from_str::<Value>(text).is_ok_and(|v| v["t"] == "resync")
 }
 
 /// The snapshot is built under the session's driver lock: off the async workers.

@@ -77,7 +77,7 @@
 	// svelte-ignore state_referenced_locally
 	const agentLabel = agentName(agent);
 	// svelte-ignore state_referenced_locally
-	const { chat } = acquireChat(
+	const { chat, created } = acquireChat(
 		paneId,
 		{
 			agent,
@@ -88,6 +88,8 @@
 		},
 		{ status, generation }
 	);
+	// Shown again (a workspace switch): catch up on anything the view missed.
+	if (!created) chat.resync();
 	const workspace = $derived(
 		cwd && cwd !== project.path
 			? workspaceStore.getByWorktreePath(cwd)
@@ -168,6 +170,8 @@
 		}
 	}
 </script>
+
+<svelte:window onfocus={() => chat.resync()} />
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div

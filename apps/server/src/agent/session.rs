@@ -985,6 +985,8 @@ impl AgentSession {
             "exited": exited,
             // The login a Claude chat runs under; it changes with an account switch.
             "claudeAccountId": self.claude_account_id(),
+            // Answers `{"t":"resync"}` with a fresh snapshot on the same socket.
+            "resync": true,
         })
         .to_string()
     }
