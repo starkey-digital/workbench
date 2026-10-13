@@ -172,6 +172,22 @@ fn use_dev_config_dir() {
     paths::set_workbench_config_dir(dir);
 }
 
+/// Keep macOS running the process while its window is hidden or the display
+/// sleeps: it hosts the servers a phone and the panes' `claude`s talk to.
+/// `LSAppNapIsDisabled` in Info.plist didn't stop the whole process pausing
+/// for minutes while the display slept; this activity is Apple's documented
+/// App Nap opt-out. It still lets the machine itself idle-sleep.
+#[cfg(target_os = "macos")]
+fn stay_scheduled() {
+    use objc2_foundation::{NSActivityOptions, NSProcessInfo, NSString};
+    let activity = NSProcessInfo::processInfo().beginActivityWithOptions_reason(
+        NSActivityOptions::UserInitiatedAllowingIdleSystemSleep,
+        &NSString::from_str("Serving terminals and chats"),
+    );
+    // Held for the process's life: dropping it ends the activity.
+    std::mem::forget(activity);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // First, before any thread starts: a Workbench launched from another's
@@ -187,6 +203,8 @@ pub fn run() {
     // whole process — dropping it flushes pending events on shutdown.
     let _sentry_guard = observability::init(context.package_info().version.to_string());
     workbench_server::watchdog::raise_fd_limit();
+    #[cfg(target_os = "macos")]
+    stay_scheduled();
 
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
