@@ -7833,6 +7833,7 @@ dependencies = [
  "log",
  "notify",
  "notify-debouncer-mini",
+ "objc2-foundation",
  "portable-pty",
  "reqwest 0.12.28",
  "sentry",
