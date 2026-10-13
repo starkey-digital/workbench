@@ -29,7 +29,7 @@
 	<button
 		type="button"
 		class={[
-			'flex h-9 items-center disabled:opacity-50 justify-center gap-1.5 bg-wb-accent px-3 text-[13px] font-semibold text-wb-accent-ink active:brightness-90',
+			'flex h-9 items-center justify-center gap-1.5 bg-wb-accent px-3 text-[13px] font-semibold text-wb-accent-ink active:brightness-90 disabled:opacity-50',
 			wide && 'flex-1'
 		]}
 		aria-label="Start Claude in {name}"
@@ -41,7 +41,7 @@
 	<button
 		type="button"
 		class={[
-			'flex h-9 items-center disabled:opacity-50 justify-center gap-1.5 border border-l-0 border-wb-hair bg-wb-panel2 px-2.5 text-[13px] font-semibold text-wb-codex active:bg-wb-panel',
+			'flex h-9 items-center justify-center gap-1.5 border border-l-0 border-wb-hair bg-wb-panel2 px-2.5 text-[13px] font-semibold text-wb-codex active:bg-wb-panel disabled:opacity-50',
 			wide && 'flex-1'
 		]}
 		aria-label="Start a Codex chat in {name}"
@@ -53,7 +53,7 @@
 	<button
 		type="button"
 		class={[
-			'flex h-9 items-center disabled:opacity-50 justify-center gap-1.5 border border-l-0 border-wb-hair bg-wb-panel2 text-[13px] font-semibold text-wb-ink-mute active:bg-wb-panel',
+			'flex h-9 items-center justify-center gap-1.5 border border-l-0 border-wb-hair bg-wb-panel2 text-[13px] font-semibold text-wb-ink-mute active:bg-wb-panel disabled:opacity-50',
 			wide ? 'flex-1' : 'w-9'
 		]}
 		aria-label="Open a terminal in {name}"

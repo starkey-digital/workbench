@@ -58,7 +58,7 @@
 >
 	<button
 		type="button"
-		class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs enabled:hover:bg-wb-panel2 focus-visible:ring-1 focus-visible:ring-wb-accent focus-visible:outline-none focus-visible:ring-inset"
+		class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs focus-visible:ring-1 focus-visible:ring-wb-accent focus-visible:outline-none focus-visible:ring-inset enabled:hover:bg-wb-panel2"
 		disabled={!expandable}
 		aria-expanded={open}
 		onclick={() => (open = !open)}

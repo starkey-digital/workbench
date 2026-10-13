@@ -1158,8 +1158,7 @@ export const register: Register = (on) => {
 			throw err;
 		}
 		const launched = result.result as
-			| { status?: string; agentId?: string; success?: boolean; background?: boolean }
-			| undefined;
+			{ status?: string; agentId?: string; success?: boolean; background?: boolean } | undefined;
 		if (isAgent && id) {
 			runningAgents.delete(id);
 		}

@@ -164,8 +164,7 @@
 					<textarea
 						aria-label="Queued message"
 						value={controls.editing[item.id] ?? item.text}
-						oninput={(e) => (controls.editing[item.id] = e.currentTarget.value)}
-					></textarea>
+						oninput={(e) => (controls.editing[item.id] = e.currentTarget.value)}></textarea>
 					<div class="flex flex-wrap gap-2">
 						<button
 							disabled={controls.busy}
@@ -228,8 +227,7 @@
 				<label
 					>Objective <textarea
 						bind:value={controls.objective}
-						placeholder="What should Codex keep working toward?"
-					></textarea></label
+						placeholder="What should Codex keep working toward?"></textarea></label
 				>
 				<label
 					>Token budget (optional) <input

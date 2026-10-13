@@ -4,8 +4,7 @@ import { checkForUpdate, type AvailableUpdate } from './updater';
 
 export type DownloadProgress = { downloaded: number; total: number };
 export type InstallResult =
-	| { status: 'installing' | 'needs_permission' }
-	| { status: 'ready_to_install'; sha256: string };
+	{ status: 'installing' | 'needs_permission' } | { status: 'ready_to_install'; sha256: string };
 
 export type UpdaterState =
 	| { kind: 'idle' }

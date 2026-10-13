@@ -20,8 +20,7 @@ const MAX_LABEL_DISCOVERY_ATTEMPTS = 6;
 
 /** Who to notify about: a pane here, or a session no pane shows. */
 export type AttentionTarget =
-	| { paneId: string; sessionId: string }
-	| { id: string; projectPath: string; label: string };
+	{ paneId: string; sessionId: string } | { id: string; projectPath: string; label: string };
 
 export class ClaudeSessionStore {
 	/** AI panes mid-turn and not waiting on anyone (the server's runtime state). */
