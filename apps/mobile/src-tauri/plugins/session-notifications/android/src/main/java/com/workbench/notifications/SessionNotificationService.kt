@@ -12,6 +12,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import org.json.JSONObject
 import java.io.IOException
@@ -31,8 +32,9 @@ class SessionNotificationService : Service() {
   @Volatile private var activeConnection: HttpURLConnection? = null
   private val manager get() = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
   private val monitorId = 1
-  /** Wall clock of the last poll: the executor's clock stops while the phone sleeps. */
+  /** Last poll on `elapsedRealtime` (runs through deep sleep) and `uptimeMillis` (stops in it). */
   private var lastPollAt = 0L
+  private var lastPollUptime = 0L
 
   override fun onBind(intent: Intent?): IBinder? = null
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -139,18 +141,27 @@ class SessionNotificationService : Service() {
 
   /** A gap past long polling's timeout means the CPU slept or the network stalled. */
   private fun noteStall() {
-    val now = System.currentTimeMillis()
+    val now = SystemClock.elapsedRealtime()
+    val uptime = SystemClock.uptimeMillis()
     val gap = now - lastPollAt
     if (lastPollAt != 0L && gap > 60_000) {
+      val asleep = gap - (uptime - lastPollUptime)
       val power = getSystemService(POWER_SERVICE) as PowerManager
-      Telemetry.once("stall", "Session polling stalled", mapOf(
-        "gapSeconds" to gap / 1000,
-        "deviceIdle" to (Build.VERSION.SDK_INT >= 23 && power.isDeviceIdleMode),
-        "interactive" to power.isInteractive,
-        "ignoringBatteryOptimizations" to (Build.VERSION.SDK_INT >= 23 && power.isIgnoringBatteryOptimizations(packageName)),
-      ))
+      // Doze (deep or light) stops the CPU even for an exempt app; expected, not a fault.
+      if (asleep > gap / 2) {
+        Telemetry.breadcrumb("poll gap ${gap / 1000}s, CPU asleep ${asleep / 1000}s")
+      } else {
+        Telemetry.once("stall", "Session polling stalled", mapOf(
+          "gapSeconds" to gap / 1000,
+          "asleepSeconds" to asleep / 1000,
+          "deviceIdle" to (Build.VERSION.SDK_INT >= 23 && power.isDeviceIdleMode),
+          "interactive" to power.isInteractive,
+          "ignoringBatteryOptimizations" to (Build.VERSION.SDK_INT >= 23 && power.isIgnoringBatteryOptimizations(packageName)),
+        ))
+      }
     }
     lastPollAt = now
+    lastPollUptime = uptime
   }
 
   /** The person (or Android) turned alerts off: they would post into nothing. */

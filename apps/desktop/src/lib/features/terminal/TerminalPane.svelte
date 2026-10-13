@@ -580,10 +580,22 @@
 		intersectionObserver?.disconnect();
 		shellState?.dispose();
 		searchAddon?.dispose();
-		webgl?.drop();
-		terminal?.dispose();
 		// Detach only: the terminal is the server's, and ends when its pane closes.
 		conn?.dispose();
+		// xterm parses queued output on a timer dispose() doesn't cancel; parsed after
+		// dispose, it refreshes a renderer that's gone (WORKBENCH-H). Dispose once it's parsed.
+		const t = terminal;
+		const w = webgl;
+		const release = () => {
+			w?.drop();
+			t?.dispose();
+		};
+		try {
+			if (t) t.write('', release);
+			else release();
+		} catch {
+			release(); // write refuses once its queue passes xterm's limit
+		}
 	});
 </script>
 

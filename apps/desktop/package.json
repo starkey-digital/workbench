@@ -9,7 +9,7 @@
 		"dev": "tauri dev",
 		"build": "tauri build",
 		"build:signed": "bash scripts/build-signed.sh",
-		"build:e2e": "tauri build --debug --no-bundle --features e2e",
+		"build:e2e": "VITE_SENTRY_DSN= tauri build --debug --no-bundle --features e2e",
 		"test:e2e": "wdio run e2e/wdio.conf.ts",
 		"check": "svelte-check --tsconfig ./tsconfig.json && tsc -p e2e/tsconfig.json",
 		"lint": "eslint .",
