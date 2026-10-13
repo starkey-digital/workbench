@@ -61,6 +61,20 @@ export function applyChanges(
 	return next;
 }
 
+/**
+ * The items before a same-session snapshot's window (a reconnect or resync
+ * sends only the newest) that the chat already shows, so its scrollback isn't
+ * cut. None when the snapshot starts at the beginning or shares no item.
+ */
+export function earlierItems(
+	items: TranscriptItem[],
+	snapshot: { start: number; items: TranscriptItem[] }
+): TranscriptItem[] {
+	if (snapshot.start === 0 || snapshot.items.length === 0) return [];
+	const at = items.findIndex((i) => i.id === snapshot.items[0].id);
+	return at > 0 ? items.slice(0, at) : [];
+}
+
 /** Group consecutive read-only tool calls so a turn reads as prose, not a log. */
 export function groupBlocks(items: TranscriptItem[]): ChatBlock[] {
 	const blocks: StepBlock[] = [];
