@@ -17,6 +17,7 @@
 	import { isLayoutDisabled } from './layout-guard';
 	import { WebglRenderer } from './webgl-atlas';
 	import { getClaudeSessionStore, getWorkbenchSettingsStore } from '$stores/context';
+	import { fontPrefs, terminalFont } from '@workbench/chat-ui';
 
 	let {
 		paneId,
@@ -300,15 +301,28 @@
 		}
 	);
 
+	watch(
+		() => [fontPrefs.terminalFamily, fontPrefs.value.terminalSize] as const,
+		() =>
+			void terminalFont().then((font) => {
+				if (!terminal) return;
+				Object.assign(terminal.options, font);
+				fitTerminal();
+			}),
+		{ lazy: true }
+	);
+
 	onMount(async () => {
 		try {
 			inputDedup = new TerminalInputDedup(paneId, () => claudeSessionStore.paneType(paneId));
 
 			// Wait for fonts to load so cell measurements are accurate
 			await document.fonts.ready;
+			const font = await terminalFont();
 
 			terminal = new Terminal({
 				...terminalOptions,
+				...font,
 				scrollback: inPerformanceMode() ? SCROLLBACK_PERFORMANCE : SCROLLBACK_NORMAL,
 				// Set unconditionally — unlike WebLinksAddon, OSC 8 links are handled by
 				// xterm core, so they need this even in performance mode. Only http(s)

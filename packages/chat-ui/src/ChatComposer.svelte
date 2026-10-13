@@ -400,7 +400,7 @@
 		enterkeyhint={enterSends ? 'send' : 'enter'}
 		disabled={disabledReason !== null}
 		placeholder={disabledReason ?? placeholder}
-		class="scrollbar-thin block max-h-[180px] w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-sm leading-relaxed text-wb-ink placeholder:text-wb-ink-soft focus:outline-none disabled:cursor-not-allowed"
+		class="scrollbar-thin block max-h-[180px] w-full resize-none bg-transparent px-3.5 pt-3 pb-1 leading-relaxed text-wb-ink placeholder:text-wb-ink-soft focus:outline-none disabled:cursor-not-allowed"
 	></textarea>
 	{#if attachError}
 		<p class="px-3.5 pb-1 text-[11px] text-wb-err" role="alert">{attachError}</p>

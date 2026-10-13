@@ -44,14 +44,15 @@
 		platform.openLink(href);
 	}
 
+	// Sized in em from the chat's text size (14px by default: 18px, 16px, 14px).
 	const HEADING = [
 		'',
-		'text-lg font-semibold',
-		'text-base font-semibold',
-		'text-sm font-semibold',
-		'text-sm font-medium',
-		'text-sm font-medium',
-		'text-sm font-medium'
+		'text-[1.286em]/[1.556] font-semibold',
+		'text-[1.143em]/[1.5] font-semibold',
+		'font-semibold',
+		'font-medium',
+		'font-medium',
+		'font-medium'
 	];
 </script>
 
@@ -143,7 +144,7 @@
 					</button>
 				</div>
 				<pre
-					class="scrollbar-thin overflow-x-auto px-3 py-2 font-mono text-xs leading-relaxed text-wb-ink">{code.text}</pre>
+					class="scrollbar-thin overflow-x-auto px-3 py-2 font-mono text-[0.857em] leading-relaxed text-wb-ink">{code.text}</pre>
 			</div>
 		{:else if token.type === 'blockquote'}
 			<blockquote class="flex flex-col gap-2 border-l-2 border-wb-hair pl-3 text-wb-ink-mute">
@@ -182,7 +183,7 @@
 		{:else if token.type === 'table'}
 			{@const table = token as Tokens.Table}
 			<div class="scrollbar-thin overflow-x-auto rounded-md border border-wb-hair">
-				<table class="w-full border-collapse text-xs">
+				<table class="w-full border-collapse text-[0.857em]/[1.333]">
 					<thead class="bg-wb-panel">
 						<tr>
 							{#each table.header as cell, c (c)}
@@ -211,8 +212,9 @@
 		{:else if token.type === 'hr'}
 			<hr class="border-wb-hair" />
 		{:else if token.type === 'html'}
-			<pre class="font-mono text-xs whitespace-pre-wrap text-wb-ink-mute">{(token as Tokens.HTML)
-					.text}</pre>
+			<pre class="font-mono text-[0.857em]/[1.333] whitespace-pre-wrap text-wb-ink-mute">{(
+					token as Tokens.HTML
+				).text}</pre>
 		{/if}
 	{/each}
 {/snippet}

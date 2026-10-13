@@ -2,6 +2,7 @@
 	import { watch } from 'runed';
 	import { onDestroy, onMount } from 'svelte';
 	import { TERMINAL_BG } from '$lib/terminal-config';
+	import { fontPrefs } from '@workbench/chat-ui';
 	import {
 		attachNativeTerminal,
 		detachNativeTerminal,
@@ -90,7 +91,7 @@
 				y: nsRect.y,
 				width: nsRect.width,
 				height: nsRect.height,
-				fontSize: 13
+				fontSize: fontPrefs.value.terminalSize
 			});
 
 			created = true;
