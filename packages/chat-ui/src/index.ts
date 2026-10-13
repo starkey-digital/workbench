@@ -1,5 +1,14 @@
 export { AgentChat, type PaneProcess, type TaskOutput } from './agent-chat.svelte.ts';
 export { ChatDraft } from './chat-draft.svelte.ts';
+export {
+	CHAT_FONT_SIZES,
+	CHAT_FONTS,
+	fontPrefs,
+	TERMINAL_FONT_SIZES,
+	TERMINAL_FONTS,
+	terminalFont,
+	type FontChoice
+} from './font-prefs.svelte.ts';
 export { agentClient, type AgentApi, type AgentClient } from './agent-api.ts';
 export { useAccountPlanUsage } from './plan-usage.svelte.ts';
 export { setChatPlatform, type ChatPlatform } from './platform.ts';

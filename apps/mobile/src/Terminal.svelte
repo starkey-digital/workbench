@@ -5,6 +5,9 @@
 	import { FitAddon } from '@xterm/addon-fit';
 	import '@xterm/xterm/css/xterm.css';
 	import { terminalWsUrl } from '@workbench/transport';
+	import { fontPrefs, terminalFont } from '@workbench/chat-ui';
+	import { watch } from 'runed';
+	import { untrack } from 'svelte';
 	import { touchScroll } from './touch-scroll.ts';
 	import ViewSwitch from './ViewSwitch.svelte';
 	import { useBack } from './back-navigation';
@@ -58,17 +61,37 @@
 		if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: 'i', d: data }));
 	}
 
+	/** The mounted terminal, for font changes. */
+	let view: { term: Terminal; fit: FitAddon } | undefined;
+
+	watch(
+		() => [fontPrefs.terminalFamily, fontPrefs.value.terminalSize] as const,
+		() =>
+			void terminalFont().then((font) => {
+				if (!view) return;
+				Object.assign(view.term.options, font);
+				view.fit.fit();
+			}),
+		{ lazy: true }
+	);
+
 	const mountTerminal: Attachment<HTMLDivElement> = (host) => {
 		const term = new Terminal({
 			cursorBlink: true,
-			fontSize: 13,
-			fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
 			theme: { background: '#0f1115', foreground: '#e7eaf0' }
 		});
 		const fit = new FitAddon();
 		term.loadAddon(fit);
-		term.open(host);
-		fit.fit();
+		view = { term, fit };
+		// Open once the font has loaded: xterm measures its cells at open, and
+		// setting the same font again later wouldn't measure them anew.
+		// Untracked: font changes go through the watch above, not a remount.
+		void untrack(terminalFont).then((font) => {
+			if (view?.term !== term) return;
+			Object.assign(term.options, font);
+			term.open(host);
+			fit.fit();
+		});
 
 		let retry: ReturnType<typeof setTimeout> | undefined;
 		let attempt = 0;
@@ -154,6 +177,7 @@
 				ws.close();
 			}
 			ws = undefined;
+			view = undefined;
 			term.dispose();
 		};
 	};

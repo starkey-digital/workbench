@@ -5,7 +5,15 @@
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import SquareTerminalIcon from '@lucide/svelte/icons/square-terminal';
 	import XIcon from '@lucide/svelte/icons/x';
-	import { Elapsed, shortPath } from '@workbench/chat-ui';
+	import {
+		CHAT_FONT_SIZES,
+		CHAT_FONTS,
+		Elapsed,
+		fontPrefs,
+		shortPath,
+		TERMINAL_FONT_SIZES,
+		TERMINAL_FONTS
+	} from '@workbench/chat-ui';
 	import { cn } from '@workbench/ui';
 	import type { RunningTasks } from '@workbench/types';
 	import type { MobileClient } from './client.svelte.ts';
@@ -27,6 +35,16 @@
 
 	const store = $derived(client.store!);
 	let settingsOpen = $state(false);
+	const fontRows = [
+		{
+			label: 'Terminal',
+			font: 'terminalFont',
+			size: 'terminalSize',
+			fonts: TERMINAL_FONTS,
+			sizes: TERMINAL_FONT_SIZES
+		},
+		{ label: 'Chat', font: 'chatFont', size: 'chatSize', fonts: CHAT_FONTS, sizes: CHAT_FONT_SIZES }
+	] as const;
 	let machinesOpen = $state(false);
 	let reviewFolder = $state<ReviewFolder | null>(null);
 	let reviewTab = $state<'history' | 'changes'>('history');
@@ -337,6 +355,31 @@
 				<p class="text-xs text-wb-ink-mute">
 					Claude sessions can switch between chat and terminal from their header.
 				</p>
+			</div>
+			<div class="flex flex-col gap-2">
+				<span class="text-[13px] font-semibold">Fonts on this phone</span>
+				{#each fontRows as row (row.label)}
+					<div class="grid grid-cols-[4.5rem_1fr_5rem] items-center gap-2 text-[13px]">
+						<span class="text-wb-ink-mute">{row.label}</span>
+						<select
+							class="h-10 min-w-0 rounded-lg border border-wb-hair bg-wb-panel2 px-3"
+							aria-label="{row.label} font"
+							value={fontPrefs.value[row.font]}
+							onchange={(e) => fontPrefs.set({ [row.font]: e.currentTarget.value })}
+						>
+							{#each row.fonts as font (font.id)}<option value={font.id}>{font.label}</option
+								>{/each}
+						</select>
+						<select
+							class="h-10 rounded-lg border border-wb-hair bg-wb-panel2 px-3"
+							aria-label="{row.label} size"
+							value={String(fontPrefs.value[row.size])}
+							onchange={(e) => fontPrefs.set({ [row.size]: Number(e.currentTarget.value) })}
+						>
+							{#each row.sizes as size (size)}<option value={String(size)}>{size}</option>{/each}
+						</select>
+					</div>
+				{/each}
 			</div>
 			{#if client.notifications.supported}
 				<label class="flex items-center gap-3 text-[13px] font-semibold">

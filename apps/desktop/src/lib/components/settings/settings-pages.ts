@@ -10,6 +10,7 @@ export type SettingsPageId =
 	| 'general'
 	| 'worktrees'
 	| 'terminal'
+	| 'fonts'
 	| 'agent-actions'
 	| 'integrations'
 	| 'remote-access'
@@ -61,6 +62,12 @@ export const SETTINGS_NAV: SettingsNavGroup[] = [
 				label: 'Terminal',
 				description: 'Rendering and performance of terminal panes.',
 				store: 'workbench'
+			},
+			{
+				id: 'fonts',
+				label: 'Fonts',
+				description: 'Font and text size of terminals and chats on this computer.',
+				store: 'immediate'
 			},
 			{
 				id: 'agent-actions',

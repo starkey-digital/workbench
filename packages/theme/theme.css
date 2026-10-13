@@ -9,6 +9,18 @@
  * for the shared UI packages so every consumer generates their classes. App-
  * specific extras (overlay-scrollbars theme, animations) stay in the app. */
 
+/* Terminal and chat font choices (`TERMINAL_FONTS`, `CHAT_FONTS` in @workbench/chat-ui). Bundled
+ * so they work offline and on Android; a face is only fetched once it's used. */
+@import '@fontsource-variable/jetbrains-mono';
+@import '@fontsource-variable/fira-code';
+@import '@fontsource-variable/source-code-pro';
+@import '@fontsource-variable/geist-mono';
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/700.css';
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/ibm-plex-sans';
+@import '@fontsource-variable/atkinson-hyperlegible-next';
+
 /* Scan the shared packages so Tailwind generates classes used only there.
  * Paths are relative to this file (packages/theme/theme.css). */
 @source '../ui/src';

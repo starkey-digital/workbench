@@ -23,6 +23,7 @@
 	import SettingsServerMode from './SettingsServerMode.svelte';
 	import SettingsSkills from './SettingsSkills.svelte';
 	import SettingsTerminal from './SettingsTerminal.svelte';
+	import SettingsFonts from './SettingsFonts.svelte';
 	import SettingsWorktrees from './SettingsWorktrees.svelte';
 	import {
 		WORKBENCH_SETTINGS_FILE,
@@ -133,6 +134,8 @@
 					<SettingsWorktrees />
 				{:else if pageId === 'terminal'}
 					<SettingsTerminal />
+				{:else if pageId === 'fonts'}
+					<SettingsFonts />
 				{:else if pageId === 'agent-actions'}
 					<SettingsAgentActions />
 				{:else if pageId === 'integrations'}

@@ -18,6 +18,7 @@
 		ChatUsage,
 		contextUsed,
 		followLatest,
+		fontPrefs,
 		metaUsageChips,
 		setChatPlatform,
 		useAccountPlanUsage
@@ -132,8 +133,11 @@
 </script>
 
 <div
-	class="flex h-full flex-col bg-wb-bg text-sm text-wb-ink"
+	class="flex h-full flex-col bg-wb-bg text-wb-ink"
 	style:--wb-agent={isClaude ? undefined : 'var(--wb-codex)'}
+	style:font-size="{fontPrefs.value.chatSize}px"
+	style:line-height={20 / 14}
+	style:font-family={fontPrefs.chatFamily}
 >
 	<header
 		class="flex shrink-0 items-center gap-2 border-b border-wb-hair bg-wb-rail pr-2 pl-1"

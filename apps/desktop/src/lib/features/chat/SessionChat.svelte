@@ -16,6 +16,7 @@
 		ChatTranscript,
 		ChatUsage,
 		followLatest,
+		fontPrefs,
 		metaUsageChips,
 		setChatPlatform,
 		useAccountPlanUsage
@@ -175,8 +176,11 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	{@attach measureWidth}
-	class="relative flex h-full min-h-0 flex-col bg-wb-bg text-sm text-wb-ink"
+	class="relative flex h-full min-h-0 flex-col bg-wb-bg text-wb-ink"
 	style:--wb-agent={agent === 'codex' ? 'var(--wb-codex)' : undefined}
+	style:font-size="{fontPrefs.value.chatSize}px"
+	style:line-height={20 / 14}
+	style:font-family={fontPrefs.chatFamily}
 	onkeydown={onKeydown}
 >
 	<header class="flex h-9 shrink-0 items-center gap-3 border-b border-wb-hair pr-40 pl-4 text-xs">
