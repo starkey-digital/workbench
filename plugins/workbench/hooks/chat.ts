@@ -40,6 +40,10 @@ let lastSettings = '';
 // The live permission mode, and the one the chat was last told.
 let liveMode: string | undefined;
 let reportedMode = '';
+// Minted ids carry this load's own prefix: Claude Code reloads a plugin
+// mid-session (its files change, a worktree switch), and a restarted count
+// alone would mint ids the session already used, replacing those chat items.
+const load = Math.random().toString(36).slice(2, 8);
 let messageSeq = 0;
 let currentMessage = '';
 const startedBlocks = new Set<number>();
@@ -225,7 +229,7 @@ function commandOutput(content: string, inTerminal = false) {
 		subtype: 'local_command_output',
 		content,
 		...(inTerminal && { workbench_in_terminal: true }),
-		uuid: `wbmod-command-${++askSeq}`
+		uuid: `wbmod-command-${load}-${++askSeq}`
 	});
 }
 
@@ -431,7 +435,7 @@ export const register: Register = (on) => {
 				injected.push(text);
 				emit({
 					type: 'user',
-					uuid: `wbmod-queued-${++askSeq}`,
+					uuid: `wbmod-queued-${load}-${++askSeq}`,
 					workbench_queued: true,
 					session_id: server.current()?.sessionId,
 					message: { role: 'user', content: text }
@@ -651,7 +655,7 @@ export const register: Register = (on) => {
 		const step = { ...e, ...(pick ? { model: pick.id } : {}) };
 		if (sent !== e.effort) step.effort = sent;
 		const stream = next(step);
-		currentMessage = `wbmod-${sessionId.slice(0, 8)}-${++messageSeq}`;
+		currentMessage = `wbmod-${sessionId.slice(0, 8)}-${load}-${++messageSeq}`;
 		startedBlocks.clear();
 		model = step.model || model;
 		const settings = `${model} ${sent ?? ''}`;
@@ -832,7 +836,7 @@ export const register: Register = (on) => {
 					subtype: 'model_refusal_no_fallback',
 					original_model: model,
 					api_refusal_explanation: e.refusal.explanation,
-					uuid: `wbmod-refusal-${++askSeq}`
+					uuid: `wbmod-refusal-${load}-${++askSeq}`
 				});
 			const modelUsage = contextWindow ? { [model]: { contextWindow } } : undefined;
 			const replaced = e.reason === 'aborted' && e.turnId === replacing;
@@ -841,7 +845,7 @@ export const register: Register = (on) => {
 				replacing = undefined;
 				owedResult = true;
 			} else if (e.reason === 'error') {
-				failedResult = `wbmod-result-${++askSeq}`;
+				failedResult = `wbmod-result-${load}-${++askSeq}`;
 				emit({
 					type: 'result',
 					subtype: 'error_during_execution',
@@ -945,7 +949,7 @@ export const register: Register = (on) => {
 	// shows a read-only card, and the session waits on it until it's answered.
 	on('classic.Elicitation', ($, e, next) => {
 		if (server.current()) {
-			const id = `wbmod-elicit-${++askSeq}`;
+			const id = `wbmod-elicit-${load}-${++askSeq}`;
 			const key = elicitationKey(e);
 			terminalElicitations.set(key, [...(terminalElicitations.get(key) ?? []), id]);
 			emit({
@@ -1014,14 +1018,14 @@ export const register: Register = (on) => {
 				type: 'system',
 				subtype: 'local_command_output',
 				content: result.skip,
-				uuid: `wbmod-compact-${++askSeq}`
+				uuid: `wbmod-compact-${load}-${++askSeq}`
 			});
 		} else {
 			emit({
 				type: 'system',
 				subtype: 'compact_boundary',
 				compact_metadata: { trigger: e.trigger, pre_tokens: result.tokensBefore },
-				uuid: `wbmod-compact-${++askSeq}`
+				uuid: `wbmod-compact-${load}-${++askSeq}`
 			});
 		}
 		if (!runningTurn) emit({ type: 'result', subtype: 'success', is_error: false });
@@ -1049,7 +1053,7 @@ export const register: Register = (on) => {
 	on('session.receive', ($, e, next) => {
 		const line =
 			server.current() && !e.agentId && e.origin.kind === 'task-notification'
-				? notifiedJob(e.text)
+				? notifiedJob(e.text, (id) => agentTasks.has(id) || endedByStop.has(id))
 				: undefined;
 		if (line) emit(line);
 		return next(e);
@@ -1070,7 +1074,7 @@ export const register: Register = (on) => {
 		}
 		if (e.tool === ASKED_IN_CALL && !e.agentId && id) {
 			const { tool: _tool, tool_use_id: _id, agentId: _agent, ...input } = e;
-			const requestId = `wbmod-ask-${++askSeq}`;
+			const requestId = `wbmod-ask-${load}-${++askSeq}`;
 			const answer = await server.askInChat(
 				(u, i) => $.http.fetch(u, i),
 				(ms, fn) => $.clock.after(ms, fn),
@@ -1126,7 +1130,7 @@ export const register: Register = (on) => {
 				subtype: 'task_progress',
 				task_id: agentTasks.get(e.agentId) ?? [...runningAgents][0],
 				last_tool_name: e.tool,
-				uuid: `wbmod-progress-${++askSeq}`
+				uuid: `wbmod-progress-${load}-${++askSeq}`
 			});
 		}
 		const main = id && !e.agentId ? id : undefined;
@@ -1267,7 +1271,7 @@ export const register: Register = (on) => {
 		// terminal's, and the chat says where to answer it.
 		const pending = pendingAsks.take(e.tool_name, e.tool_input);
 		if (e.tool_name === 'ExitPlanMode') {
-			const requestId = `wbmod-ask-${++askSeq}`;
+			const requestId = `wbmod-ask-${load}-${++askSeq}`;
 			emit({
 				type: 'system',
 				subtype: 'local_command_output',
@@ -1284,7 +1288,7 @@ export const register: Register = (on) => {
 			if (pending) askedInTerminal.set(pending.id, { requestId, main: !e.agent_id });
 			return next(e);
 		}
-		const requestId = `wbmod-ask-${++askSeq}`;
+		const requestId = `wbmod-ask-${load}-${++askSeq}`;
 		const line = askLine(
 			requestId,
 			e.tool_name,

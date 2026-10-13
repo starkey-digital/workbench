@@ -1175,6 +1175,24 @@ fn a_task_can_name_the_agent_whose_file_holds_its_output() {
     assert_eq!(t.meta().tasks[0].status, "running");
 }
 
+/// A reloaded plugin forgets which task a subagent ran for, so its notification
+/// names the agent: that ends the task whose output is the agent's. A start
+/// with that id is a task of its own.
+#[test]
+fn a_notification_naming_a_subagent_ends_its_task() {
+    let mut t = Transcript::default();
+    t.apply(&json!({"type":"system","subtype":"task_started","task_id":"toolu_1","description":"Review"}));
+    t.apply(&json!({"type":"system","subtype":"task_updated","task_id":"toolu_1","output_id":"a6ee299a623b37fc4"}));
+    t.apply(&json!({"type":"system","subtype":"task_notification","task_id":"a6ee299a623b37fc4","status":"completed"}));
+    assert_eq!(t.meta().tasks.len(), 1);
+    assert_eq!(t.meta().tasks[0].status, "completed");
+
+    t.apply(&json!({"type":"system","subtype":"task_started","task_id":"a6ee299a623b37fc4","description":"Again"}));
+    let tasks = &t.meta().tasks;
+    assert_eq!(tasks.len(), 2, "{tasks:?}");
+    assert_eq!(tasks[0].description, "Review");
+}
+
 #[test]
 fn slash_commands_come_from_initialize_and_updates() {
     let mut t = Transcript::default();
