@@ -1,0 +1,22 @@
+{
+	"name": "@workbench/telemetry",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"description": "Sentry setup and reporting shared by the desktop and mobile webviews.",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"check": "tsc --noEmit -p tsconfig.json",
+		"test": "vitest run"
+	},
+	"peerDependencies": {
+		"@sentry/svelte": "^11"
+	},
+	"devDependencies": {
+		"@sentry/svelte": "^11.7.0",
+		"typescript": "catalog:",
+		"vitest": "catalog:"
+	}
+}

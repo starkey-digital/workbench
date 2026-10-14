@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { log } from '$lib/log';
 	import { watch } from 'runed';
 	import { onDestroy, onMount } from 'svelte';
 	import { TERMINAL_BG } from '$lib/terminal-config';
@@ -89,7 +90,7 @@
 			unlistenExit = await onSessionTerminalExit(terminalId, () => {
 				exited = true;
 			}).catch((e) => {
-				console.warn('[NativeTerminalPane] exit listener failed:', e);
+				log.warn('NativeTerminalPane', 'exit listener failed:', e);
 				return null;
 			});
 			if (destroyed) {

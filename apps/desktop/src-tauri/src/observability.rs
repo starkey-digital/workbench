@@ -24,6 +24,10 @@
 //!
 //! In debug builds the Sentry client is inactive, so forwarding is a no-op and
 //! only the stderr output remains.
+//!
+//! The webview's lines arrive through `log_frontend` (see [`frontend`]) under
+//! `frontend::<target>`. They go to stderr and the file only: the webview's own
+//! Sentry already reports its errors, and its lines can hold paths.
 
 use sentry::integrations::log::{LogFilter, SentryLogger};
 
@@ -78,9 +82,15 @@ fn init_logger() {
         .build();
     let max_level = dest.filter();
 
-    let logger = SentryLogger::with_dest(dest).filter(|metadata| match metadata.level() {
-        log::Level::Error => LogFilter::Event,
-        _ => LogFilter::Breadcrumb,
+    let logger = SentryLogger::with_dest(dest).filter(|metadata| {
+        let target = metadata.target();
+        if target == FRONTEND_TARGET || target.starts_with("frontend::") {
+            return LogFilter::Ignore;
+        }
+        match metadata.level() {
+            log::Level::Error => LogFilter::Event,
+            _ => LogFilter::Breadcrumb,
+        }
     });
 
     if log::set_boxed_logger(Box::new(logger)).is_ok() {
@@ -148,5 +158,131 @@ impl std::io::Write for Tee {
 
     fn flush(&mut self) -> std::io::Result<()> {
         std::io::stderr().flush()
+    }
+}
+
+const FRONTEND_TARGET: &str = "frontend";
+/// A webview stuck logging in a loop can't flood the file past this.
+const FRONTEND_LINES_PER_SEC: u32 = 20;
+const FRONTEND_MAX_CHARS: usize = 2000;
+
+static FRONTEND_BUDGET: std::sync::Mutex<Budget> = std::sync::Mutex::new(Budget {
+    window: None,
+    used: 0,
+    dropped: 0,
+});
+
+/// Lines allowed per one-second window.
+struct Budget {
+    window: Option<std::time::Instant>,
+    used: u32,
+    dropped: u32,
+}
+
+impl Budget {
+    /// `None` drops the line; `Some(n)`: write it, after noting `n` dropped before it.
+    fn take(&mut self, now: std::time::Instant) -> Option<u32> {
+        let expired = match self.window {
+            Some(start) => now.duration_since(start) >= std::time::Duration::from_secs(1),
+            None => true,
+        };
+        if expired {
+            self.window = Some(now);
+            self.used = 0;
+        }
+        if self.used >= FRONTEND_LINES_PER_SEC {
+            self.dropped += 1;
+            return None;
+        }
+        self.used += 1;
+        Some(std::mem::take(&mut self.dropped))
+    }
+}
+
+/// One webview log line, at its level under `frontend::<target>`, on one line
+/// (a message can't forge another record) and capped in length.
+pub fn frontend(level: &str, target: &str, message: &str) {
+    let level = match level {
+        "error" => log::Level::Error,
+        "warn" => log::Level::Warn,
+        "debug" => log::Level::Debug,
+        _ => log::Level::Info,
+    };
+    let Some(dropped) = FRONTEND_BUDGET
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take(std::time::Instant::now())
+    else {
+        return;
+    };
+    if dropped > 0 {
+        log::warn!(target: FRONTEND_TARGET, "{dropped} webview log lines dropped (over {FRONTEND_LINES_PER_SEC}/s)");
+    }
+    let target = format!("{FRONTEND_TARGET}::{}", frontend_target(target));
+    log::log!(target: &target, level, "{}", one_line(message));
+}
+
+fn frontend_target(target: &str) -> String {
+    let clean: String = target
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+        .take(40)
+        .collect();
+    if clean.is_empty() {
+        "app".into()
+    } else {
+        clean
+    }
+}
+
+fn one_line(message: &str) -> String {
+    let mut line: String = message
+        .chars()
+        .take(FRONTEND_MAX_CHARS)
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    if message.chars().nth(FRONTEND_MAX_CHARS).is_some() {
+        line.push('…');
+    }
+    line
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn budget_drops_past_the_limit_and_counts_them_into_the_next_window() {
+        let mut budget = Budget {
+            window: None,
+            used: 0,
+            dropped: 0,
+        };
+        let start = Instant::now();
+        for _ in 0..FRONTEND_LINES_PER_SEC {
+            assert_eq!(budget.take(start), Some(0));
+        }
+        assert_eq!(budget.take(start), None);
+        assert_eq!(budget.take(start + Duration::from_millis(999)), None);
+        assert_eq!(budget.take(start + Duration::from_secs(1)), Some(2));
+        assert_eq!(budget.take(start + Duration::from_secs(1)), Some(0));
+    }
+
+    #[test]
+    fn frontend_lines_stay_on_one_line_and_capped() {
+        assert_eq!(one_line("a\nfake INFO line\r"), "a fake INFO line ");
+        let long = "x".repeat(FRONTEND_MAX_CHARS + 5);
+        let line = one_line(&long);
+        assert_eq!(line.chars().count(), FRONTEND_MAX_CHARS + 1);
+        assert!(line.ends_with('…'));
+        assert_eq!(one_line("short"), "short");
+    }
+
+    #[test]
+    fn frontend_targets_are_plain_names() {
+        assert_eq!(frontend_target("AgentChat"), "AgentChat");
+        assert_eq!(frontend_target("a::b c/../d"), "abcd");
+        assert_eq!(frontend_target("::"), "app");
     }
 }

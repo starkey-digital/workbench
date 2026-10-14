@@ -434,6 +434,8 @@ export interface WorkbenchSettings {
 	gitSidebarEnabled: boolean;
 	terminalPerformanceMode: TerminalPerformanceMode;
 	terminalTelemetryEnabled: boolean;
+	/** Opt-in: socket breadcrumbs and chat traces on error reports (desktop and its phones). */
+	extendedDiagnostics?: boolean;
 	terminalRenderer: TerminalRenderer;
 	agentActions: AgentAction[];
 	codexConfigApproved?: boolean | null;

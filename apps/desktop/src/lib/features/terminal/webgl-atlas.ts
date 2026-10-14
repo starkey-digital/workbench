@@ -1,5 +1,6 @@
 import { WebglAddon } from '@xterm/addon-webgl';
 import type { Terminal } from '@xterm/xterm';
+import { log } from '$lib/log';
 
 /**
  * A terminal's WebGL renderer, with xterm's glyph atlas kept to a budget.
@@ -90,7 +91,7 @@ export class WebglRenderer {
 		try {
 			addon?.dispose();
 		} catch (e) {
-			console.warn('[webgl] dispose failed', e);
+			log.warn('webgl', 'dispose failed', e);
 		}
 	}
 }

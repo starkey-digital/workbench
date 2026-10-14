@@ -1,4 +1,5 @@
 import { toast } from 'svelte-sonner';
+import { log } from '$lib/log';
 
 /**
  * Run a step that must not stop what follows it (a boot step, an event
@@ -8,7 +9,7 @@ export async function attempt<T>(what: string, run: () => Promise<T>): Promise<T
 	try {
 		return await run();
 	} catch (e) {
-		console.error(`[attempt] ${what} failed:`, e);
+		log.error('attempt', `${what} failed:`, e);
 		toast.error(`Couldn't ${what}: ${e instanceof Error ? e.message : String(e)}`);
 		return undefined;
 	}

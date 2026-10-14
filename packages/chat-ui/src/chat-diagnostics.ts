@@ -92,11 +92,15 @@ export class ChatMonitor {
 	private staleTimer: ReturnType<typeof setTimeout> | null = null;
 	private staleMs = STALE_BUSY_MS;
 
-	/** `onStale`: the chat was busy and silent; false stops the probe (it can't resync). */
+	/**
+	 * `onStale`: the chat was busy and silent; false stops the probe (it can't resync).
+	 * `breadcrumb`: each entry but a streaming turn's updates, for the host's error reports.
+	 */
 	constructor(
 		private readonly agent: AgentKind,
 		private readonly onStale: () => boolean,
-		private readonly report?: (d: ChatDiagnostic) => void
+		private readonly report?: (d: ChatDiagnostic) => void,
+		private readonly breadcrumb?: (agent: AgentKind, entry: TraceEntry) => void
 	) {}
 
 	trace(kind: string, data: TraceData = {}): void {
@@ -104,6 +108,7 @@ export class ChatMonitor {
 		if (this.ring.length < TRACE_SIZE) this.ring.push(entry);
 		else this.ring[this.head] = entry;
 		this.head = (this.head + 1) % TRACE_SIZE;
+		if (kind !== 'update') this.breadcrumb?.(this.agent, entry);
 	}
 
 	/** Oldest first. */

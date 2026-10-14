@@ -5,6 +5,7 @@ import type { ProjectStore } from '$stores/projects.svelte';
 import type { WorkspaceStore } from '$stores/workspaces.svelte';
 import type { BranchInfo, WorktreeCopyOptions } from '$types/workbench';
 import { invoke } from '$lib/transport';
+import { log } from '$lib/log';
 
 interface WorktreeRemoval {
 	projectPath: string;
@@ -140,7 +141,7 @@ export class WorktreeManagerStore {
 			// A host that predates `deleteBranch` leaves the branch to us.
 			if (removeBranch && removed?.branchDeleted === undefined) {
 				await invoke('delete_branch', { repoPath: projectPath, branch, force: false }).catch((e) =>
-					console.warn('[WorktreeManager] Failed to delete branch:', e)
+					log.warn('WorktreeManager', 'Failed to delete branch:', e)
 				);
 			}
 			await this.gitStore.refreshGitState(projectPath);

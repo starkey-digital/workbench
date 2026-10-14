@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { log } from '$lib/log';
 	import { onDestroy, onMount } from 'svelte';
 	import { watch } from 'runed';
 	import { Terminal } from '@xterm/xterm';
@@ -444,7 +445,7 @@
 			try {
 				terminal.loadAddon(new LigaturesAddon());
 			} catch (error) {
-				console.warn('[TerminalPane] Ligatures addon failed to load:', error);
+				log.warn('TerminalPane', 'Ligatures addon failed to load:', error);
 			}
 
 			// Shell integration: parse OSC 133 sequences for prompt/command tracking

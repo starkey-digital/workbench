@@ -1,6 +1,6 @@
 <script lang="ts" module>
 	import { throttled } from '@workbench/chat-ui';
-	import { captureChatDiagnostic } from './sentry.ts';
+	import { captureChatDiagnostic, chatBreadcrumb, captureViewError } from '@workbench/telemetry';
 
 	/** One limit for every chat screen: a stuck chat reopened doesn't report again. */
 	const report = throttled(captureChatDiagnostic);
@@ -33,13 +33,13 @@
 	} from '@workbench/chat-ui';
 	import { cn } from '@workbench/ui';
 	import * as DropdownMenu from '@workbench/ui/dropdown-menu';
+	import { ViewBoundary } from '@workbench/ui/view-boundary';
 	import type { MobileClient } from './client.svelte.ts';
 	import { openExternal } from './open-external.ts';
 	import { baseName } from './home-format.ts';
 	import type { PaneEntry } from './panes.ts';
 	import Sheet from './Sheet.svelte';
 	import ViewSwitch from './ViewSwitch.svelte';
-	import { useBack } from './back-navigation';
 	import ProjectReviewSheet from './ProjectReviewSheet.svelte';
 	import { dictate, supportsDictation } from './dictation';
 
@@ -73,7 +73,8 @@
 			draft: drafts.get(opened),
 			reconnectOnWake: true,
 			pane: () => client.panes.find((e) => e.pane.id === paneId)?.pane,
-			report
+			report,
+			breadcrumb: chatBreadcrumb
 		}
 	);
 	// Restart on an ended chat restarts the pane on the host; the chat re-attaches to the new spawn.
@@ -113,7 +114,6 @@
 	let tasksOpen = $state(false);
 	let artifactsOpen = $state(false);
 	let reviewOpen = $state<'history' | 'changes' | null>(null);
-	useBack(() => client.closeScreen());
 	/** The draft's key follows the conversation's id across `/clear`. */
 	let draftRef = opened;
 	watch(
@@ -242,84 +242,91 @@
 		</div>
 	{/if}
 
-	<div
-		{@attach followLatest(chat)}
-		class="min-h-0 flex-1 overflow-y-auto"
-		role="log"
-		aria-live="polite"
+	<ViewBoundary
+		label="chat"
+		class="flex-1"
+		onerror={(e) => captureViewError('chat', e, chat.trace())}
+		onreset={() => chat.resyncNow()}
 	>
-		<ChatTranscript
-			{chat}
-			{cwd}
-			projectName={place}
-			onShowTerminal={showTerminal}
-			onStarter={(text) => (draft.text = text)}
-			inlineApprovals={false}
-			class="px-4 py-4"
-		/>
-	</div>
-
-	{#if waiting && !sheetOpen && chat.live}
-		<button
-			type="button"
-			class="flex shrink-0 items-center gap-2 border-t border-wb-warn/40 bg-wb-warn/10 px-4 py-2.5 text-left text-xs"
-			onclick={() => (sheetHiddenFor = null)}
+		<div
+			{@attach followLatest(chat)}
+			class="min-h-0 flex-1 overflow-y-auto"
+			role="log"
+			aria-live="polite"
 		>
-			<span class="size-1.5 animate-pulse rounded-full bg-wb-warn"></span>
-			<span class="flex-1 font-medium text-wb-warn">{name} is waiting on you</span>
-			<span class="text-wb-ink-mute">Review</span>
-		</button>
-	{/if}
-
-	{#if tasks.length > 0 || artifacts.length > 0 || contextShare > 0 || usageChips.length > 0}
-		<div class="flex shrink-0 gap-1.5 overflow-x-auto border-t border-wb-hair-soft px-3 py-1.5">
-			{#if tasks.length > 0}
-				<button
-					type="button"
-					class={cn(
-						'flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-wb-hair bg-wb-panel px-2.5 text-[11.5px]',
-						chat.runningTasks > 0
-							? isClaude
-								? 'text-wb-claude'
-								: 'text-wb-codex'
-							: 'text-wb-ink-mute'
-					)}
-					onclick={() => (tasksOpen = true)}
-				>
-					<AgentIcon agent={chat.agent} class="size-3.5" />
-					{chat.runningTasks > 0 ? `${chat.runningTasks} running` : `${tasks.length} tasks`}
-				</button>
-			{/if}
-			{#if artifacts.length > 0}
-				<button
-					type="button"
-					class="flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-wb-hair bg-wb-panel px-2.5 text-[11.5px] text-wb-ink-mute"
-					onclick={() => (artifactsOpen = true)}
-				>
-					<PanelsTopLeftIcon class="size-3.5" />
-					{artifacts.length === 1 ? '1 artifact' : `${artifacts.length} artifacts`}
-				</button>
-			{/if}
-			<ChatContext meta={chat.meta} />
-			<ChatCache {chat} />
-			<ChatUsage chips={usageChips} chipClass="h-7 px-2.5 text-[11.5px]" />
+			<ChatTranscript
+				{chat}
+				{cwd}
+				projectName={place}
+				onShowTerminal={showTerminal}
+				onStarter={(text) => (draft.text = text)}
+				inlineApprovals={false}
+				class="px-4 py-4"
+			/>
 		</div>
-	{/if}
 
-	<div
-		class="shrink-0 border-t border-wb-hair bg-wb-rail px-2.5 pt-2"
-		style="padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));"
-	>
-		<ChatDock
-			{chat}
-			id="chat-draft-{paneId}"
-			notice={client.notice}
-			accounts={client.accounts}
-			defaultAccountName={client.defaultAccountName}
-			onResume={() => (reviewOpen = 'history')}
-			onThread={(sessionId) => client.resume('codex', ref, sessionId)}
-		/>
-	</div>
+		{#if waiting && !sheetOpen && chat.live}
+			<button
+				type="button"
+				class="flex shrink-0 items-center gap-2 border-t border-wb-warn/40 bg-wb-warn/10 px-4 py-2.5 text-left text-xs"
+				onclick={() => (sheetHiddenFor = null)}
+			>
+				<span class="size-1.5 animate-pulse rounded-full bg-wb-warn"></span>
+				<span class="flex-1 font-medium text-wb-warn">{name} is waiting on you</span>
+				<span class="text-wb-ink-mute">Review</span>
+			</button>
+		{/if}
+
+		{#if tasks.length > 0 || artifacts.length > 0 || contextShare > 0 || usageChips.length > 0}
+			<div class="flex shrink-0 gap-1.5 overflow-x-auto border-t border-wb-hair-soft px-3 py-1.5">
+				{#if tasks.length > 0}
+					<button
+						type="button"
+						class={cn(
+							'flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-wb-hair bg-wb-panel px-2.5 text-[11.5px]',
+							chat.runningTasks > 0
+								? isClaude
+									? 'text-wb-claude'
+									: 'text-wb-codex'
+								: 'text-wb-ink-mute'
+						)}
+						onclick={() => (tasksOpen = true)}
+					>
+						<AgentIcon agent={chat.agent} class="size-3.5" />
+						{chat.runningTasks > 0 ? `${chat.runningTasks} running` : `${tasks.length} tasks`}
+					</button>
+				{/if}
+				{#if artifacts.length > 0}
+					<button
+						type="button"
+						class="flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-wb-hair bg-wb-panel px-2.5 text-[11.5px] text-wb-ink-mute"
+						onclick={() => (artifactsOpen = true)}
+					>
+						<PanelsTopLeftIcon class="size-3.5" />
+						{artifacts.length === 1 ? '1 artifact' : `${artifacts.length} artifacts`}
+					</button>
+				{/if}
+				<ChatContext meta={chat.meta} />
+				<ChatCache {chat} />
+				<ChatUsage chips={usageChips} chipClass="h-7 px-2.5 text-[11.5px]" />
+			</div>
+		{/if}
+
+		<div
+			class="shrink-0 border-t border-wb-hair bg-wb-rail px-2.5 pt-2"
+			style="padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));"
+		>
+			<ChatDock
+				{chat}
+				id="chat-draft-{paneId}"
+				notice={client.notice}
+				accounts={client.accounts}
+				defaultAccountName={client.defaultAccountName}
+				onResume={() => (reviewOpen = 'history')}
+				onThread={(sessionId) => client.resume('codex', ref, sessionId)}
+			/>
+		</div>
+	</ViewBoundary>
 </div>
 
 {#if sheetOpen && waiting}

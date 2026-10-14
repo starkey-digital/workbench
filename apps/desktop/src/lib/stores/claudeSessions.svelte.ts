@@ -14,6 +14,7 @@ import { effectivePath } from '$lib/utils/path';
 import type { IntegrationApprovalStore } from './integration-approval.svelte';
 import type { WorkspaceStore } from './workspaces.svelte';
 import type { ProjectStore } from './projects.svelte';
+import { log } from '$lib/log';
 
 /** Bound on session-label discovery retries, so a session that genuinely never gets a
  *  label (no user message on disk) stops rescanning the session directory. */
@@ -265,7 +266,7 @@ export class ClaudeSessionStore {
 			try {
 				cb(target, kind);
 			} catch (e) {
-				console.warn('[ClaudeSessionStore] attention callback error:', e);
+				log.warn('ClaudeSessionStore', 'attention callback error:', e);
 			}
 		}
 	}
@@ -328,7 +329,7 @@ export class ClaudeSessionStore {
 		try {
 			return await invoke<DiscoveredClaudeSession[]>(command, { projectPath: cwd });
 		} catch (e) {
-			console.error(`[ClaudeSessionStore] Failed to discover ${type} sessions:`, e);
+			log.error('ClaudeSessionStore', `Failed to discover ${type} sessions:`, e);
 			return [];
 		}
 	}

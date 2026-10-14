@@ -100,6 +100,7 @@ macro_rules! build_invoke_handler {
             commands::clone_repo,
             commands::delete_branch,
             commands::open_url,
+            commands::log_frontend,
             commands::check_codex_integration,
             commands::codex_supports_no_daemon,
             commands::apply_codex_integration,

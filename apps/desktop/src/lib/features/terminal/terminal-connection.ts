@@ -20,6 +20,8 @@
  */
 
 import { loopbackServer, parseTerminalControlFrame, terminalWsUrl } from '@workbench/transport';
+import { breadcrumb } from '@workbench/telemetry';
+import { log } from '$lib/log';
 
 /** Payload delivered to the `onData` callback. */
 export type TerminalDataPayload = Uint8Array;
@@ -103,6 +105,7 @@ export class TerminalConnection {
 		return new Promise<void>((resolve, reject) => {
 			ws.onopen = () => {
 				opened = true;
+				breadcrumb('terminal.ws', 'open');
 				ws.send(JSON.stringify({ t: 'r', c: cols, r: rows }));
 				resolve();
 			};
@@ -121,6 +124,7 @@ export class TerminalConnection {
 					this.onData(new Uint8Array(event.data));
 				} else if (typeof event.data === 'string') {
 					const frame = parseTerminalControlFrame(event.data);
+					if (frame) breadcrumb('terminal.ws', frame.t);
 					if (frame?.t === 'takeover') {
 						this.deliverExit({ reason: 'taken_over' });
 					} else if (frame?.t === 'exit') {
@@ -135,11 +139,12 @@ export class TerminalConnection {
 				// A clean exit/takeover already delivered its control frame; an
 				// intentional dispose() must stay silent.
 				if (this.disposed || this.exitDelivered) return;
+				breadcrumb('terminal.ws', opened ? 'dropped' : 'refused', { code: event.code });
 				if (!opened) {
 					this.deliverExit({ reason: 'ended' });
 					return;
 				}
-				console.warn('[TerminalConnection] socket dropped', {
+				log.warn('TerminalConnection', 'socket dropped', {
 					code: event.code,
 					reason: event.reason,
 					wasClean: event.wasClean

@@ -3,6 +3,7 @@ import { SvelteSet } from 'svelte/reactivity';
 import { invoke } from '$lib/transport';
 import type { ProjectConfig } from '$types/workbench';
 import type { WorkspaceStore } from './workspaces.svelte';
+import { log } from '$lib/log';
 
 const FAVOURITES_KEY = 'workbench.favourites';
 
@@ -82,7 +83,7 @@ export class ProjectStore {
 		const [moved] = next.splice(fromIndex, 1);
 		next.splice(toIndex, 0, moved);
 		this.projects = next;
-		this.persist().catch((e) => console.warn('[ProjectStore] Failed to save the order:', e));
+		this.persist().catch((e) => log.warn('ProjectStore', 'Failed to save the order:', e));
 	}
 
 	toggleFavourite(projectPath: string) {

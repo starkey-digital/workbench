@@ -280,6 +280,9 @@ pub struct WorkbenchSettings {
     pub terminal_performance_mode: String,
     #[serde(default)]
     pub terminal_telemetry_enabled: bool,
+    /// Opt-in: socket breadcrumbs and chat traces on error reports.
+    #[serde(default)]
+    pub extended_diagnostics: bool,
     #[serde(default = "default_agent_actions")]
     pub agent_actions: Vec<AgentAction>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -402,6 +405,7 @@ impl Default for WorkbenchSettings {
             trello_enabled: false,
             terminal_performance_mode: default_terminal_performance_mode(),
             terminal_telemetry_enabled: false,
+            extended_diagnostics: false,
             agent_actions: default_agent_actions(),
             codex_config_approved: None,
             git_sidebar_enabled: false,
@@ -805,5 +809,6 @@ mod tests {
         let settings: WorkbenchSettings = serde_json::from_str(json).unwrap();
         assert_eq!(settings.terminal_performance_mode, "auto");
         assert!(!settings.terminal_telemetry_enabled);
+        assert!(!settings.extended_diagnostics);
     }
 }

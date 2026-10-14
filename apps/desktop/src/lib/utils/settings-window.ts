@@ -1,5 +1,6 @@
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import type { SettingsWindowBounds } from '$types/workbench';
+import { log } from '$lib/log';
 
 /** Label of the dedicated settings OS window. */
 export const SETTINGS_WINDOW_LABEL = 'settings';
@@ -50,6 +51,6 @@ export async function openSettingsWindow(
 	});
 
 	win.once('tauri://error', (event) => {
-		console.error('Failed to open settings window', event.payload);
+		log.error('settings-window', 'Failed to open settings window', event.payload);
 	});
 }

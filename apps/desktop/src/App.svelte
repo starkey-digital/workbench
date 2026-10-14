@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { log } from '$lib/log';
+	import { setExtendedDiagnostics } from '@workbench/telemetry';
 	import EmptyState from '$components/EmptyState.svelte';
 	import ActivityRail from '$features/chrome/ActivityRail.svelte';
 	import StatusBar from '$features/chrome/StatusBar.svelte';
@@ -132,6 +134,7 @@
 		() => workbenchSettingsStore.accentColor,
 		(accent) => document.documentElement.setAttribute('data-accent', accent)
 	);
+	watch(() => workbenchSettingsStore.extendedDiagnostics, setExtendedDiagnostics);
 
 	// Update macOS dock badge with count of sessions awaiting user input
 	watch(
@@ -199,7 +202,7 @@
 		() => gitProjectPaths,
 		(paths) => {
 			void invoke('watch_git_projects', { projectPaths: paths ? paths.split('\n') : [] }).catch(
-				(e) => console.warn('[App] git watch:', e)
+				(e) => log.warn('App', 'git watch:', e)
 			);
 		}
 	);
