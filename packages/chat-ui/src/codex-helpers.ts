@@ -18,3 +18,25 @@ export function decodeAudio(data: string): Float32Array {
 		(_, i) => view.getInt16(i * 2, true) / 32768
 	);
 }
+
+/** The end of a Codex task's output, from an `inspect` of its thread. */
+export function codexTaskOutput(result: unknown): { text: string; bytes: number } {
+	const entries = (
+		result as {
+			data?: {
+				item: { text?: string; aggregatedOutput?: string; content?: { text?: string }[] };
+			}[];
+		}
+	).data;
+	const text = [...(entries ?? [])]
+		.reverse()
+		.flatMap(({ item }) =>
+			item.text
+				? [item.text]
+				: item.aggregatedOutput
+					? [item.aggregatedOutput]
+					: (item.content ?? []).flatMap((c) => (c.text ? [c.text] : []))
+		)
+		.join('\n\n');
+	return { text: text.slice(-65536), bytes: new TextEncoder().encode(text).length };
+}

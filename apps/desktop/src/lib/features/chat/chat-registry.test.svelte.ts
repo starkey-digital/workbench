@@ -9,6 +9,7 @@ const created: {
 }[] = [];
 const destroyed: unknown[] = [];
 vi.mock('./agent-api', () => ({ loopbackAgentApi: {} }));
+vi.mock('./chat-platform', () => ({ desktopChatPlatform: {} }));
 vi.mock('@workbench/chat-ui', () => ({
 	AgentChat: class {
 		sessionId: string;

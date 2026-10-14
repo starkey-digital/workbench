@@ -1,3 +1,11 @@
+<script lang="ts" module>
+	import { throttled } from '@workbench/chat-ui';
+	import { captureChatDiagnostic } from './sentry.ts';
+
+	/** One limit for every chat screen: a stuck chat reopened doesn't report again. */
+	const report = throttled(captureChatDiagnostic);
+</script>
+
 <script lang="ts">
 	import { AgentIcon } from '@workbench/ui/agent-icon';
 	import { onDestroy, onMount } from 'svelte';
@@ -43,6 +51,7 @@
 	setChatPlatform({
 		openLink: openExternal,
 		enterSends: false,
+		report,
 		...(supportsDictation() ? { dictate } : {})
 	});
 
@@ -63,7 +72,8 @@
 		{
 			draft: drafts.get(opened),
 			reconnectOnWake: true,
-			pane: () => client.panes.find((e) => e.pane.id === paneId)?.pane
+			pane: () => client.panes.find((e) => e.pane.id === paneId)?.pane,
+			report
 		}
 	);
 	// Restart on an ended chat restarts the pane on the host; the chat re-attaches to the new spawn.
@@ -124,6 +134,16 @@
 	const showTerminal = $derived(
 		isClaude && entry.pane.terminalId ? () => client.setView(paneId, 'terminal') : undefined
 	);
+
+	/** Shape only: counts, flags and recent socket events; nothing from the conversation. */
+	async function copyDiagnostics() {
+		const diagnostics = { app: `workbench-mobile@${__APP_VERSION__}`, ...chat.diagnostics() };
+		try {
+			await navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2));
+		} catch (e) {
+			client.notice = `Couldn't copy diagnostics: ${e instanceof Error ? e.message : String(e)}`;
+		}
+	}
 
 	// The session keeps running on the host; leaving only detaches.
 	onDestroy(() => {
@@ -196,6 +216,8 @@
 					>Review changes</DropdownMenu.Item
 				>
 				<DropdownMenu.Item onSelect={() => chat.open()}>Reconnect</DropdownMenu.Item>
+				<DropdownMenu.Item onSelect={() => chat.resyncNow()}>Resync now</DropdownMenu.Item>
+				<DropdownMenu.Item onSelect={copyDiagnostics}>Copy diagnostics</DropdownMenu.Item>
 				{#if client.canRestart(entry.pane)}
 					<DropdownMenu.Item onSelect={() => client.restart(entry.tab.id)}
 						>Restart session</DropdownMenu.Item

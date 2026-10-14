@@ -36,6 +36,15 @@ import type { ElicitationValue } from './elicitation-form';
 import { previewUrl } from './attachment-intake';
 import { chatArtifacts } from './artifacts';
 import { ChatDraft } from './chat-draft.svelte';
+import { codexTaskOutput } from './codex-helpers';
+import { settlePending, type PendingPrompt } from './pending';
+import {
+	ChatMonitor,
+	chatShape,
+	type ChatDiagnostic,
+	type ChatDiagnostics,
+	type ResyncReason
+} from './chat-diagnostics';
 
 /**
  * - `starting`: attaching to the session.
@@ -46,19 +55,7 @@ import { ChatDraft } from './chat-draft.svelte';
  */
 export type ChatStatus = 'starting' | 'live' | 'reconnecting' | 'exited' | 'failed';
 
-/** A prompt shown at once, until the agent echoes it back as a real item. */
-export interface PendingPrompt {
-	id: string;
-	text: string;
-	/** Data URLs of attached images, shown in the bubble. */
-	previews: string[];
-	/** Names of attached PDFs and text files. */
-	files: string[];
-	/** User items already in the chat when it was sent; only later ones can echo it. */
-	after: number;
-	/** Absolute index the next item had when it was sent. */
-	at: number;
-}
+export type { PendingPrompt } from './pending';
 
 /** First retry after a drop; each failed one doubles it, up to the cap. */
 const RECONNECT_MS = 1500;
@@ -214,6 +211,13 @@ export class AgentChat {
 	private attachedGeneration: number | undefined;
 	/** The server said `replaced`: the session comes back under a new process. */
 	private relaunched = false;
+	private readonly monitor: ChatMonitor;
+	/** Why the snapshot on its way was asked for; it's checked against the chat when it comes. */
+	private resyncFor: ResyncReason | null = null;
+	/** A resync the throttle held back that can't wait for the chat to be shown again. */
+	private owedResync: ReturnType<typeof setTimeout> | null = null;
+	/** A conversation rewind cut items here: updates may disagree until the relaunch's snapshot. */
+	private cut = false;
 
 	/**
 	 * `draft`: hosts that keep the composer beyond this chat pass their own.
@@ -223,6 +227,7 @@ export class AgentChat {
 	 * `pane`: the pane's process from the host's snapshot. A session that isn't
 	 * running is waited for only while the pane runs a newer spawn than the one
 	 * attached to (a restart from any device); otherwise the chat ends at once.
+	 * `report`: drift and unreadable frames, shape only (the host's Sentry).
 	 */
 	constructor(
 		body: ChatTarget,
@@ -231,12 +236,14 @@ export class AgentChat {
 			draft?: ChatDraft;
 			reconnectOnWake?: boolean;
 			pane?: () => PaneProcess | null | undefined;
+			report?: (d: ChatDiagnostic) => void;
 		} = {}
 	) {
 		this.pane = opts.pane ?? (() => null);
 		this.body = body;
 		this.api = api;
 		this.agent = body.agent ?? 'claude';
+		this.monitor = new ChatMonitor(this.agent, this.onStale, opts.report);
 		this.sessionId = body.sessionId;
 		this.accountId = body.claudeAccountId;
 		this.draft = opts.draft ?? new ChatDraft();
@@ -247,6 +254,13 @@ export class AgentChat {
 		}
 		void this.open();
 	}
+
+	/** Busy and silent for a while: ask for a snapshot, unless the quiet is the person's to end. */
+	private onStale = (): boolean => {
+		if (!this.canResync) return false;
+		if (!this.waiting) this.resync('stale');
+		return true;
+	};
 
 	private onVisibility = () => {
 		if (document.hidden) this.hiddenAt = Date.now();
@@ -300,17 +314,25 @@ export class AgentChat {
 		if (stale()) return;
 		const ws = new WebSocket(url);
 		this.ws = ws;
+		this.monitor.trace('connect', { attempt: this.reconnectAttempts });
 		ws.onmessage = (event) => {
 			if (this.ws !== ws) return; // a frame still arriving after a Restart closed it
 			try {
 				this.receive(JSON.parse(String(event.data)) as AgentServerMsg);
 			} catch (e) {
-				console.warn('[AgentChat] bad frame', e);
+				// Possibly half applied: a fresh snapshot puts it right. A parse
+				// error quotes the frame, which a console breadcrumb would carry off.
+				console.warn('[AgentChat] bad frame', e instanceof SyntaxError ? 'unparseable' : e);
+				this.monitor.frameError(e);
+				this.resync('frame-error');
 			}
 		};
 		ws.onclose = (event?: CloseEvent) => {
 			if (this.ws !== ws) return; // replaced by a Restart
+			this.monitor.trace('close', { code: event?.code ?? null });
+			this.monitor.watchBusy(false); // the next snapshot arms it again
 			this.ws = null;
+			this.resyncFor = null;
 			this.rejectControls('Connection lost');
 			this.settleRewinds();
 			if (this.status === 'exited' || this.status === 'failed') return;
@@ -340,6 +362,7 @@ export class AgentChat {
 			pane.generation > (this.attachedGeneration ?? -1);
 		if ((this.relaunched || newer) && this.reconnectAttempts < RELAUNCH_ATTEMPTS)
 			return this.scheduleReconnect();
+		this.monitor.trace('not-running', { relaunched: this.relaunched });
 		this.status = this.status === 'reconnecting' ? 'exited' : 'failed';
 		this.error = null;
 	}
@@ -351,14 +374,17 @@ export class AgentChat {
 			this.status = 'exited';
 			this.error = `Lost the connection to ${agentName(this.agent)}. Restart to try again.`;
 			this.lostConnection = true;
+			this.monitor.trace('gave-up');
 			return;
 		}
 		this.status = 'reconnecting';
 		const delay = Math.min(RECONNECT_MS * 2 ** this.reconnectAttempts++, MAX_RECONNECT_MS);
+		this.monitor.trace('retry', { delay, attempt: this.reconnectAttempts });
 		this.retryTimer = setTimeout(() => void this.connect(), delay);
 	}
 
 	receive(msg: AgentServerMsg): void {
+		this.monitor.received(msg);
 		switch (msg.t) {
 			case 'codexResult': {
 				const pending = this.controls.get(msg.requestId);
@@ -379,6 +405,15 @@ export class AgentChat {
 				this.artifactWaiters.delete(msg.id);
 				break;
 			case 'snapshot': {
+				const reason = this.resyncFor;
+				this.resyncFor = null;
+				// Only a chat that looked fine can show unexplained drift: a misaligned
+				// update or a bad frame was traced already.
+				const check = reason === 'show' || reason === 'stale' || reason === 'manual';
+				if (check && this.status === 'live' && msg.sessionId === this.sessionId)
+					this.monitor.checkDrift(reason, this.shape(), chatShape(msg.items, msg.start, msg.meta));
+				this.clearOwedResync();
+				this.cut = false;
 				const earlier = msg.sessionId === this.sessionId ? earlierItems(this.items, msg) : [];
 				// `/clear` re-keys to a new, empty transcript. The `/clear` and prompts
 				// queued after it echo only in the new one.
@@ -406,8 +441,13 @@ export class AgentChat {
 				this.settlePending();
 				break;
 			}
-			case 'update':
-				this.items = applyChanges(this.items, this.start, msg.changes);
+			case 'update': {
+				const { items, aligned } = applyChanges(this.items, this.start, msg.changes);
+				this.items = items;
+				if (!aligned && !this.cut) {
+					this.monitor.trace('misaligned');
+					this.resync('misaligned');
+				}
 				this.markSeen(
 					msg.changes.flatMap(([, i]) =>
 						i.kind === 'tool' && i.status === 'running' ? [i.id] : []
@@ -418,12 +458,14 @@ export class AgentChat {
 				this.notice = null;
 				this.settlePending();
 				break;
+			}
 			case 'exit':
 				this.rejectControls(`The ${agentName(this.agent)} session ended`);
 				this.status = 'exited';
 				this.error = msg.message;
 				this.pending = [];
 				this.busySince = null;
+				this.monitor.watchBusy(false);
 				this.ws?.close();
 				break;
 			case 'error':
@@ -461,6 +503,7 @@ export class AgentChat {
 				this.rejectControls('The connection was revoked');
 				this.status = 'exited';
 				this.error = 'The connection to Workbench was closed.';
+				this.monitor.watchBusy(false);
 				this.ws?.close();
 				break;
 		}
@@ -469,6 +512,7 @@ export class AgentChat {
 	private setMeta(meta: TranscriptMeta): void {
 		if (meta.busy && !this.meta?.busy) this.busySince = Date.now();
 		if (!meta.busy) this.busySince = null;
+		this.monitor.watchBusy(meta.busy);
 		this.markSeen(meta.tasks.map((t) => t.id));
 		this.meta = meta;
 	}
@@ -483,33 +527,14 @@ export class AgentChat {
 	/** Drop optimistic prompts the agent has echoed back. */
 	private settlePending(): void {
 		if (this.pending.length === 0) return;
-		const users = this.items.filter((i) => i.kind === 'user');
-		// The CLI collapses runs of spaces in a slash command's echo, and echoes
-		// an alias like `/design consent` as `/design-consent`.
-		const norm = (s: string) => s.replace(/[\s-]+/g, ' ');
-		// A terminal session's prompt comes back with its attachments as `@path` mentions.
-		const same = (echo: string, sent: string) =>
-			norm(echo) === norm(sent) || norm(echo).startsWith(`${norm(sent)} @`.trimStart());
-		// A command the CLI can't run headless (`/design-login`) is never echoed,
-		// only answered with a notice.
 		const idle = !this.meta?.busy;
-		const noticeSince = (at: number) =>
-			this.items.some((i, k) => i.kind === 'notice' && this.start + k >= at);
-		const previews: Record<string, string[]> = {};
-		const matched = this.echoedUsers;
-		const available = new Set(users.map((user) => user.id));
-		for (const id of matched) if (!available.has(id)) matched.delete(id);
-		this.pending = this.pending.filter((p) => {
-			const echo = users
-				.slice(p.after)
-				.find((u) => u.kind === 'user' && !matched.has(u.id) && same(u.text, p.text));
-			if (echo) matched.add(echo.id);
-			if (echo && p.previews.length > 0) previews[echo.id] = p.previews;
-			return !echo && !(idle && p.text.startsWith('/') && noticeSince(p.at));
-		});
-		if (Object.keys(previews).length > 0) {
-			this.imagePreviews = { ...this.imagePreviews, ...previews };
-		}
+		const settled = settlePending(this.pending, this.items, this.start, !idle, this.echoedUsers);
+		this.pending = settled.pending;
+		// No turn came of it (a command answered with a notice, meta unchanged):
+		// the next turn's timer mustn't count from this send.
+		if (this.pending.length === 0 && idle) this.busySince = null;
+		if (Object.keys(settled.previews).length > 0)
+			this.imagePreviews = { ...this.imagePreviews, ...settled.previews };
 	}
 
 	get title(): string {
@@ -610,6 +635,7 @@ export class AgentChat {
 		if (files.length > 0) msg.files = files;
 		if (now && this.canSendNow) msg.now = true;
 		if (!this.send(msg)) return false;
+		this.monitor.trace('prompt', { images: images.length, files: files.length, now: !!msg.now });
 		this.pending = [
 			...this.pending,
 			{
@@ -791,26 +817,7 @@ export class AgentChat {
 	taskOutput(taskId: string): Promise<TaskOutput | null> {
 		if (this.agent === 'codex')
 			return this.codexAction('inspect', { section: 'task', threadId: taskId })
-				.then((result) => {
-					const entries = (
-						result as {
-							data: {
-								item: { text?: string; aggregatedOutput?: string; content?: { text?: string }[] };
-							}[];
-						}
-					).data;
-					const text = [...(entries ?? [])]
-						.reverse()
-						.flatMap(({ item }) =>
-							item.text
-								? [item.text]
-								: item.aggregatedOutput
-									? [item.aggregatedOutput]
-									: (item.content ?? []).flatMap((c) => (c.text ? [c.text] : []))
-						)
-						.join('\n\n');
-					return { text: text.slice(-65536), bytes: new TextEncoder().encode(text).length };
-				})
+				.then(codexTaskOutput)
 				.catch(() => null);
 		return new Promise((resolve) => {
 			if (!this.send({ t: 'taskOutput', taskId })) return resolve(null);
@@ -870,7 +877,10 @@ export class AgentChat {
 		this.rewind = null;
 		if (!conversation) return null;
 		const at = this.items.findIndex((i) => i.id === open.messageId);
-		if (at >= 0) this.items = this.items.slice(0, at);
+		if (at >= 0) {
+			this.items = this.items.slice(0, at);
+			this.cut = true;
+		}
 		return open.text;
 	}
 
@@ -909,14 +919,57 @@ export class AgentChat {
 	/**
 	 * Ask for a fresh snapshot when the chat is shown again, so a view that
 	 * drifted from the server (a turn shown as still thinking, subagents
-	 * missing) is put right. Same socket: nothing in flight is dropped. Only a
-	 * live chat on a server that offers it, and at most every few seconds.
+	 * missing) is put right; the snapshot is compared with the chat and any
+	 * drift reported. Same socket: nothing in flight is dropped. Only a live
+	 * chat on a server that offers it, and at most every few seconds.
 	 */
-	resync(): void {
+	resync(reason: ResyncReason = 'show'): void {
 		if (!this.canResync || this.status !== 'live' || this.ws?.readyState !== WebSocket.OPEN) return;
-		if (Date.now() - this.resyncedAt < RESYNC_MIN_MS) return;
+		const wait = this.resyncedAt + RESYNC_MIN_MS - Date.now();
+		if (reason !== 'manual' && wait > 0) {
+			// Drift seen on the socket can't wait for the chat to be shown again.
+			if ((reason === 'misaligned' || reason === 'frame-error') && !this.owedResync)
+				this.owedResync = setTimeout(() => {
+					this.owedResync = null;
+					this.resync(reason);
+				}, wait);
+			return;
+		}
+		this.clearOwedResync();
 		this.resyncedAt = Date.now();
-		this.send({ t: 'resync' });
+		this.monitor.trace(`resync:${reason}`);
+		if (this.send({ t: 'resync' })) this.resyncFor = reason;
+	}
+
+	/** The menu's "Resync now": a fresh snapshot, or a re-attach on a server without resync. */
+	resyncNow(): void {
+		if (this.canResync && this.status === 'live' && this.ws?.readyState === WebSocket.OPEN)
+			this.resync('manual');
+		else this.reattach();
+	}
+
+	private clearOwedResync(): void {
+		if (this.owedResync) clearTimeout(this.owedResync);
+		this.owedResync = null;
+	}
+
+	private shape() {
+		return chatShape(this.items, this.start, this.meta);
+	}
+
+	diagnostics(): ChatDiagnostics {
+		const since = this.busySince;
+		return this.monitor.describe({
+			...this.shape(),
+			status: this.status,
+			canResync: this.canResync,
+			start: this.start,
+			items: this.items.length,
+			historyItems: this.historyItems.length,
+			pending: this.pending.length,
+			busyForMs: since === null ? null : Date.now() - since,
+			tasks: this.meta?.tasks.length ?? 0
+		});
 	}
 
 	private reattach(): void {
@@ -932,6 +985,7 @@ export class AgentChat {
 		if (old) {
 			old.onclose = null;
 			old.close();
+			this.monitor.watchBusy(false);
 			// No reply comes over the old socket now.
 			this.rejectControls('Connection lost');
 			this.settleRewinds();
@@ -943,6 +997,8 @@ export class AgentChat {
 	dispose(): void {
 		this.rejectControls('Chat closed');
 		this.disposed = true;
+		this.monitor.dispose();
+		this.clearOwedResync();
 		if (this.reconnectOnWake) document.removeEventListener('visibilitychange', this.onVisibility);
 		if (this.retryTimer) clearTimeout(this.retryTimer);
 		this.ws?.close();

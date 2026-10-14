@@ -13,6 +13,12 @@ export {
 export { agentClient, type AgentApi, type AgentClient } from './agent-api.ts';
 export { useAccountPlanUsage } from './plan-usage.svelte.ts';
 export { setChatPlatform, type ChatPlatform } from './platform.ts';
+export {
+	throttled,
+	type ChatDiagnostic,
+	type ChatDiagnostics,
+	type TraceEntry
+} from './chat-diagnostics.ts';
 export { followLatest } from './follow-latest.ts';
 export * from './chat-format.ts';
 export * from './usage-format.ts';
