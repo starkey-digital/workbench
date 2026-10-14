@@ -102,7 +102,11 @@ export interface RewindState {
 
 type RewindReply = Extract<AgentServerMsg, { t: 'rewind' }>;
 
-/** One chat view's connection to its Claude or Codex session on a Workbench server. */
+/**
+ * One chat view's connection to its Claude or Codex session on a Workbench server.
+ * Its deriveds belong to the effect it's made in: one kept past that view's
+ * life must be made with `owned`.
+ */
 export class AgentChat {
 	readonly agent: AgentKind;
 	items = $state.raw<TranscriptItem[]>([]);

@@ -1,5 +1,5 @@
 import type { ChatTarget } from '$types/workbench';
-import { AgentChat, ChatDraft, type PaneProcess } from '@workbench/chat-ui';
+import { AgentChat, ChatDraft, owned, type PaneProcess } from '@workbench/chat-ui';
 import { loopbackAgentApi } from './agent-api';
 
 /**
@@ -9,15 +9,23 @@ import { loopbackAgentApi } from './agent-api';
  * Released when the pane goes back to the terminal or leaves the snapshot.
  * Every chat only attaches: the server's workspace service runs the session.
  */
+// eslint-disable-next-line svelte/prefer-svelte-reactivity -- a cache: views must not re-run as chats come and go
 const chats = new Map<
 	string,
-	{ chat: AgentChat; generation: number | undefined; pane: Partial<PaneProcess> }
+	{
+		chat: AgentChat;
+		/** Ends the reactive root the chat's deriveds belong to. */
+		destroy: () => void;
+		generation: number | undefined;
+		pane: Partial<PaneProcess>;
+	}
 >();
 /**
  * Composer drafts by pane. They outlive the chat (Terminal | Chat toggles
  * release it); an emptied one is dropped on release, so a closed pane leaves
  * at most its unsent draft in memory until the app restarts.
  */
+// eslint-disable-next-line svelte/prefer-svelte-reactivity -- a cache, like `chats`
 const drafts = new Map<string, ChatDraft>();
 
 /**
@@ -35,11 +43,15 @@ export function acquireChat(
 		followPane(paneId, pane);
 		return { chat: existing.chat, created: false };
 	}
-	existing?.chat.dispose();
+	if (existing) drop(existing);
 	let draft = drafts.get(paneId);
-	if (!draft) drafts.set(paneId, (draft = new ChatDraft()));
-	const chat = new AgentChat(body, loopbackAgentApi, { draft, pane: () => processOf(paneId) });
-	chats.set(paneId, { chat, generation: pane.generation, pane });
+	// Owned by nothing that unmounts: it outlives views and chats alike.
+	if (!draft) drafts.set(paneId, (draft = owned(() => new ChatDraft())[0]));
+	// Its own root: it outlives the `SessionChat` that first asks for it.
+	const [chat, destroy] = owned(
+		() => new AgentChat(body, loopbackAgentApi, { draft, pane: () => processOf(paneId) })
+	);
+	chats.set(paneId, { chat, destroy, generation: pane.generation, pane });
 	return { chat, created: true };
 }
 
@@ -66,8 +78,14 @@ function processOf(paneId: string): PaneProcess | null {
 	return status && generation !== undefined ? { status, generation } : null;
 }
 
+function drop(entry: { chat: AgentChat; destroy: () => void }): void {
+	entry.chat.dispose();
+	entry.destroy();
+}
+
 export function releaseChat(paneId: string): void {
-	chats.get(paneId)?.chat.dispose();
+	const entry = chats.get(paneId);
+	if (entry) drop(entry);
 	chats.delete(paneId);
 	const draft = drafts.get(paneId);
 	if (draft && !draft.text && draft.images.length === 0 && draft.files.length === 0)

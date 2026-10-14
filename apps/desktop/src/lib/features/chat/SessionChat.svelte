@@ -33,7 +33,7 @@
 	import PRStatusBadge from '$features/projects/PRStatusBadge.svelte';
 	import { openUrl } from '$lib/utils/open-url';
 	import { planUsage } from './agent-api';
-	import { acquireChat, followPane } from './chat-registry';
+	import { acquireChat, followPane } from './chat-registry.svelte';
 	import { desktopChatPlatform } from './chat-platform';
 	import ChatResumePicker from './ChatResumePicker.svelte';
 	import PanelResizeHandle from './PanelResizeHandle.svelte';

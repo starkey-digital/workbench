@@ -7,6 +7,7 @@ const created: {
 	dispose: ReturnType<typeof vi.fn>;
 	attach: ReturnType<typeof vi.fn>;
 }[] = [];
+const destroyed: unknown[] = [];
 vi.mock('./agent-api', () => ({ loopbackAgentApi: {} }));
 vi.mock('@workbench/chat-ui', () => ({
 	AgentChat: class {
@@ -29,6 +30,10 @@ vi.mock('@workbench/chat-ui', () => ({
 			created.push(this);
 		}
 	},
+	owned: <T>(make: () => T) => {
+		const value = make();
+		return [value, () => destroyed.push(value)];
+	},
 	ChatDraft: class {
 		text = '';
 		images: unknown[] = [];
@@ -36,13 +41,14 @@ vi.mock('@workbench/chat-ui', () => ({
 	}
 }));
 
-const { acquireChat, followPane, releaseChat } = await import('./chat-registry');
+const { acquireChat, followPane, releaseChat } = await import('./chat-registry.svelte');
 const body = (sessionId: string) => ({ projectPath: '/repo', sessionId, paneId: 'p1' });
 
 describe('chat registry', () => {
 	afterEach(() => {
 		releaseChat('p1');
 		created.length = 0;
+		destroyed.length = 0;
 	});
 
 	it('keeps one chat per pane across remounts', () => {
@@ -58,6 +64,7 @@ describe('chat registry', () => {
 		const next = acquireChat('p1', body('s2')).chat;
 		expect(next).not.toBe(first);
 		expect(created[0].dispose).toHaveBeenCalled();
+		expect(destroyed).toContain(first);
 	});
 
 	it('follows a /clear re-key: the chat moved to the id its pane now shows', () => {
@@ -103,5 +110,6 @@ describe('chat registry', () => {
 		acquireChat('p1', body('s1'));
 		releaseChat('p1');
 		expect(created[0].dispose).toHaveBeenCalled();
+		expect(destroyed).toContain(created[0]);
 	});
 });
