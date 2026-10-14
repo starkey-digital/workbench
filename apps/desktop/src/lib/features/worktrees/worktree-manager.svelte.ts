@@ -109,10 +109,12 @@ export class WorktreeManagerStore {
 		}
 	}
 
-	open(projectPath: string, worktreePath: string, branch: string) {
+	/** Resolves to the opened workspace's id once the server has applied it. */
+	async open(projectPath: string, worktreePath: string, branch: string): Promise<string | null> {
 		const project = this.projectStore.getByPath(projectPath);
-		if (!project) return;
-		this.workspaceStore.openWorktree(project, worktreePath, branch);
+		if (!project) return null;
+		const result = await this.workspaceStore.openWorktree(project, worktreePath, branch);
+		return result?.workspaceId ?? null;
 	}
 
 	remove(projectPath: string, worktreePath: string, branch: string) {

@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { isAISessionType, type TerminalPaneState } from '$types/workbench';
-	import { getWorkspaceStore } from '$stores/context';
+	import { getClaudeSessionStore, getWorkspaceStore } from '$stores/context';
 
 	let { pane, tabId, cwd }: { pane: TerminalPaneState; tabId: string; cwd: string } = $props();
 
 	const workspaceStore = getWorkspaceStore();
+	const claudeSessionStore = getClaudeSessionStore();
 	const ai = $derived(isAISessionType(pane.type));
 	const name = $derived(
 		pane.type === 'codex' ? 'Codex' : pane.type === 'claude' ? 'Claude' : 'Shell'
@@ -32,7 +33,7 @@
 				<button
 					type="button"
 					class="mt-1 rounded bg-white/10 px-3 py-1 text-xs text-wb-ink hover:bg-white/20"
-					onclick={() => workspaceStore.restartAISession('', tabId)}
+					onclick={() => claudeSessionStore.restartSession('', tabId, pane.type)}
 				>
 					Restart
 				</button>

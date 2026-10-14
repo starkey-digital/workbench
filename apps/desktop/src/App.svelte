@@ -59,6 +59,7 @@
 	import { effectivePath } from '$lib/utils/path';
 	import { watch } from 'runed';
 	import { Toaster, toast } from 'svelte-sonner';
+	import { attempt } from '$lib/utils/attempt';
 
 	const workbenchSettingsStore = setWorkbenchSettingsStore(new WorkbenchSettingsStore());
 	const gitStore = setGitStore(new GitStore());
@@ -113,11 +114,17 @@
 
 	// The settings window persists changes to disk in its own webview; reload the
 	// live-bound stores here so accent, sidebar toggles, and integrations update.
-	listen('settings:changed', async () => {
-		await workbenchSettingsStore.load();
+	listen('settings:changed', () => {
+		void attempt('reload settings', async () => {
+			await workbenchSettingsStore.load();
+			await loadTrello();
+		});
+	});
+
+	async function loadTrello() {
 		await trelloStore.loadCredentials();
 		await Promise.all(projectStore.projects.map((p) => trelloStore.loadProjectConfig(p.path)));
-	});
+	}
 
 	// Apply selected accent preset to the document root (drives CSS-var presets).
 	// watch() tracks only accentColor and runs the DOM write untracked.
@@ -130,7 +137,10 @@
 	watch(
 		() => claudeSessionStore.panesAwaitingInput.size,
 		(count) => {
-			getCurrentWindow().setBadgeCount(count > 0 ? count : undefined);
+			// Unsupported (and rejected) on Windows: the badge is best-effort.
+			getCurrentWindow()
+				.setBadgeCount(count > 0 ? count : undefined)
+				.catch(() => {});
 		}
 	);
 
@@ -196,7 +206,11 @@
 
 	onMount(async () => {
 		instancesStore.load();
-		await Promise.all([workbenchSettingsStore.load(), projectStore.load()]);
+		// A failed step is shown and boot goes on: the workspaces must still load.
+		await Promise.all([
+			attempt('load settings', () => workbenchSettingsStore.load()),
+			attempt('load projects', () => projectStore.load())
+		]);
 		await workspaceStore.load();
 		// Not while the model isn't saved: an empty model there may hide the person's tabs.
 		if (
@@ -207,10 +221,9 @@
 			void projectStore.openProject(projectStore.projects[0].path);
 		}
 		gitStore.refreshAll(projectStore.projects.map((p) => p.path));
-		githubStore.initForProjects(projectStore.projects.map((p) => p.path));
-		githubStore.initSidebarState();
-		await trelloStore.loadCredentials();
-		await Promise.all(projectStore.projects.map((p) => trelloStore.loadProjectConfig(p.path)));
+		void githubStore.initForProjects(projectStore.projects.map((p) => p.path));
+		void githubStore.initSidebarState();
+		await attempt('load Trello', loadTrello);
 		if (workbenchSettingsStore.serverMode) {
 			try {
 				await startServer(

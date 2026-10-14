@@ -183,9 +183,9 @@
 
 		<ClaudeSessionMenu
 			type="claude"
+			cwd={wsCwd}
 			onResume={(sessionId, label) =>
 				claudeSessionStore.resumeSession(workspace.id, sessionId, label)}
-			onOpen={() => claudeSessionStore.discoverSessions(wsCwd)}
 		/>
 
 		<Tooltip.Root>
@@ -209,9 +209,9 @@
 
 		<ClaudeSessionMenu
 			type="codex"
+			cwd={wsCwd}
 			onResume={(sessionId, label) =>
 				claudeSessionStore.resumeSession(workspace.id, sessionId, label, 'codex')}
-			onOpen={() => claudeSessionStore.discoverCodexSessions(wsCwd)}
 		/>
 
 		{#if !nativeMode}

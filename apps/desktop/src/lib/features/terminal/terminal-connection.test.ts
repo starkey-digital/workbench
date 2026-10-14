@@ -352,20 +352,31 @@ describe('TerminalConnection', () => {
 	});
 
 	describe('WS close', () => {
-		it('fires onExit with reason ended when the socket closes', async () => {
-			const { ws, onExit } = await connectAndOpen();
-
-			ws.closeWs();
-
-			expect(onExit).toHaveBeenCalledWith({ reason: 'ended' });
+		it('ends the pane when the attach never opened', async () => {
+			const { TerminalConnection } = await import('./terminal-connection');
+			const onExit = vi.fn();
+			const conn = new TerminalConnection('t-1', vi.fn(), onExit);
+			mockServerRunning();
+			const p = conn.connect(80, 24).catch(() => {});
+			await flushMicrotasks();
+			FakeWebSocket._last!.onerror?.(new Event('error'));
+			FakeWebSocket._last!.closeWs(1006);
+			await p;
+			expect(onExit).toHaveBeenCalledExactlyOnceWith({ reason: 'ended' });
 		});
 
-		it('fires onExit even without an explicit exit frame', async () => {
+		it('reports a drop with no frame as dropped, never re-attaching by itself', async () => {
+			const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 			const { ws, onExit } = await connectAndOpen();
-			// Close without any preceding exit text frame.
-			ws.closeWs(1001, 'going away');
+			ws.closeWs(1006, 'gone');
 
-			expect(onExit).toHaveBeenCalledTimes(1);
+			expect(onExit).toHaveBeenCalledExactlyOnceWith({ reason: 'dropped' });
+			expect(warn).toHaveBeenCalledWith('[TerminalConnection] socket dropped', {
+				code: 1006,
+				reason: 'gone',
+				wasClean: undefined
+			});
+			expect(FakeWebSocket._last).toBe(ws);
 		});
 	});
 

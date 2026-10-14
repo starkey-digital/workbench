@@ -674,15 +674,14 @@ describe('GitHubStore', () => {
 	// ─── initForProjects ──────────────────────────────────────
 
 	describe('initForProjects', () => {
-		it('checks gh availability then configures backend polling', async () => {
+		it('checks gh availability, polls only tracked projects, and fetches every one once', async () => {
 			mockInvoke('github_is_available', () => true);
 
 			await store.initForProjects(['/project-a', '/project-b']);
 
 			expect(invokeSpy).toHaveBeenCalledWith('github_is_available');
-			expect(invokeSpy).toHaveBeenCalledWith('github_set_tracked_projects', {
-				projectPaths: ['/project-a', '/project-b']
-			});
+			// No project has a session: nothing to poll.
+			expect(invokeSpy).not.toHaveBeenCalledWith('github_set_tracked_projects', expect.anything());
 			expect(invokeSpy).toHaveBeenCalledWith('github_refresh_project', {
 				projectPath: '/project-a'
 			});

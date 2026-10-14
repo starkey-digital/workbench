@@ -17,7 +17,14 @@ async function ensureExitListener(): Promise<void> {
 		const sessionListeners = exitSessionListeners.get(event.payload.sessionId);
 		if (!sessionListeners) return;
 		for (const cb of sessionListeners) cb(event.payload);
-	}).then(() => undefined);
+	}).then(
+		() => undefined,
+		(e) => {
+			// Not cached: the next pane tries again rather than never hearing an exit.
+			exitListenerReady = null;
+			throw e;
+		}
+	);
 	return exitListenerReady;
 }
 

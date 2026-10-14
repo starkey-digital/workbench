@@ -31,19 +31,28 @@ export class NotificationStore {
 	private native = false;
 	/** Plugin path only: whether permission was granted. */
 	private enabled = false;
-	/** Awaited before notifying, so early events don't race the probe. */
-	private ready: Promise<void>;
+	/**
+	 * Every post and withdrawal runs in arrival order after the probe: a
+	 * withdrawal must never overtake the post it takes down, or that banner stays.
+	 */
+	private queue: Promise<void>;
 	private workspaces: WorkspaceStore;
 	/** Plugin path only: notification id (numeric hash) → paneId for click routing. */
 	private idToPane = new SvelteMap<number, string>();
 
 	constructor(workspaces: WorkspaceStore, sessions: ClaudeSessionStore) {
 		this.workspaces = workspaces;
-		this.ready = this.init();
+		this.queue = this.init();
 
 		sessions.onAttention((target, kind) => {
-			if (kind === 'resolved') void this.withdraw(target);
-			else void this.notify(target, ATTENTION_TEXT[kind]);
+			if (kind === 'resolved') this.enqueue(() => this.withdraw(target));
+			else this.enqueue(() => this.notify(target, ATTENTION_TEXT[kind]));
+		});
+	}
+
+	private enqueue(op: () => Promise<void>): void {
+		this.queue = this.queue.then(op).catch((e) => {
+			console.warn('[NotificationStore] Notification update failed:', e);
 		});
 	}
 
@@ -125,7 +134,6 @@ export class NotificationStore {
 	 * BSDs, and only notifications shown while an `onAction` listener exists.
 	 */
 	private async withdraw(target: AttentionTarget): Promise<void> {
-		await this.ready;
 		if (!this.native) return;
 		// Posted under the pane, or under the session while no pane showed it.
 		const ids = 'paneId' in target ? [target.paneId, target.sessionId] : [target.id];
@@ -139,7 +147,6 @@ export class NotificationStore {
 	}
 
 	private async notify(target: AttentionTarget, message: string): Promise<void> {
-		await this.ready;
 		// A session no pane shows here (started on the phone) is routed by its id;
 		// a click on it just brings the window forward.
 		const paneId = targetId(target);
