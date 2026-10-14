@@ -74,20 +74,89 @@ describe('ClaudeSessionStore', () => {
 	});
 
 	describe('discoverSessions', () => {
-		it('returns sessions and sets discoveredSessions state', async () => {
-			const sessions: DiscoveredClaudeSession[] = [
-				{ sessionId: 'sess-1', label: 'First session', timestamp: '2025-01-01T00:00:00Z' },
-				{ sessionId: 'sess-2', label: 'Second session', timestamp: '2025-01-02T00:00:00Z' }
-			];
-			mockInvoke('discover_claude_sessions', () => sessions);
+		const at = (sessionId: string, timestamp: string, accountId?: string) => ({
+			sessionId,
+			label: sessionId,
+			timestamp,
+			...(accountId && { accountId })
+		});
 
-			const result = await store.discoverSessions('/projects/test');
+		it('keeps a resume list per agent and cwd', async () => {
+			mockInvoke('discover_claude_sessions', (args) =>
+				(args as { projectPath: string }).projectPath === '/a'
+					? [at('a-1', '2025-01-01T00:00:00Z')]
+					: [at('b-1', '2025-01-01T00:00:00Z')]
+			);
+			mockInvoke('discover_codex_sessions', () => [at('c-1', '2025-01-01T00:00:00Z')]);
 
-			expect(invokeSpy).toHaveBeenCalledWith('discover_claude_sessions', {
-				projectPath: '/projects/test'
-			});
-			expect(result).toEqual(sessions);
-			expect(store.discoveredSessions).toEqual(sessions);
+			const result = await store.discoverSessions('/a');
+			await store.discoverSessions('/b');
+			await store.discoverSessions('/a', 'codex');
+
+			expect(invokeSpy).toHaveBeenCalledWith('discover_claude_sessions', { projectPath: '/a' });
+			expect(result.map((s) => s.sessionId)).toEqual(['a-1']);
+			expect(store.discoveredFor('/a').map((s) => s.sessionId)).toEqual(['a-1']);
+			expect(store.discoveredFor('/b').map((s) => s.sessionId)).toEqual(['b-1']);
+			expect(store.discoveredFor('/a', 'codex').map((s) => s.sessionId)).toEqual(['c-1']);
+		});
+
+		it('keeps the newest scan when an older one finishes last', async () => {
+			let release: (v: DiscoveredClaudeSession[]) => void = () => {};
+			mockInvoke('discover_claude_sessions', () => new Promise((r) => (release = r)));
+			const first = store.discoverSessions('/a');
+			const releaseFirst = release;
+			const second = store.discoverSessions('/a');
+			release([at('new', '2025-01-02T00:00:00Z')]);
+			await second;
+			releaseFirst([at('old', '2025-01-01T00:00:00Z')]);
+			await first;
+
+			expect(store.discoveredFor('/a').map((s) => s.sessionId)).toEqual(['new']);
+		});
+
+		it('lists a session id once, the newest copy', async () => {
+			mockInvoke('discover_claude_sessions', () => [
+				at('dup', '2025-01-01T00:00:00Z', 'old'),
+				at('one', '2025-01-01T00:00:00Z'),
+				at('dup', '2025-01-03T00:00:00Z', 'new')
+			]);
+
+			await store.discoverSessions('/a');
+
+			expect(store.discoveredFor('/a')).toEqual([
+				at('one', '2025-01-01T00:00:00Z'),
+				at('dup', '2025-01-03T00:00:00Z', 'new')
+			]);
+		});
+
+		it("resumes with the account from the workspace's own list", async () => {
+			mockWorkspaceStore = createMockWorkspaceStore([
+				{ id: 'ws-a', projectPath: '/a', terminalTabs: [] },
+				{ id: 'ws-b', projectPath: '/b', terminalTabs: [] }
+			]);
+			Object.assign(mockWorkspaceStore, { resumeAISession: vi.fn(async () => null) });
+			store = new ClaudeSessionStore(
+				mockWorkspaceStore,
+				mockProjectStore,
+				mockIntegrationApprovalStore
+			);
+			mockInvoke('discover_claude_sessions', (args) =>
+				(args as { projectPath: string }).projectPath === '/a'
+					? [at('s', '2025-01-01T00:00:00Z', 'acct-a')]
+					: [at('s', '2025-01-01T00:00:00Z', 'acct-b')]
+			);
+			await store.discoverSessions('/a');
+			await store.discoverSessions('/b');
+
+			await store.resumeSession('ws-a', 's', 'label');
+
+			expect(mockWorkspaceStore.resumeAISession).toHaveBeenCalledWith(
+				'ws-a',
+				's',
+				'label',
+				'claude',
+				'acct-a'
+			);
 		});
 
 		it('handles invoke failure gracefully', async () => {
@@ -108,46 +177,36 @@ describe('ClaudeSessionStore', () => {
 	});
 
 	describe('removeDiscoveredSession', () => {
-		it('filters claude sessions by default', () => {
-			store.discoveredSessions = [
-				{ sessionId: 'sess-1', label: 'First', timestamp: '2025-01-01T00:00:00Z' },
-				{ sessionId: 'sess-2', label: 'Second', timestamp: '2025-01-02T00:00:00Z' }
-			];
-
-			store.removeDiscoveredSession('sess-1');
-
-			expect(store.discoveredSessions).toEqual([
-				{ sessionId: 'sess-2', label: 'Second', timestamp: '2025-01-02T00:00:00Z' }
-			]);
+		it('stays removed when a scan that started before it finishes', async () => {
+			let answer: (v: DiscoveredClaudeSession[]) => void = () => {};
+			const s1 = { sessionId: 's-1', label: 'One', timestamp: '2025-01-01T00:00:00Z' };
+			mockInvoke('discover_claude_sessions', () => [s1]);
+			await store.discoverSessions('/a');
+			mockInvoke('discover_claude_sessions', () => new Promise((r) => (answer = r)));
+			const scan = store.discoverSessions('/a');
+			store.removeDiscoveredSession('/a', 's-1');
+			answer([s1]);
+			await scan;
+			expect(store.discoveredFor('/a')).toEqual([]);
 		});
 
-		it('filters codex sessions when type is codex', () => {
-			store.discoveredCodexSessions = [
-				{ sessionId: 'codex-1', label: 'Codex 1', timestamp: '2025-01-01T00:00:00Z' },
-				{ sessionId: 'codex-2', label: 'Codex 2', timestamp: '2025-01-02T00:00:00Z' }
-			];
-
-			store.removeDiscoveredSession('codex-1', 'codex');
-
-			expect(store.discoveredCodexSessions).toEqual([
-				{ sessionId: 'codex-2', label: 'Codex 2', timestamp: '2025-01-02T00:00:00Z' }
+		it('removes from that cwd and agent only', async () => {
+			mockInvoke('discover_claude_sessions', () => [
+				{ sessionId: 's-1', label: 'One', timestamp: '2025-01-01T00:00:00Z' },
+				{ sessionId: 's-2', label: 'Two', timestamp: '2025-01-02T00:00:00Z' }
 			]);
-		});
-
-		it('does not modify codex sessions when filtering claude sessions', () => {
-			store.discoveredSessions = [
-				{ sessionId: 'sess-1', label: 'Claude', timestamp: '2025-01-01T00:00:00Z' }
-			];
-			store.discoveredCodexSessions = [
-				{ sessionId: 'codex-1', label: 'Codex', timestamp: '2025-01-01T00:00:00Z' }
-			];
-
-			store.removeDiscoveredSession('sess-1');
-
-			expect(store.discoveredSessions).toEqual([]);
-			expect(store.discoveredCodexSessions).toEqual([
-				{ sessionId: 'codex-1', label: 'Codex', timestamp: '2025-01-01T00:00:00Z' }
+			mockInvoke('discover_codex_sessions', () => [
+				{ sessionId: 's-1', label: 'Codex', timestamp: '2025-01-01T00:00:00Z' }
 			]);
+			await store.discoverSessions('/a');
+			await store.discoverSessions('/b');
+			await store.discoverSessions('/a', 'codex');
+
+			store.removeDiscoveredSession('/a', 's-1');
+
+			expect(store.discoveredFor('/a').map((s) => s.sessionId)).toEqual(['s-2']);
+			expect(store.discoveredFor('/b').map((s) => s.sessionId)).toEqual(['s-1', 's-2']);
+			expect(store.discoveredFor('/a', 'codex').map((s) => s.sessionId)).toEqual(['s-1']);
 		});
 	});
 
@@ -565,39 +624,6 @@ describe('ClaudeSessionStore', () => {
 			await new Promise((r) => setTimeout(r, 0));
 
 			expect(mockWorkspaceStore.renameTab).not.toHaveBeenCalled();
-		});
-	});
-
-	describe('discoverCodexSessions', () => {
-		it('returns sessions and sets discoveredCodexSessions state', async () => {
-			const sessions: DiscoveredClaudeSession[] = [
-				{ sessionId: 'codex-1', label: 'Codex session', timestamp: '2025-01-01T00:00:00Z' }
-			];
-			mockInvoke('discover_codex_sessions', () => sessions);
-
-			const result = await store.discoverCodexSessions('/projects/test');
-
-			expect(invokeSpy).toHaveBeenCalledWith('discover_codex_sessions', {
-				projectPath: '/projects/test'
-			});
-			expect(result).toEqual(sessions);
-			expect(store.discoveredCodexSessions).toEqual(sessions);
-		});
-
-		it('handles invoke failure gracefully', async () => {
-			const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-			mockInvoke('discover_codex_sessions', () => {
-				throw new Error('codex discovery failed');
-			});
-
-			const result = await store.discoverCodexSessions('/projects/test');
-
-			expect(result).toEqual([]);
-			expect(errorSpy).toHaveBeenCalledWith(
-				'[ClaudeSessionStore] Failed to discover codex sessions:',
-				expect.any(Error)
-			);
-			errorSpy.mockRestore();
 		});
 	});
 });

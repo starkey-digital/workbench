@@ -10,6 +10,7 @@ import {
 	type DiscoveredClaudeSession,
 	type SessionType
 } from '$types/workbench';
+import { effectivePath } from '$lib/utils/path';
 import type { IntegrationApprovalStore } from './integration-approval.svelte';
 import type { WorkspaceStore } from './workspaces.svelte';
 import type { ProjectStore } from './projects.svelte';
@@ -22,6 +23,18 @@ const MAX_LABEL_DISCOVERY_ATTEMPTS = 6;
 export type AttentionTarget =
 	{ paneId: string; sessionId: string } | { id: string; projectPath: string; label: string };
 
+const discoveryKey = (cwd: string, type: 'claude' | 'codex') => `${type}:${cwd}`;
+
+/** One entry per session id, the newest: discovery can list an id twice (two account dirs). */
+export function uniqueSessions(sessions: DiscoveredClaudeSession[]): DiscoveredClaudeSession[] {
+	const newest: Record<string, DiscoveredClaudeSession> = {};
+	for (const s of sessions) {
+		const kept = newest[s.sessionId];
+		if (!kept || Date.parse(s.timestamp) > Date.parse(kept.timestamp)) newest[s.sessionId] = s;
+	}
+	return sessions.filter((s) => newest[s.sessionId] === s);
+}
+
 export class ClaudeSessionStore {
 	/** AI panes mid-turn and not waiting on anyone (the server's runtime state). */
 	readonly panesInProgress: ReadonlySet<string> = $derived(
@@ -33,11 +46,10 @@ export class ClaudeSessionStore {
 		new SvelteSet(this.aiPanes().flatMap((p) => (p.waiting ? [p.id] : [])))
 	);
 
-	/** Cached discovered Claude sessions for the current project */
-	discoveredSessions: DiscoveredClaudeSession[] = $state([]);
-
-	/** Cached discovered Codex sessions for the current project */
-	discoveredCodexSessions: DiscoveredClaudeSession[] = $state([]);
+	/** Resume lists by agent and cwd: every workspace's landing page and menu shows its own. */
+	private discovered: Record<string, DiscoveredClaudeSession[]> = $state({});
+	/** The latest discovery per list, so an older scan finishing last can't replace a newer one. */
+	private discoveryRuns: Record<string, number> = {};
 
 	/** Latest Codex session ID observed for each pane from notify events */
 	private latestCodexSessionByPane = new SvelteMap<string, string>();
@@ -109,25 +121,35 @@ export class ClaudeSessionStore {
 		return result;
 	});
 
-	/** Read Claude CLI session files from ~/.claude/projects/ (the resume list). */
-	async discoverSessions(projectPath: string): Promise<DiscoveredClaudeSession[]> {
-		return (this.discoveredSessions = await this.peekSessions(projectPath, 'claude'));
+	/** The resume list last discovered for `cwd`. */
+	discoveredFor(cwd: string, type: 'claude' | 'codex' = 'claude'): DiscoveredClaudeSession[] {
+		return this.discovered[discoveryKey(cwd, type)] ?? [];
 	}
 
-	/** Read Codex session files from ~/.codex/sessions/ filtered by cwd (the resume list). */
-	async discoverCodexSessions(projectPath: string): Promise<DiscoveredClaudeSession[]> {
-		return (this.discoveredCodexSessions = await this.peekSessions(projectPath, 'codex'));
+	/** Re-read the resume list for `cwd` (Claude: ~/.claude/projects/, Codex: ~/.codex/sessions/). */
+	async discoverSessions(
+		cwd: string,
+		type: 'claude' | 'codex' = 'claude'
+	): Promise<DiscoveredClaudeSession[]> {
+		const key = discoveryKey(cwd, type);
+		const run = (this.discoveryRuns[key] ?? 0) + 1;
+		this.discoveryRuns[key] = run;
+		const sessions = uniqueSessions(await this.peekSessions(cwd, type));
+		if (this.discoveryRuns[key] === run) this.discovered[key] = sessions;
+		return sessions;
 	}
 
-	/** Remove a session from the discovered list (does not delete the JSONL file) */
-	removeDiscoveredSession(sessionId: string, type: SessionType = 'claude'): void {
-		if (type === 'codex') {
-			this.discoveredCodexSessions = this.discoveredCodexSessions.filter(
-				(s) => s.sessionId !== sessionId
-			);
-		} else {
-			this.discoveredSessions = this.discoveredSessions.filter((s) => s.sessionId !== sessionId);
-		}
+	/** Remove a session from a resume list (does not delete the JSONL file) */
+	removeDiscoveredSession(
+		cwd: string,
+		sessionId: string,
+		type: 'claude' | 'codex' = 'claude'
+	): void {
+		const key = discoveryKey(cwd, type);
+		// A scan still running would list it again: let its answer go.
+		this.discoveryRuns[key] = (this.discoveryRuns[key] ?? 0) + 1;
+		const list = this.discovered[key];
+		if (list) this.discovered[key] = list.filter((s) => s.sessionId !== sessionId);
 	}
 
 	/** Start a new AI session in a workspace. */
@@ -165,9 +187,10 @@ export class ClaudeSessionStore {
 		type: 'claude' | 'codex' = 'claude'
 	) {
 		if (!(await this.integrationApproval.ensureIntegration(type))) return;
+		const ws = this.workspaces.workspaces.find((w) => w.id === workspaceId);
 		const accountId =
-			type === 'claude'
-				? this.discoveredSessions.find((s) => s.sessionId === sessionId)?.accountId
+			type === 'claude' && ws
+				? this.discoveredFor(effectivePath(ws)).find((s) => s.sessionId === sessionId)?.accountId
 				: undefined;
 		await this.workspaces.resumeAISession(workspaceId, sessionId, label, type, accountId);
 	}
@@ -284,9 +307,7 @@ export class ClaudeSessionStore {
 		const ctx = this.workspaces.findAIPaneContext(paneId, type);
 		if (!ctx) return;
 
-		// Read-only lookup: `discoverSessions` also overwrites the store-wide resume
-		// list, which a retry loop would yank out from under another project's landing
-		// page. Label sync must not have that side effect.
+		// Read-only lookup: `discoverSessions` would also replace this cwd's resume list.
 		const sessions = await this.peekSessions(ctx.cwd, type);
 		if (this.latestCodexSessionByPane.get(paneId) !== sessionId) return;
 
@@ -301,7 +322,7 @@ export class ClaudeSessionStore {
 		}
 	}
 
-	/** Sessions in `cwd` without touching the store-wide resume list. */
+	/** Sessions in `cwd` without touching its resume list. */
 	async peekSessions(cwd: string, type: 'claude' | 'codex'): Promise<DiscoveredClaudeSession[]> {
 		const command = type === 'codex' ? 'discover_codex_sessions' : 'discover_claude_sessions';
 		try {

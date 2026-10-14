@@ -56,6 +56,17 @@ export class RemoteInstance {
 
 const STORAGE_KEY = 'workbench.instances';
 
+function isConfig(c: unknown): c is RemoteInstanceConfig {
+	if (!c || typeof c !== 'object') return false;
+	const { id, name, url, token } = c as Record<string, unknown>;
+	return (
+		typeof id === 'string' &&
+		typeof name === 'string' &&
+		typeof url === 'string' &&
+		(token === undefined || typeof token === 'string')
+	);
+}
+
 /**
  * Owns the set of instances shown in the left sidebar: the implicit local
  * instance ("This Mac") plus connected remote servers. Remotes are persisted to
@@ -81,9 +92,9 @@ export class InstancesStore {
 		let configs: RemoteInstanceConfig[] = [];
 		try {
 			const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]');
-			// Guard against corrupt / schema-drifted localStorage: a non-array would
+			// Guard against corrupt / schema-drifted localStorage: a bad entry would
 			// otherwise blow up the .map below (outside any try/catch) at startup.
-			if (Array.isArray(parsed)) configs = parsed;
+			if (Array.isArray(parsed)) configs = parsed.filter(isConfig);
 		} catch {
 			configs = [];
 		}
@@ -93,7 +104,12 @@ export class InstancesStore {
 	}
 
 	private persist(): void {
-		localStorage.setItem(STORAGE_KEY, JSON.stringify(this.remotes.map((r) => r.config)));
+		try {
+			localStorage.setItem(STORAGE_KEY, JSON.stringify(this.remotes.map((r) => r.config)));
+		} catch (e) {
+			// Blocked storage: the server stays connected until the app quits.
+			console.warn('[InstancesStore] Failed to save servers:', e);
+		}
 	}
 
 	add(config: Omit<RemoteInstanceConfig, 'id'>): RemoteInstance {

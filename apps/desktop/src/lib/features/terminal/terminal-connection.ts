@@ -13,7 +13,10 @@
  * The server allows one attacher: a second one sends {"t":"takeover"} to the
  * first, which stays detached until the person picks "Take control" — never
  * automatically, or two devices would kick each other back and forth. Closing
- * the socket only detaches; the terminal keeps running.
+ * the socket only detaches; the terminal keeps running. A socket that drops
+ * without any frame is `dropped`, also re-attached only on a click: its
+ * takeover frame may have been lost (a sleeping laptop), and re-attaching by
+ * itself would then take the terminal back from the other device.
  */
 
 import { loopbackServer, parseTerminalControlFrame, terminalWsUrl } from '@workbench/transport';
@@ -22,7 +25,7 @@ import { loopbackServer, parseTerminalControlFrame, terminalWsUrl } from '@workb
 export type TerminalDataPayload = Uint8Array;
 
 /** Reason a terminal session ended from the client's perspective. */
-export type ExitReason = 'ended' | 'taken_over';
+export type ExitReason = 'ended' | 'taken_over' | 'dropped';
 
 export interface TerminalExitInfo {
 	reason: ExitReason;
@@ -88,6 +91,7 @@ export class TerminalConnection {
 	private openSocket(wsUrl: string, cols: number, rows: number): Promise<void> {
 		if (this.disposed) return Promise.resolve();
 
+		let opened = false;
 		// The first binary frame is scrollback replay — reset xterm before it so
 		// re-attached history isn't duplicated into the still-mounted terminal.
 		let firstFrame = true;
@@ -98,6 +102,7 @@ export class TerminalConnection {
 
 		return new Promise<void>((resolve, reject) => {
 			ws.onopen = () => {
+				opened = true;
 				ws.send(JSON.stringify({ t: 'r', c: cols, r: rows }));
 				resolve();
 			};
@@ -126,11 +131,20 @@ export class TerminalConnection {
 				}
 			};
 
-			ws.onclose = () => {
+			ws.onclose = (event: CloseEvent) => {
 				// A clean exit/takeover already delivered its control frame; an
 				// intentional dispose() must stay silent.
-				if (this.disposed) return;
-				this.deliverExit({ reason: 'ended' });
+				if (this.disposed || this.exitDelivered) return;
+				if (!opened) {
+					this.deliverExit({ reason: 'ended' });
+					return;
+				}
+				console.warn('[TerminalConnection] socket dropped', {
+					code: event.code,
+					reason: event.reason,
+					wasClean: event.wasClean
+				});
+				this.deliverExit({ reason: 'dropped' });
 			};
 		});
 	}

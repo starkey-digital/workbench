@@ -103,4 +103,21 @@ describe('ControlPlaneStore', () => {
 		expect(store.error).toBe('network down');
 		expect(store.projects).toEqual([]);
 	});
+
+	it('keeps a failure a concurrent success finishing later would have hidden', async () => {
+		let answer: (v: unknown) => void = () => {};
+		transport.mockInvoke('list_worktrees', () => new Promise((r) => (answer = r)));
+		transport.mockInvoke('list_projects', () => {
+			throw new Error('network down');
+		});
+		const worktrees = store.loadWorktrees('/a');
+		await store.loadProjects();
+		answer([]);
+		await worktrees;
+		expect(store.error).toBe('network down');
+
+		transport.mockInvoke('list_projects', () => []);
+		await store.loadProjects();
+		expect(store.error).toBeNull();
+	});
 });

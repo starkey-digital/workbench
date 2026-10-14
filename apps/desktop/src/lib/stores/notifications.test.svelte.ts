@@ -150,6 +150,28 @@ describe('NotificationStore', () => {
 			expect(invokeSpy).toHaveBeenCalledWith('remove_native_notification', { identifier: PANE });
 		});
 
+		it('takes a notification down even when it is answered while still being posted', async () => {
+			useNativePath();
+			mockInvoke('remove_native_notification', () => undefined);
+			let focused: (v: boolean) => void = () => {};
+			isFocused.mockImplementationOnce(() => new Promise((r) => (focused = r)));
+			const { sessions, holder } = mockSessions();
+			new NotificationStore(mockWorkspaces(), sessions);
+			await settle();
+
+			holder.fire?.({ paneId: PANE, sessionId: 'sess-pane' });
+			holder.fire?.({ paneId: PANE, sessionId: 'sess-pane' }, 'resolved');
+			await settle();
+			focused(false);
+			await settle();
+
+			const calls = invokeSpy.mock.calls.map(([cmd]) => cmd);
+			expect(calls.indexOf('send_native_notification')).toBeGreaterThan(-1);
+			expect(calls.indexOf('remove_native_notification')).toBeGreaterThan(
+				calls.indexOf('send_native_notification')
+			);
+		});
+
 		it('focuses the pane when its notification is clicked', async () => {
 			useNativePath();
 			const workspaces = mockWorkspaces();

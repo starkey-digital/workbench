@@ -164,6 +164,64 @@ describe('GitStore', () => {
 			expect(gitInfoSpy).toHaveBeenCalledWith('/projects/foo');
 			expect(worktreesSpy).toHaveBeenCalledWith('/projects/foo');
 		});
+
+		describe('coalescing', () => {
+			afterEach(() => vi.useRealTimers());
+
+			function stubFetchers() {
+				const status = vi.spyOn(store, 'fetchStatus');
+				for (const fn of ['fetchGitInfo', 'fetchWorktrees', 'fetchLog', 'fetchStashes'] as const)
+					vi.spyOn(store, fn).mockResolvedValue();
+				return status;
+			}
+
+			it('runs once more after a request that arrived mid-refresh', async () => {
+				vi.useFakeTimers();
+				const status = stubFetchers();
+				let finish: () => void = () => {};
+				status.mockImplementationOnce(() => new Promise<void>((r) => (finish = r)));
+				status.mockResolvedValue();
+
+				const first = store.refreshGitState('/p');
+				void store.refreshGitState('/p');
+				void store.refreshGitState('/p');
+				finish();
+				await first;
+				expect(status).toHaveBeenCalledTimes(1);
+
+				await vi.advanceTimersByTimeAsync(500);
+				expect(status).toHaveBeenCalledTimes(2);
+			});
+
+			it('keeps a trailing refresh for a request inside the throttle window', async () => {
+				vi.useFakeTimers();
+				const status = stubFetchers().mockResolvedValue();
+
+				await store.refreshGitState('/p');
+				await store.refreshGitState('/p');
+				await store.refreshGitState('/p');
+				expect(status).toHaveBeenCalledTimes(1);
+
+				await vi.advanceTimersByTimeAsync(500);
+				expect(status).toHaveBeenCalledTimes(2);
+			});
+		});
+	});
+
+	describe('fetchStatus', () => {
+		it('drops an older answer that arrives after a newer one', async () => {
+			const answers: Array<(v: unknown) => void> = [];
+			mockInvoke('git_status', () => new Promise((r) => answers.push(r)));
+
+			const older = store.fetchStatus('/p');
+			const newer = store.fetchStatus('/p');
+			answers[1]({ branch: 'new' });
+			await newer;
+			answers[0]({ branch: 'old' });
+			await older;
+
+			expect(store.statusByProject['/p']).toEqual({ branch: 'new' });
+		});
 	});
 
 	describe('refreshAll', () => {

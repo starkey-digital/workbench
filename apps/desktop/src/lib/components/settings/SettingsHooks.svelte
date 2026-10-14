@@ -42,9 +42,13 @@
 	let reversedEntries = $derived([...logEntries].reverse());
 
 	onMount(() => {
-		invoke<HookLogEntry[]>('get_hook_logs').then((logs) => {
-			logEntries = logs;
-		});
+		// Live entries can arrive before the saved ones: keep both, saved first.
+		invoke<HookLogEntry[]>('get_hook_logs').then(
+			(logs) => {
+				logEntries = [...logs, ...logEntries];
+			},
+			(e) => console.warn('[SettingsHooks] Failed to load hook logs:', e)
+		);
 
 		const unlistenPromise = listen<HookLogEntry>('hook-bridge:log', (event) => {
 			logEntries = [...logEntries, event.payload];

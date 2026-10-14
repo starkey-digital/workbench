@@ -91,10 +91,10 @@
 		return attentionSessions.some((s) => s.sessionType === 'claude') ? 'claude' : 'codex';
 	}
 
-	function startSessionInWorktree(projectPath: string, worktreePath: string, branch: string): void {
-		worktreeManager.open(projectPath, worktreePath, branch);
-		const ws = workspaceStore.getByWorktreePath(worktreePath);
-		if (ws) claudeSessionStore.startSession(ws.id);
+	// The workspace may not be open yet: wait for the server to open it.
+	async function startSessionInWorktree(projectPath: string, worktreePath: string, branch: string) {
+		const workspaceId = await worktreeManager.open(projectPath, worktreePath, branch);
+		if (workspaceId) await claudeSessionStore.startSession(workspaceId);
 	}
 
 	function sessionCount(sessions: ActiveClaudeSession[], type: 'claude' | 'codex'): number {
