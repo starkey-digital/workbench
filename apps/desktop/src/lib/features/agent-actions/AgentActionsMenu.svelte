@@ -117,7 +117,7 @@
 										{action.category}
 									</Badge>
 								{/if}
-								{#each action.tags.slice(0, 2) as tag (`${action.id}-${tag}`)}
+								{#each action.tags.slice(0, 2) as tag, i (`${i}:${tag}`)}
 									<Badge variant="secondary" class="h-4 rounded-sm px-1 text-[9px]">
 										#{tag}
 									</Badge>

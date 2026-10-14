@@ -21,17 +21,24 @@ export class ControlPlaneStore {
 
 	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- internal bookkeeping only
 	private githubUrlsInFlight = new Set<string>();
+	/** Calls started so far, and how many had started when `error` was set. */
+	private runs = 0;
+	private errorAt = 0;
 
 	constructor(transport: ControlPlaneTransport) {
 		this.transport = transport;
 	}
 
+	/** Only a call started after the last failure clears it, so a concurrent success can't hide it. */
 	private async run<T>(fn: () => Promise<T>): Promise<T | undefined> {
-		this.error = null;
+		const run = ++this.runs;
 		try {
-			return await fn();
+			const result = await fn();
+			if (run > this.errorAt) this.error = null;
+			return result;
 		} catch (e) {
 			this.error = e instanceof Error ? e.message : String(e);
+			this.errorAt = this.runs;
 			return undefined;
 		}
 	}

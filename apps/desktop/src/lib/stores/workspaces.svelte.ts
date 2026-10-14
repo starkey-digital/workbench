@@ -18,7 +18,7 @@ import {
 } from '$types/workspace';
 import { transport } from '$lib/transport';
 import { effectivePath } from '$lib/utils/path';
-import { releaseChat } from '$features/chat/chat-registry.svelte';
+import { followPane, releaseChat } from '$features/chat/chat-registry.svelte';
 import { getGitStore, getWorkbenchSettingsStore } from './context';
 import { hasSavedUi, loadUi, pruneUi, saveUi, seededUi, type WorkspaceUi } from './workspace-ui';
 import { workspaceView } from './workspace-view';
@@ -27,6 +27,8 @@ export type WorkspaceApi = Pick<ControlPlaneTransport, 'workspaceCommand' | 'sub
 
 /** Boot doesn't wait longer than this for the server's first snapshot. */
 const FIRST_SNAPSHOT_MS = 5000;
+/** How long ids a command made are kept from pruning while no snapshot shows them yet. */
+const PENDING_TTL_MS = 10_000;
 
 interface PaneAt {
 	workspace: ProjectWorkspace;
@@ -52,7 +54,7 @@ export class WorkspaceStore {
 	private ui = $state.raw<WorkspaceUi>(loadUi());
 	/** No state saved on this device yet: take the one an older desktop saved with the model. */
 	private seed = !hasSavedUi();
-	/** Ids a command made, kept from pruning until a snapshot at that rev arrives. */
+	/** Ids a command made, kept from pruning until a snapshot shows them (or they expire). */
 	private pending: Record<string, number> = {};
 	/** Spawn notices already shown, by pane and spawn. */
 	private shownNotices: Record<string, true> = {};
@@ -66,6 +68,9 @@ export class WorkspaceStore {
 	constructor(api: WorkspaceApi = transport()) {
 		this.api = api;
 	}
+
+	/** False while the snapshot stream is down and retrying: what's shown may be stale. */
+	streamLive = $state(true);
 
 	/** Whether the server saves the model; anything but `ok` loses tabs on quit. */
 	readonly persistence = $derived(this.snapshot.persistence ?? { status: 'ok', message: null });
@@ -104,7 +109,8 @@ export class WorkspaceStore {
 					this.apply(s, fresh);
 					clearTimeout(timer);
 					resolve();
-				}
+				},
+				status: (live) => (this.streamLive = live)
 			});
 		});
 	}
@@ -117,16 +123,29 @@ export class WorkspaceStore {
 	/** A snapshot from the stream. `fresh`: a new connection, whose `rev` may have restarted. */
 	apply(next: WorkspaceSnapshot, fresh = false): void {
 		if (!fresh && next.rev <= this.snapshot.rev) return;
-		const gone = Object.keys(this.paneIndex);
+		const before = Object.fromEntries(
+			Object.values(this.paneIndex).map(({ pane }) => [
+				pane.id,
+				`${pane.status}:${pane.generation}`
+			])
+		);
 		const prevProject = this.activeProjectPath;
 		this.snapshot = next;
-		for (const paneId of gone) if (!(paneId in this.ids)) releaseChat(paneId);
+		for (const paneId of Object.keys(before)) if (!(paneId in this.ids)) releaseChat(paneId);
+		// A chat whose view is hidden still has to follow its pane's restarts, but
+		// only on a change: an ended chat on a running pane would re-attach each frame.
+		for (const { pane } of Object.values(this.paneIndex))
+			if (before[pane.id] !== `${pane.status}:${pane.generation}`)
+				followPane(pane.id, { status: pane.status, generation: pane.generation });
 		if (this.seed && next.local) {
 			this.seed = false;
 			this.setUi(seededUi(next.local));
 		}
+		// A command answered before its snapshot was published (a slow server) has an
+		// older rev than the one showing its ids: keep them until they show.
+		const now = Date.now();
 		this.pending = Object.fromEntries(
-			Object.entries(this.pending).filter(([, rev]) => next.rev < rev)
+			Object.entries(this.pending).filter(([id, until]) => !(id in this.ids) && now < until)
 		);
 		const pruned = pruneUi(this.ui, next.workspaces, Object.keys(this.pending));
 		if (pruned) this.setUi(pruned);
@@ -139,6 +158,7 @@ export class WorkspaceStore {
 	}
 
 	private setUi(ui: WorkspaceUi): void {
+		for (const paneId of this.ui.chatPanes) if (!ui.chatPanes.includes(paneId)) releaseChat(paneId);
 		this.ui = ui;
 		saveUi(ui);
 	}
@@ -148,7 +168,8 @@ export class WorkspaceStore {
 		try {
 			const result = await this.api.workspaceCommand(cmd);
 			for (const id of [result.workspaceId, result.tabId, result.paneId])
-				if (id && !(id in this.ids)) this.pending = { ...this.pending, [id]: result.rev };
+				if (id && !(id in this.ids))
+					this.pending = { ...this.pending, [id]: Date.now() + PENDING_TTL_MS };
 			return result;
 		} catch (e) {
 			toast.error(e instanceof Error ? e.message : String(e));
@@ -254,7 +275,6 @@ export class WorkspaceStore {
 			});
 			return;
 		}
-		if (view === 'terminal') releaseChat(paneId);
 		const chatPanes = this.ui.chatPanes.filter((id) => id !== paneId);
 		this.setUi({ ...this.ui, chatPanes: view === 'chat' ? [...chatPanes, paneId] : chatPanes });
 	}
@@ -320,7 +340,11 @@ export class WorkspaceStore {
 		});
 	}
 
-	openWorktree(project: ProjectConfig, worktreePath: string, branch: string): Promise<unknown> {
+	openWorktree(
+		project: ProjectConfig,
+		worktreePath: string,
+		branch: string
+	): Promise<WorkspaceCommandResult | null> {
 		return this.sendAndFocus({
 			type: 'openWorkspace',
 			projectPath: project.path,

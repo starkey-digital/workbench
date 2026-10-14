@@ -35,6 +35,7 @@ export class ProjectStore {
 		this.workspaces = workspaces;
 	}
 
+	/** Stays unloaded on failure: saving an empty list then would wipe the real one. */
 	async load() {
 		this.projects = await invoke<ProjectConfig[]>('list_projects');
 		this.loaded = true;
@@ -81,7 +82,7 @@ export class ProjectStore {
 		const [moved] = next.splice(fromIndex, 1);
 		next.splice(toIndex, 0, moved);
 		this.projects = next;
-		this.persist();
+		this.persist().catch((e) => console.warn('[ProjectStore] Failed to save the order:', e));
 	}
 
 	toggleFavourite(projectPath: string) {
@@ -123,7 +124,7 @@ export class ProjectStore {
 
 	/** Close all workspaces for a project, then remove it from the project list */
 	async removeWithWorkspaces(projectPath: string) {
-		this.workspaces.closeAllForProject(projectPath);
+		await this.workspaces.closeAllForProject(projectPath);
 		await this.remove(projectPath);
 	}
 }

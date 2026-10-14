@@ -27,7 +27,8 @@
 			.filter((id, i, ids): id is number => id !== null && ids.indexOf(id) === i)
 	);
 
-	const checkKey = (c: RunCheck) => `${c.runId ?? ''}:${c.workflow}:${c.name}`;
+	// Commit statuses have no run id and may repeat a name: the index keeps keys unique.
+	const checkKey = (c: RunCheck, i: number) => `${c.runId ?? ''}:${c.workflow}:${c.name}:${i}`;
 	let settledLabel = $derived(
 		[
 			groups.passed.length ? `${groups.passed.length} passed` : '',
@@ -58,10 +59,10 @@
 	{#if checks.length === 0}
 		<p class="px-3 py-1 text-xs text-wb-ink-soft">{emptyText}</p>
 	{/if}
-	{#each groups.failing as check (checkKey(check))}
+	{#each groups.failing as check, i (checkKey(check, i))}
 		<CheckItem {check} onRerun={check.runId === null ? undefined : () => rerun([check.runId!])} />
 	{/each}
-	{#each groups.pending as check (checkKey(check))}
+	{#each groups.pending as check, i (checkKey(check, i))}
 		<CheckItem {check} />
 	{/each}
 	{#if settled.length > 0}
@@ -80,7 +81,7 @@
 			{/if}
 		</button>
 		{#if showSettled}
-			{#each settled as check (checkKey(check))}
+			{#each settled as check, i (checkKey(check, i))}
 				<CheckItem {check} />
 			{/each}
 		{/if}

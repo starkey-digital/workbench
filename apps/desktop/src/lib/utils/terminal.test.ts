@@ -122,5 +122,16 @@ describe('integration-status helpers', () => {
 	});
 });
 
-// Suppress the unused-import lint warning: vi is used in beforeEach/it hooks
-void vi;
+describe('onSessionTerminalExit', () => {
+	it('tries the listener again after it failed to register', async () => {
+		const { listenSpy, emitMockEvent } = await import('../../test/tauri-mocks');
+		const { onSessionTerminalExit } = await import('./terminal');
+		listenSpy.mockRejectedValueOnce(new Error('not ready'));
+		await expect(onSessionTerminalExit('t-1', () => {})).rejects.toThrow('not ready');
+
+		const exited = vi.fn();
+		await onSessionTerminalExit('t-1', exited);
+		emitMockEvent('terminal:exit', { sessionId: 't-1', code: 0 });
+		expect(exited).toHaveBeenCalledWith({ sessionId: 't-1', code: 0 });
+	});
+});

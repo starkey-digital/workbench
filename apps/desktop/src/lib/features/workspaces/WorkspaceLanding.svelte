@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { AgentIcon } from '@workbench/ui/agent-icon';
-	import { onMount } from 'svelte';
+	import { watch } from 'runed';
 	import TerminalSquareIcon from '@lucide/svelte/icons/terminal-square';
 	import AgentActionsMenu from '$features/agent-actions/AgentActionsMenu.svelte';
 	import RecentSessionList from '$features/workspaces/RecentSessionList.svelte';
@@ -19,10 +19,17 @@
 
 	let wsCwd = $derived(effectivePath(workspace));
 
-	onMount(() => {
-		claudeSessionStore.discoverSessions(wsCwd);
-		claudeSessionStore.discoverCodexSessions(wsCwd);
-	});
+	// Every empty workspace mounts one of these: rescan when this one is shown.
+	// Derived, so a snapshot that rebuilds `workspace` doesn't rescan.
+	const shown = $derived(workspaceStore.activeWorkspaceId === workspace.id);
+	watch(
+		() => [shown, wsCwd] as const,
+		([shown, cwd]) => {
+			if (!shown) return;
+			void claudeSessionStore.discoverSessions(cwd, 'claude');
+			void claudeSessionStore.discoverSessions(cwd, 'codex');
+		}
+	);
 </script>
 
 <div class="flex flex-1 items-center justify-center bg-wb-bg">
@@ -114,16 +121,16 @@
 			<RecentSessionList
 				agent="claude"
 				title="Recent Claude Sessions"
-				sessions={claudeSessionStore.discoveredSessions}
+				sessions={claudeSessionStore.discoveredFor(wsCwd, 'claude')}
 				onResume={(id, label) => claudeSessionStore.resumeSession(workspace.id, id, label)}
-				onRemove={(id) => claudeSessionStore.removeDiscoveredSession(id)}
+				onRemove={(id) => claudeSessionStore.removeDiscoveredSession(wsCwd, id)}
 			/>
 			<RecentSessionList
 				agent="codex"
 				title="Recent Codex Sessions"
-				sessions={claudeSessionStore.discoveredCodexSessions}
+				sessions={claudeSessionStore.discoveredFor(wsCwd, 'codex')}
 				onResume={(id, label) => claudeSessionStore.resumeSession(workspace.id, id, label, 'codex')}
-				onRemove={(id) => claudeSessionStore.removeDiscoveredSession(id, 'codex')}
+				onRemove={(id) => claudeSessionStore.removeDiscoveredSession(wsCwd, id, 'codex')}
 			/>
 		</div>
 	</div>

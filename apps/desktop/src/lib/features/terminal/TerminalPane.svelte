@@ -9,7 +9,7 @@
 	import { openUrl } from '$lib/utils/open-url';
 	import '@xterm/xterm/css/xterm.css';
 	import { terminalOptions, TERMINAL_BG } from '$lib/terminal-config';
-	import { TerminalConnection } from './terminal-connection';
+	import { TerminalConnection, type TerminalExitInfo } from './terminal-connection';
 	import TerminalSearch from './TerminalSearch.svelte';
 	import { registerShellIntegration, type ShellIntegrationState } from './shell-integration';
 	import { TerminalInputDedup } from './input-dedup';
@@ -43,8 +43,8 @@
 	let searchOpen = $state(false);
 	let shellState: ShellIntegrationState | null = null;
 	let terminalError = $state('');
-	/** Another device holds this terminal; stays detached until the user takes control. */
-	let takenOver = $state(false);
+	/** Detached until a click re-attaches: another device took it, or the socket dropped. */
+	let detached = $state<'taken_over' | 'dropped' | null>(null);
 	let removeVisibilityListener: (() => void) | null = null;
 	let lastCols = 0;
 	let lastRows = 0;
@@ -84,6 +84,8 @@
 
 	let removeCopyListener: (() => void) | null = null;
 	let removeResidueGuard: (() => void) | null = null;
+	/** Set by onDestroy: the async onMount checks it after each await, so nothing outlives the pane. */
+	let destroyed = false;
 
 	function canFitTerminal(): boolean {
 		if (!terminal || !fitAddon || !container) return false;
@@ -157,6 +159,18 @@
 			clearTimeout(outputFlushTimer);
 			outputFlushTimer = null;
 		}
+	}
+
+	/** Write held output now; bytes written directly after it must not overtake it. */
+	function flushOffscreen() {
+		clearFlushSchedule();
+		if (!terminal || offscreenQueue === null) return;
+		const batched = offscreenQueue;
+		offscreenQueue = null;
+		const start = performance.now();
+		terminal.write(batched);
+		outputFlushesSinceLog += 1;
+		outputFlushMsSinceLog += performance.now() - start;
 	}
 
 	function inPerformanceMode(): boolean {
@@ -242,20 +256,10 @@
 				merged.set(bytes, offscreenQueue.length);
 				offscreenQueue = merged;
 			}
-			if (!outputFlushTimer) {
-				outputFlushTimer = setTimeout(() => {
-					outputFlushTimer = null;
-					if (!terminal || offscreenQueue === null) return;
-					const batched = offscreenQueue;
-					offscreenQueue = null;
-					const start = performance.now();
-					terminal.write(batched);
-					outputFlushesSinceLog += 1;
-					outputFlushMsSinceLog += performance.now() - start;
-				}, OFFSCREEN_FLUSH_INTERVAL_MS);
-			}
+			outputFlushTimer ??= setTimeout(flushOffscreen, OFFSCREEN_FLUSH_INTERVAL_MS);
 			return;
 		}
+		flushOffscreen();
 
 		// Active terminal: write directly with callback (VS Code pattern)
 		const start = performance.now();
@@ -280,12 +284,7 @@
 			if (dims && (dims.cols !== terminal.cols || dims.rows !== terminal.rows)) {
 				fitTerminal();
 			}
-			// Flush offscreen buffer if there's data waiting
-			if (offscreenQueue !== null && offscreenQueue.length > 0) {
-				const batched = offscreenQueue;
-				offscreenQueue = null;
-				terminal.write(batched);
-			}
+			flushOffscreen();
 		}
 	);
 
@@ -297,7 +296,7 @@
 				terminal.options.scrollback = performanceMode ? SCROLLBACK_PERFORMANCE : SCROLLBACK_NORMAL;
 				if (!performanceMode) ensureWebLinksAddon();
 			}
-			clearFlushSchedule();
+			if (!performanceMode) flushOffscreen();
 		}
 	);
 
@@ -319,6 +318,7 @@
 			// Wait for fonts to load so cell measurements are accurate
 			await document.fonts.ready;
 			const font = await terminalFont();
+			if (destroyed) return;
 
 			terminal = new Terminal({
 				...terminalOptions,
@@ -483,11 +483,11 @@
 				(bytes: Uint8Array) => {
 					writeTerminalData(bytes);
 				},
-				({ reason, code }: { reason: string; code?: number }) => {
-					if (reason === 'taken_over') {
-						// The PTY keeps running on the other device; reattaching is an
-						// explicit click, never automatic, so two devices can't ping-pong.
-						takenOver = true;
+				({ reason, code }: TerminalExitInfo) => {
+					if (reason === 'taken_over' || reason === 'dropped') {
+						// The PTY keeps running; reattaching is an explicit click, never
+						// automatic, so two devices can't ping-pong.
+						detached = reason;
 					} else if (code != null) {
 						terminal?.writeln(`\r\n[process exited: ${code}]`);
 					} else {
@@ -495,12 +495,17 @@
 					}
 				},
 				() => {
-					// Reset xterm before the server replays scrollback (re-attach path).
+					// Reset xterm before the server replays scrollback (re-attach path);
+					// output held from before the replay would print after it.
+					offscreenQueue = null;
+					clearFlushSchedule();
 					terminal?.reset();
 				}
 			);
 
 			await conn.connect(terminal.cols, terminal.rows);
+			// onDestroy already released the terminal and its connection.
+			if (destroyed) return;
 
 			// VS Code-style resize: use ResizeObserver but with smart
 			// split-axis debouncing instead of a flat 500ms delay
@@ -566,23 +571,25 @@
 				perfLogInterval = setInterval(logPerfSnapshotIfEnabled, PERF_LOG_INTERVAL_MS);
 			}
 		} catch (error) {
-			terminalError = `Failed to start terminal: ${String(error)}`;
+			if (!destroyed) terminalError = `Failed to start terminal: ${String(error)}`;
 		}
 	});
 
 	async function takeControl() {
 		if (!conn || !terminal) return;
-		takenOver = false;
+		const was = detached;
+		detached = null;
 		try {
 			await conn.takeControl(terminal.cols, terminal.rows);
 			terminal.focus();
 		} catch (error) {
-			takenOver = true;
+			detached = was;
 			terminalError = `Failed to take control: ${String(error)}`;
 		}
 	}
 
 	onDestroy(() => {
+		destroyed = true;
 		if (resizeRAFId !== null) cancelAnimationFrame(resizeRAFId);
 		if (colResizeTimeout) clearTimeout(colResizeTimeout);
 		clearFlushSchedule();
@@ -629,16 +636,16 @@
 			</div>
 		</div>
 	{/if}
-	{#if takenOver && !terminalError}
+	{#if detached && !terminalError}
 		<div class="terminal-takeover">
 			<div class="text-center">
-				<p>Opened on another device</p>
+				<p>{detached === 'dropped' ? 'Connection lost' : 'Opened on another device'}</p>
 				<button
 					class="mt-2 rounded bg-white/10 px-3 py-1 text-xs hover:bg-white/20"
 					type="button"
 					onclick={takeControl}
 				>
-					Take control
+					{detached === 'dropped' ? 'Reconnect' : 'Take control'}
 				</button>
 			</div>
 		</div>
