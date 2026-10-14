@@ -5,12 +5,12 @@
 	import { FitAddon } from '@xterm/addon-fit';
 	import '@xterm/xterm/css/xterm.css';
 	import { terminalWsUrl } from '@workbench/transport';
+	import { breadcrumb } from '@workbench/telemetry';
 	import { fontPrefs, terminalFont } from '@workbench/chat-ui';
 	import { watch } from 'runed';
 	import { untrack } from 'svelte';
 	import { touchScroll } from './touch-scroll.ts';
 	import ViewSwitch from './ViewSwitch.svelte';
-	import { useBack } from './back-navigation';
 	import {
 		reconnectDelay,
 		statusForTextFrame,
@@ -37,7 +37,6 @@
 		/** Why the last action failed. */
 		notice?: string | null;
 	} = $props();
-	useBack(() => onClose());
 
 	let status = $state<TerminalStatus>('connecting');
 	let ws: WebSocket | undefined;
@@ -106,6 +105,7 @@
 			socket.binaryType = 'arraybuffer';
 
 			socket.onopen = () => {
+				breadcrumb('terminal.ws', 'open', { attempt });
 				status = 'open';
 				attempt = 0;
 				term.focus();
@@ -119,9 +119,11 @@
 					term.write(new Uint8Array(ev.data));
 				} else {
 					status = statusForTextFrame(ev.data) ?? status;
+					breadcrumb('terminal.ws', status);
 				}
 			};
-			socket.onclose = () => {
+			socket.onclose = (ev) => {
+				breadcrumb('terminal.ws', 'closed', { code: ev.code });
 				status = statusOnClose(status);
 				// Hidden (phone locked): wait for `resume` instead of retrying in the dark.
 				if (status === 'reconnecting' && !document.hidden)

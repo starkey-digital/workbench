@@ -110,3 +110,12 @@
 		{/snippet}
 	</SettingsRow>
 </SettingsSection>
+
+<SettingsSection title="Privacy">
+	<SettingsToggle
+		label="Share extended diagnostics"
+		description="Error reports are always sent. With this on, they also carry what led up to the error: when chat and terminal connections opened, closed or retried (close codes, retry counts, item counts, busy flags), and a chat's last 200 such events. Never your prompts, replies, session titles, file paths, links or tokens. Applies once saved; a connected phone follows it the next time it connects."
+		checked={store.extendedDiagnostics}
+		onCheckedChange={(v) => store.set('extendedDiagnostics', v)}
+	/>
+</SettingsSection>

@@ -13,6 +13,7 @@ import { getClaudeSessionStore, getGitStore, getProjectStore, getWorkspaceStore 
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { load } from '@tauri-apps/plugin-store';
+import { log } from '$lib/log';
 
 type CheckNotification = {
 	name: string;
@@ -221,7 +222,7 @@ export class GitHubStore {
 			await invoke('github_refresh_project', { projectPath });
 			this.lastRefreshedAt[projectPath] = Date.now();
 		} catch (e) {
-			console.warn('[GitHubStore] Failed to request project refresh:', e);
+			log.warn('GitHubStore', 'Failed to request project refresh:', e);
 		}
 	}
 
@@ -277,7 +278,7 @@ export class GitHubStore {
 		try {
 			await invoke('github_set_tracked_projects', { projectPaths });
 		} catch (e) {
-			console.warn('[GitHubStore] Failed to sync tracked projects:', e);
+			log.warn('GitHubStore', 'Failed to sync tracked projects:', e);
 		}
 	}
 

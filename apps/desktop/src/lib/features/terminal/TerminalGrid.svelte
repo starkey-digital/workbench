@@ -3,6 +3,8 @@
 	import { SvelteMap } from 'svelte/reactivity';
 	import { toast } from 'svelte-sonner';
 	import { cn } from '@workbench/ui';
+	import { ViewBoundary } from '@workbench/ui/view-boundary';
+	import { captureViewError } from '@workbench/telemetry';
 	import SessionChat from '$features/chat/SessionChat.svelte';
 	import PaneState from '$features/terminal/PaneState.svelte';
 	import TerminalPane from '$features/terminal/TerminalPane.svelte';
@@ -87,7 +89,9 @@
 			{:else if !inChat && attachable(pane)}
 				<!-- A restart or rewind gives the pane a new terminal: follow it. -->
 				{#key pane.terminalId}
-					<TerminalPane paneId={pane.id} terminalId={pane.terminalId} {active} />
+					<ViewBoundary label="terminal" onerror={(e) => captureViewError('terminal', e)}>
+						<TerminalPane paneId={pane.id} terminalId={pane.terminalId} {active} />
+					</ViewBoundary>
 				{/key}
 			{:else}
 				<PaneState {pane} tabId={tab.id} cwd={cwd ?? project.path} />

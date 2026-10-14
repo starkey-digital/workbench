@@ -334,6 +334,12 @@ pub async fn delete_branch(repo_path: String, branch: String, force: bool) -> Re
     .await
 }
 
+/// A webview log line for `workbench.log` (see `observability::frontend`).
+#[tauri::command]
+pub async fn log_frontend(level: String, target: String, message: String) {
+    crate::blocking(move || crate::observability::frontend(&level, &target, &message)).await
+}
+
 #[tauri::command]
 pub async fn open_url(url: String) -> Result<bool, String> {
     crate::blocking(move || {

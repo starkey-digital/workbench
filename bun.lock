@@ -22,6 +22,7 @@
         "@tauri-apps/plugin-store": "^2.5.0",
         "@workbench/chat-ui": "workspace:*",
         "@workbench/control-plane-ui": "workspace:*",
+        "@workbench/telemetry": "workspace:*",
         "@workbench/theme": "workspace:*",
         "@workbench/transport": "workspace:*",
         "@workbench/ui": "workspace:*",
@@ -87,6 +88,7 @@
         "@tauri-apps/plugin-opener": "^2.7.1",
         "@workbench/chat-ui": "workspace:*",
         "@workbench/control-plane-ui": "workspace:*",
+        "@workbench/telemetry": "workspace:*",
         "@workbench/theme": "workspace:*",
         "@workbench/transport": "workspace:*",
         "@workbench/types": "workspace:*",
@@ -152,6 +154,18 @@
       },
       "peerDependencies": {
         "svelte": "^5",
+      },
+    },
+    "packages/telemetry": {
+      "name": "@workbench/telemetry",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@sentry/svelte": "^11.7.0",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+      "peerDependencies": {
+        "@sentry/svelte": "^11",
       },
     },
     "packages/theme": {
@@ -775,6 +789,8 @@
     "@workbench/desktop": ["@workbench/desktop@workspace:apps/desktop"],
 
     "@workbench/mobile": ["@workbench/mobile@workspace:apps/mobile"],
+
+    "@workbench/telemetry": ["@workbench/telemetry@workspace:packages/telemetry"],
 
     "@workbench/theme": ["@workbench/theme@workspace:packages/theme"],
 

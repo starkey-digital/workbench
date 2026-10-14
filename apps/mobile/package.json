@@ -21,6 +21,7 @@
 		"@tauri-apps/plugin-opener": "^2.7.1",
 		"@workbench/chat-ui": "workspace:*",
 		"@workbench/control-plane-ui": "workspace:*",
+		"@workbench/telemetry": "workspace:*",
 		"@workbench/theme": "workspace:*",
 		"@workbench/transport": "workspace:*",
 		"@workbench/types": "workspace:*",

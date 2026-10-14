@@ -1,4 +1,5 @@
 import * as Sentry from '@sentry/svelte';
+import { log } from '$lib/log';
 
 /**
  * Guards against an xterm.js + WKWebView (Tauri/macOS) input-duplication bug.
@@ -112,8 +113,9 @@ export class TerminalInputDedup {
 
 	private report(data: string, historyLength: number, now: number): void {
 		const shape = describeShape(data, historyLength);
-		console.warn(
-			`[terminal] dropped duplicate input flush (session ${this.sessionId.slice(0, 8)})`,
+		log.warn(
+			'terminal',
+			`dropped duplicate input flush (session ${this.sessionId.slice(0, 8)})`,
 			shape
 		);
 		this.suppressedSinceReport++;

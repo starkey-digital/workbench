@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { log } from '$lib/log';
 	import { watch } from 'runed';
 	import { Button } from '@workbench/ui/button';
 	import { Checkbox } from '@workbench/ui/checkbox';
@@ -73,7 +74,7 @@
 			columnsByBoard = { ...columnsByBoard, [boardId]: columns };
 			labelsByBoard = { ...labelsByBoard, [boardId]: labels };
 		} catch (e) {
-			console.warn('[SettingsBoardConfig] Failed to load columns/labels:', e);
+			log.warn('SettingsBoardConfig', 'Failed to load columns/labels:', e);
 		}
 	}
 

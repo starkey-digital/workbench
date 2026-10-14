@@ -1,5 +1,6 @@
 import { agentClient, agentName } from '@workbench/chat-ui';
 import { ControlPlaneStore } from '@workbench/control-plane-ui';
+import { setExtendedDiagnostics } from '@workbench/telemetry';
 import { createHttpTransport, type OpenEventSource } from '@workbench/transport';
 import type {
 	AgentKind,
@@ -115,12 +116,15 @@ export class MobileClient {
 
 	private async loadAccounts(): Promise<void> {
 		const live = this.live();
+		// Off until this host says otherwise: another host's opt-in isn't this one's.
+		setExtendedDiagnostics(false);
 		try {
 			const settings = (await this.controlPlane?.invoke(
 				'load_workbench_settings',
 				undefined
 			)) as WorkbenchSettings | null;
 			if (!live()) return;
+			setExtendedDiagnostics(!!settings?.extendedDiagnostics);
 			this.accounts = (settings?.claudeAccounts ?? []).map(({ id, name }) => ({ id, name }));
 			this.defaultAccountName = defaultAccountName(settings);
 			const active = settings?.activeClaudeAccount;

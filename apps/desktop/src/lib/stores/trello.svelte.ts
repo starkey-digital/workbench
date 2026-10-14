@@ -13,6 +13,7 @@ import type { WorkspaceStore } from './workspaces.svelte';
 import { getWorkspaceStore } from './context';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { log } from '$lib/log';
 
 /**
  * The settings OS window instantiates TrelloStore without a WorkspaceStore in
@@ -90,7 +91,7 @@ export class TrelloStore {
 			const creds = await invoke<TrelloCredentials | null>('trello_load_credentials');
 			this.credentials = creds;
 		} catch (e) {
-			console.warn('[TrelloStore] Failed to load credentials:', e);
+			log.warn('TrelloStore', 'Failed to load credentials:', e);
 		}
 	}
 
@@ -117,7 +118,7 @@ export class TrelloStore {
 			});
 			this.configByProject = { ...this.configByProject, [projectPath]: config };
 		} catch (e) {
-			console.warn('[TrelloStore] Failed to load project config:', e);
+			log.warn('TrelloStore', 'Failed to load project config:', e);
 		}
 	}
 
@@ -135,7 +136,7 @@ export class TrelloStore {
 				token: this.credentials.token
 			});
 		} catch (e) {
-			console.warn('[TrelloStore] Failed to fetch boards:', e);
+			log.warn('TrelloStore', 'Failed to fetch boards:', e);
 			this.availableBoards = [];
 		} finally {
 			this.loading = false;
@@ -151,7 +152,7 @@ export class TrelloStore {
 			const key = `${projectPath}::${boardConfig.boardId}`;
 			this.boardDataCache = { ...this.boardDataCache, [key]: data };
 		} catch (e) {
-			console.warn('[TrelloStore] Failed to fetch board data:', e);
+			log.warn('TrelloStore', 'Failed to fetch board data:', e);
 		}
 	}
 
@@ -166,7 +167,7 @@ export class TrelloStore {
 			await this.refreshAllBoards(projectPath);
 			return card;
 		} catch (e) {
-			console.warn('[TrelloStore] Failed to create card:', e);
+			log.warn('TrelloStore', 'Failed to create card:', e);
 			return null;
 		}
 	}
@@ -232,7 +233,7 @@ export class TrelloStore {
 			]);
 			await this.refreshAllBoards(projectPath);
 		} catch (e) {
-			console.error('[TrelloStore] Board action failed:', e);
+			log.error('TrelloStore', 'Board action failed:', e);
 		}
 	}
 }

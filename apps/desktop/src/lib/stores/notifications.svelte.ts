@@ -12,6 +12,7 @@ import { visibleSplit } from '$features/terminal/split-view';
 import { baseName } from '$lib/utils/path';
 import type { AttentionTarget, ClaudeSessionStore } from './claudeSessions.svelte';
 import type { WorkspaceStore } from './workspaces.svelte';
+import { log } from '$lib/log';
 
 /** A notification's text per attention kind, as the phone words it (`NotificationFeed.kt`). */
 export const ATTENTION_TEXT = {
@@ -52,7 +53,7 @@ export class NotificationStore {
 
 	private enqueue(op: () => Promise<void>): void {
 		this.queue = this.queue.then(op).catch((e) => {
-			console.warn('[NotificationStore] Notification update failed:', e);
+			log.warn('NotificationStore', 'Notification update failed:', e);
 		});
 	}
 
@@ -71,7 +72,7 @@ export class NotificationStore {
 			await listen<string>('notification:action', (event) => {
 				void this.focusPane(event.payload);
 			}).catch((e) => {
-				console.warn('[NotificationStore] Failed to listen for actions:', e);
+				log.warn('NotificationStore', 'Failed to listen for actions:', e);
 			});
 			return;
 		}
@@ -83,7 +84,7 @@ export class NotificationStore {
 			}
 			this.enabled = granted;
 		} catch (e) {
-			console.warn('[NotificationStore] Notification permission unavailable:', e);
+			log.warn('NotificationStore', 'Notification permission unavailable:', e);
 			this.enabled = false;
 		}
 
@@ -94,7 +95,7 @@ export class NotificationStore {
 			if (!paneId) return;
 			void this.focusPane(paneId);
 		}).catch((e) => {
-			console.warn('[NotificationStore] Failed to register action handler:', e);
+			log.warn('NotificationStore', 'Failed to register action handler:', e);
 		});
 	}
 
@@ -141,7 +142,7 @@ export class NotificationStore {
 			try {
 				await invoke('remove_native_notification', { identifier });
 			} catch (e) {
-				console.warn('[NotificationStore] Failed to remove notification:', e);
+				log.warn('NotificationStore', 'Failed to remove notification:', e);
 			}
 		}
 	}
@@ -171,10 +172,10 @@ export class NotificationStore {
 				});
 				// False means authorization was refused — the user's OS-level choice.
 				if (!delivered) {
-					console.warn('[NotificationStore] Notification not delivered (not authorized)');
+					log.warn('NotificationStore', 'Notification not delivered (not authorized)');
 				}
 			} catch (e) {
-				console.warn('[NotificationStore] Native notification failed:', e);
+				log.warn('NotificationStore', 'Native notification failed:', e);
 			}
 			return;
 		}
@@ -185,7 +186,7 @@ export class NotificationStore {
 		try {
 			sendNotification({ id: notificationId, title, body });
 		} catch (e) {
-			console.warn('[NotificationStore] Failed to send notification:', e);
+			log.warn('NotificationStore', 'Failed to send notification:', e);
 		}
 	}
 
@@ -205,7 +206,7 @@ export class NotificationStore {
 			await win.show();
 			await win.setFocus();
 		} catch (e) {
-			console.warn('[NotificationStore] Failed to focus window:', e);
+			log.warn('NotificationStore', 'Failed to focus window:', e);
 		}
 		this.workspaces.focusPane(paneId);
 	}

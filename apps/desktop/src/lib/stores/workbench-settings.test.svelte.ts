@@ -20,6 +20,7 @@ function makeSettings(overrides: Partial<WorkbenchSettings> = {}): WorkbenchSett
 		gitSidebarEnabled: false,
 		terminalPerformanceMode: 'auto',
 		terminalTelemetryEnabled: false,
+		extendedDiagnostics: false,
 		terminalRenderer: 'xterm',
 		agentActions: [],
 		claudePermissionMode: 'default',
@@ -66,6 +67,7 @@ describe('WorkbenchSettingsStore', () => {
 					worktreeStrategy: 'inside',
 					terminalPerformanceMode: 'always',
 					terminalTelemetryEnabled: true,
+					extendedDiagnostics: true,
 					agentActions: actions
 				})
 			);
@@ -75,6 +77,7 @@ describe('WorkbenchSettingsStore', () => {
 			expect(store.worktreeStrategy).toBe('inside');
 			expect(store.terminalPerformanceMode).toBe('always');
 			expect(store.terminalTelemetryEnabled).toBe(true);
+			expect(store.extendedDiagnostics).toBe(true);
 			expect(store.agentActions).toHaveLength(1);
 			expect(store.agentActions[0].name).toBe('Review');
 		});
@@ -269,6 +272,7 @@ describe('WorkbenchSettingsStore', () => {
 					gitSidebarEnabled: false,
 					terminalPerformanceMode: 'auto',
 					terminalTelemetryEnabled: false,
+					extendedDiagnostics: false,
 					terminalRenderer: 'xterm',
 					agentActions: store.agentActions,
 					codexConfigApproved: null,
@@ -533,6 +537,7 @@ describe('WorkbenchSettingsStore', () => {
 					gitSidebarEnabled: false,
 					terminalPerformanceMode: 'auto',
 					terminalTelemetryEnabled: false,
+					extendedDiagnostics: false,
 					terminalRenderer: 'xterm',
 					agentActions: store.agentActions,
 					codexConfigApproved: null,

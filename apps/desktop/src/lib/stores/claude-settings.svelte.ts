@@ -7,6 +7,7 @@ import type {
 	ScopeGroup,
 	SkillInfo
 } from '$types/claude-settings';
+import { log } from '$lib/log';
 
 const SCOPES: SettingsScope[] = ['user', 'user-local', 'project', 'project-local'];
 
@@ -69,7 +70,7 @@ export class ClaudeSettingsStore {
 					scope,
 					projectPath: scope.startsWith('project') ? projectPath : null
 				}).catch((e) => {
-					console.warn(`[ClaudeSettings] Failed to load scope "${scope}":`, e);
+					log.warn('ClaudeSettings', `Failed to load scope "${scope}":`, e);
 					return {} as ClaudeSettings;
 				})
 			)
@@ -84,15 +85,15 @@ export class ClaudeSettingsStore {
 
 		const [plugins, skills, hookScripts] = await Promise.all([
 			invoke<PluginInfo[]>('list_claude_plugins').catch((e) => {
-				console.warn('[ClaudeSettings] Failed to list plugins:', e);
+				log.warn('ClaudeSettings', 'Failed to list plugins:', e);
 				return [] as PluginInfo[];
 			}),
 			invoke<SkillInfo[]>('list_claude_skills').catch((e) => {
-				console.warn('[ClaudeSettings] Failed to list skills:', e);
+				log.warn('ClaudeSettings', 'Failed to list skills:', e);
 				return [] as SkillInfo[];
 			}),
 			invoke<HookScriptInfo[]>('list_claude_hooks_scripts').catch((e) => {
-				console.warn('[ClaudeSettings] Failed to list hook scripts:', e);
+				log.warn('ClaudeSettings', 'Failed to list hook scripts:', e);
 				return [] as HookScriptInfo[];
 			})
 		]);

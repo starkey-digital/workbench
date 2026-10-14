@@ -1,16 +1,23 @@
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { openUrl } from '$lib/utils/open-url';
-import { captureChatDiagnostic } from '$lib/sentry';
+import { captureChatDiagnostic } from '@workbench/telemetry';
+import { log } from '$lib/log';
 import { throttled, type ChatPlatform } from '@workbench/chat-ui';
 import type { ChatAttachment } from '$types/workbench';
+
+const capture = throttled(captureChatDiagnostic);
 
 export const desktopChatPlatform: ChatPlatform = {
 	openLink(href) {
 		void openUrl(href);
 	},
 
-	report: throttled(captureChatDiagnostic),
+	/** Every one to the log file; Sentry gets each type once per 10 minutes. */
+	report(d) {
+		log.warn('chat', `${d.type} ${d.agent}: ${d.mismatched.join(',') || '-'}`, d.fields);
+		capture(d);
+	},
 
 	/** Tauri takes OS file drops before the page sees them; keep the ones over `node`. */
 	watchDrops(node, on) {

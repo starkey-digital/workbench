@@ -9,6 +9,8 @@
 	import EllipsisIcon from '@lucide/svelte/icons/ellipsis';
 	import { toast } from 'svelte-sonner';
 	import * as DropdownMenu from '@workbench/ui/dropdown-menu';
+	import { ViewBoundary } from '@workbench/ui/view-boundary';
+	import { captureViewError } from '@workbench/telemetry';
 	import {
 		agentName,
 		ChatArtifacts,
@@ -276,72 +278,79 @@
 		</div>
 	</header>
 
-	<div class="flex min-h-0 flex-1">
-		<div class="flex min-h-0 min-w-0 flex-1 flex-col">
-			{#if chat.status === 'reconnecting'}
-				<div class="reconnect relative h-0.5 shrink-0 overflow-hidden bg-wb-panel2" role="status">
-					<span class="sr-only">Reconnecting to {agentLabel}</span>
+	<ViewBoundary
+		label="chat"
+		class="flex-1"
+		onerror={(e) => captureViewError('chat', e, chat.trace())}
+		onreset={() => chat.resyncNow()}
+	>
+		<div class="flex min-h-0 flex-1">
+			<div class="flex min-h-0 min-w-0 flex-1 flex-col">
+				{#if chat.status === 'reconnecting'}
+					<div class="reconnect relative h-0.5 shrink-0 overflow-hidden bg-wb-panel2" role="status">
+						<span class="sr-only">Reconnecting to {agentLabel}</span>
+					</div>
+				{/if}
+
+				<div
+					{@attach overlayScrollbars()}
+					{@attach follow}
+					class="min-h-0 flex-1"
+					role="log"
+					aria-live="polite"
+				>
+					<ChatTranscript
+						{chat}
+						cwd={workdir}
+						projectName={project.name}
+						{onShowTerminal}
+						onStarter={(text) => (chat.draft.text = text)}
+						class="mx-auto max-w-3xl px-5 py-5"
+					/>
+				</div>
+
+				<ChatDock
+					{chat}
+					id="chat-draft-{paneId}"
+					accounts={settingsStore.claudeAccounts}
+					defaultAccountName={settingsStore.defaultAccountName}
+					answerHint="Answer {agentLabel} above first"
+					onResume={() => (resumeOpen = true)}
+					onThread={(id, label) => {
+						if (workspace)
+							workspaceStore.resumeAISession(workspace.id, id, label, 'codex', undefined, 'chat');
+					}}
+					class="mx-auto w-full max-w-3xl shrink-0 px-5 pb-4"
+				>
+					{#snippet popover()}
+						{#if resumeOpen}
+							<ChatResumePicker
+								{agent}
+								load={earlierSessions}
+								onPick={resume}
+								onClose={() => (resumeOpen = false)}
+							/>
+						{/if}
+					{/snippet}
+				</ChatDock>
+			</div>
+			{#if tasks.length > 0 && wide}
+				<!-- The saved width is shared by every pane; a narrower pane keeps half for the chat. -->
+				<div class="relative flex max-w-1/2 shrink-0" style:width="{tasksPanelWidth.width}px">
+					<PanelResizeHandle size={tasksPanelWidth} label="Resize agents and tasks panel" />
+					<ChatTasks
+						{agent}
+						{tasks}
+						seenAt={chat.seenAt}
+						cwd={workdir}
+						fetchOutput={(id) => chat.taskOutput(id)}
+						fetchTranscript={(id) => chat.taskTranscript(id)}
+						class="w-full"
+					/>
 				</div>
 			{/if}
-
-			<div
-				{@attach overlayScrollbars()}
-				{@attach follow}
-				class="min-h-0 flex-1"
-				role="log"
-				aria-live="polite"
-			>
-				<ChatTranscript
-					{chat}
-					cwd={workdir}
-					projectName={project.name}
-					{onShowTerminal}
-					onStarter={(text) => (chat.draft.text = text)}
-					class="mx-auto max-w-3xl px-5 py-5"
-				/>
-			</div>
-
-			<ChatDock
-				{chat}
-				id="chat-draft-{paneId}"
-				accounts={settingsStore.claudeAccounts}
-				defaultAccountName={settingsStore.defaultAccountName}
-				answerHint="Answer {agentLabel} above first"
-				onResume={() => (resumeOpen = true)}
-				onThread={(id, label) => {
-					if (workspace)
-						workspaceStore.resumeAISession(workspace.id, id, label, 'codex', undefined, 'chat');
-				}}
-				class="mx-auto w-full max-w-3xl shrink-0 px-5 pb-4"
-			>
-				{#snippet popover()}
-					{#if resumeOpen}
-						<ChatResumePicker
-							{agent}
-							load={earlierSessions}
-							onPick={resume}
-							onClose={() => (resumeOpen = false)}
-						/>
-					{/if}
-				{/snippet}
-			</ChatDock>
 		</div>
-		{#if tasks.length > 0 && wide}
-			<!-- The saved width is shared by every pane; a narrower pane keeps half for the chat. -->
-			<div class="relative flex max-w-1/2 shrink-0" style:width="{tasksPanelWidth.width}px">
-				<PanelResizeHandle size={tasksPanelWidth} label="Resize agents and tasks panel" />
-				<ChatTasks
-					{agent}
-					{tasks}
-					seenAt={chat.seenAt}
-					cwd={workdir}
-					fetchOutput={(id) => chat.taskOutput(id)}
-					fetchTranscript={(id) => chat.taskTranscript(id)}
-					class="w-full"
-				/>
-			</div>
-		{/if}
-	</div>
+	</ViewBoundary>
 
 	{#if artifactsOpen && artifacts.length > 0}
 		<div class="absolute inset-y-0 right-0 z-30 flex shadow-2xl">

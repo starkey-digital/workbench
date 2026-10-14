@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { log } from '$lib/log';
 	import { onMount } from 'svelte';
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen } from '@tauri-apps/api/event';
@@ -47,7 +48,7 @@
 			(logs) => {
 				logEntries = [...logs, ...logEntries];
 			},
-			(e) => console.warn('[SettingsHooks] Failed to load hook logs:', e)
+			(e) => log.warn('SettingsHooks', 'Failed to load hook logs:', e)
 		);
 
 		const unlistenPromise = listen<HookLogEntry>('hook-bridge:log', (event) => {

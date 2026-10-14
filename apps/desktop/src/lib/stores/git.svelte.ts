@@ -9,6 +9,7 @@ import type {
 } from '$types/workbench';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { log } from '$lib/log';
 
 /** Watcher-driven refreshes of one project run at most this often (with a trailing run). */
 const REFRESH_MIN_MS = 500;
@@ -45,7 +46,7 @@ export class GitStore {
 		try {
 			return await invoke<T>(command, args);
 		} catch (e) {
-			console.warn(warnPrefix, e);
+			log.warn('GitStore', warnPrefix, e);
 			return undefined;
 		}
 	}
@@ -69,7 +70,7 @@ export class GitStore {
 			'git_info',
 			projectPath,
 			{ path: projectPath },
-			'[GitStore] Not a git repo or git info failed:'
+			'Not a git repo or git info failed:'
 		);
 		if (info) {
 			this.branchByProject = { ...this.branchByProject, [projectPath]: info.branch };
@@ -81,7 +82,7 @@ export class GitStore {
 			'list_worktrees',
 			projectPath,
 			{ path: projectPath },
-			'[GitStore] Failed to list worktrees:'
+			'Failed to list worktrees:'
 		);
 		if (wts) {
 			this.worktreesByProject = { ...this.worktreesByProject, [projectPath]: wts };
@@ -93,7 +94,7 @@ export class GitStore {
 			'git_status',
 			projectPath,
 			{ path: projectPath },
-			'[GitStore] Failed to fetch status:'
+			'Failed to fetch status:'
 		);
 		if (status) {
 			this.statusByProject = { ...this.statusByProject, [projectPath]: status };
@@ -105,7 +106,7 @@ export class GitStore {
 			'git_log',
 			projectPath,
 			{ path: projectPath, maxCount },
-			'[GitStore] Failed to fetch log:'
+			'Failed to fetch log:'
 		);
 		if (log) {
 			this.logByProject = { ...this.logByProject, [projectPath]: log };
@@ -117,7 +118,7 @@ export class GitStore {
 			'git_stash_list',
 			projectPath,
 			{ path: projectPath },
-			'[GitStore] Failed to fetch stashes:'
+			'Failed to fetch stashes:'
 		);
 		if (stashes) {
 			this.stashByProject = { ...this.stashByProject, [projectPath]: stashes };
@@ -128,7 +129,7 @@ export class GitStore {
 		const ok = await this.tryInvoke<void>(
 			'git_stage',
 			{ path: projectPath, files },
-			'[GitStore] Failed to stage files:'
+			'Failed to stage files:'
 		);
 		if (ok !== undefined) {
 			await this.fetchStatus(projectPath);
@@ -139,7 +140,7 @@ export class GitStore {
 		const ok = await this.tryInvoke<void>(
 			'git_unstage',
 			{ path: projectPath, files },
-			'[GitStore] Failed to unstage files:'
+			'Failed to unstage files:'
 		);
 		if (ok !== undefined) {
 			await this.fetchStatus(projectPath);
@@ -239,7 +240,7 @@ export class GitStore {
 		const files = await this.tryInvoke<GitCommitFile[]>(
 			'git_show_files',
 			{ path: projectPath, sha },
-			'[GitStore] Failed to show files:'
+			'Failed to show files:'
 		);
 		return files ?? [];
 	}
@@ -250,7 +251,7 @@ export class GitStore {
 			await Promise.all([this.fetchStatus(projectPath), this.fetchLog(projectPath)]);
 			return result;
 		} catch (e) {
-			console.warn('[GitStore] Failed to revert:', e);
+			log.warn('GitStore', 'Failed to revert:', e);
 			throw e;
 		}
 	}

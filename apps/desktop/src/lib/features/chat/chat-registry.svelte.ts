@@ -1,5 +1,6 @@
 import type { ChatTarget } from '$types/workbench';
 import { AgentChat, ChatDraft, owned, type PaneProcess } from '@workbench/chat-ui';
+import { chatBreadcrumb } from '@workbench/telemetry';
 import { loopbackAgentApi } from './agent-api';
 import { desktopChatPlatform } from './chat-platform';
 
@@ -54,7 +55,8 @@ export function acquireChat(
 			new AgentChat(body, loopbackAgentApi, {
 				draft,
 				pane: () => processOf(paneId),
-				report: desktopChatPlatform.report
+				report: desktopChatPlatform.report,
+				breadcrumb: chatBreadcrumb
 			})
 	);
 	chats.set(paneId, { chat, destroy, generation: pane.generation, pane });

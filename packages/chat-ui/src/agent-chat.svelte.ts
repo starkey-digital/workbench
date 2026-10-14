@@ -43,7 +43,8 @@ import {
 	chatShape,
 	type ChatDiagnostic,
 	type ChatDiagnostics,
-	type ResyncReason
+	type ResyncReason,
+	type TraceEntry
 } from './chat-diagnostics';
 
 /**
@@ -228,6 +229,7 @@ export class AgentChat {
 	 * running is waited for only while the pane runs a newer spawn than the one
 	 * attached to (a restart from any device); otherwise the chat ends at once.
 	 * `report`: drift and unreadable frames, shape only (the host's Sentry).
+	 * `breadcrumb`: socket and state events as they happen, shape only.
 	 */
 	constructor(
 		body: ChatTarget,
@@ -237,13 +239,14 @@ export class AgentChat {
 			reconnectOnWake?: boolean;
 			pane?: () => PaneProcess | null | undefined;
 			report?: (d: ChatDiagnostic) => void;
+			breadcrumb?: (agent: AgentKind, entry: TraceEntry) => void;
 		} = {}
 	) {
 		this.pane = opts.pane ?? (() => null);
 		this.body = body;
 		this.api = api;
 		this.agent = body.agent ?? 'claude';
-		this.monitor = new ChatMonitor(this.agent, this.onStale, opts.report);
+		this.monitor = new ChatMonitor(this.agent, this.onStale, opts.report, opts.breadcrumb);
 		this.sessionId = body.sessionId;
 		this.accountId = body.claudeAccountId;
 		this.draft = opts.draft ?? new ChatDraft();
@@ -955,6 +958,11 @@ export class AgentChat {
 
 	private shape() {
 		return chatShape(this.items, this.start, this.meta);
+	}
+
+	/** The chat's recent events alone; safe to read when its items are what failed. */
+	trace(): TraceEntry[] {
+		return this.monitor.entries();
 	}
 
 	diagnostics(): ChatDiagnostics {

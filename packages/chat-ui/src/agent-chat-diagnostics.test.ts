@@ -179,6 +179,19 @@ describe('AgentChat diagnostics', () => {
 		]);
 	});
 
+	it('passes socket events, not each streamed update, to the host as breadcrumbs', async () => {
+		const breadcrumb = vi.fn();
+		new AgentChat({ projectPath: '/repo', sessionId: 'sid' }, api, { breadcrumb });
+		await vi.waitFor(() => expect(FakeSocket.all).toHaveLength(1));
+		const ws = FakeSocket.all[0];
+		ws.emit(snapshot(true));
+		ws.emit({ t: 'update', changes: [[1, reply]] });
+		ws.onclose?.({ code: 1006 });
+		const kinds = breadcrumb.mock.calls.map(([, entry]) => entry.kind);
+		expect(kinds).toEqual(['connect', 'snapshot', 'close', 'retry']);
+		expect(breadcrumb).toHaveBeenCalledWith('claude', expect.objectContaining({ code: 1006 }));
+	});
+
 	it('defers a misaligned resync the throttle holds back, rather than dropping it', async () => {
 		const { ws } = await connected(false);
 		ws.emit({ t: 'update', changes: [[4, reply]] });

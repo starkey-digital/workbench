@@ -1,6 +1,7 @@
 import { createHttpTransport, DEFAULT_TIMEOUT_MS, withTimeout } from '@workbench/transport';
 import { ControlPlaneStore } from '@workbench/control-plane-ui';
 import { uid } from '$lib/utils/uid';
+import { log } from '$lib/log';
 
 export type InstanceStatus = 'connecting' | 'online' | 'offline';
 
@@ -108,7 +109,7 @@ export class InstancesStore {
 			localStorage.setItem(STORAGE_KEY, JSON.stringify(this.remotes.map((r) => r.config)));
 		} catch (e) {
 			// Blocked storage: the server stays connected until the app quits.
-			console.warn('[InstancesStore] Failed to save servers:', e);
+			log.warn('InstancesStore', 'Failed to save servers:', e);
 		}
 	}
 

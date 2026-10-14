@@ -28,6 +28,7 @@ import {
 	isCodexSandboxMode
 } from '$lib/utils/claude';
 import { rotateServerToken } from '$lib/server-mode';
+import { log } from '$lib/log';
 
 /** Fields on WorkbenchSettingsStore that can be updated via the generic `set()` method. */
 type SettableField = keyof Omit<
@@ -54,6 +55,7 @@ export class WorkbenchSettingsStore {
 	gitSidebarEnabled = $state(false);
 	terminalPerformanceMode: TerminalPerformanceMode = $state('auto');
 	terminalTelemetryEnabled = $state(false);
+	extendedDiagnostics = $state(false);
 	terminalRenderer: TerminalRenderer = $state<TerminalRenderer>('xterm');
 	agentActions: AgentAction[] = $state([]);
 	codexConfigApproved: boolean | null = $state(null);
@@ -121,6 +123,7 @@ export class WorkbenchSettingsStore {
 		this.gitSidebarEnabled = settings.gitSidebarEnabled ?? false;
 		this.terminalPerformanceMode = settings.terminalPerformanceMode ?? 'auto';
 		this.terminalTelemetryEnabled = settings.terminalTelemetryEnabled ?? false;
+		this.extendedDiagnostics = settings.extendedDiagnostics ?? false;
 		this.terminalRenderer = settings.terminalRenderer ?? 'xterm';
 		this.agentActions = this.normalizeAgentActions(settings.agentActions);
 		this.codexConfigApproved = settings.codexConfigApproved ?? null;
@@ -157,7 +160,7 @@ export class WorkbenchSettingsStore {
 			this.sandboxRuntimeSettingsPath = await invokeLocal<string>('sandbox_runtime_settings_path');
 		} catch (e) {
 			this.sandboxRuntimeSettingsPath = '';
-			console.warn('[workbench-settings] sandbox_runtime_settings_path failed', e);
+			log.warn('workbench-settings', 'sandbox_runtime_settings_path failed', e);
 		}
 	}
 
@@ -311,6 +314,7 @@ export class WorkbenchSettingsStore {
 			gitSidebarEnabled: this.gitSidebarEnabled,
 			terminalPerformanceMode: this.terminalPerformanceMode,
 			terminalTelemetryEnabled: this.terminalTelemetryEnabled,
+			extendedDiagnostics: this.extendedDiagnostics,
 			terminalRenderer: this.terminalRenderer,
 			agentActions: this.agentActions,
 			codexConfigApproved: this.codexConfigApproved,
