@@ -1,5 +1,6 @@
 import { getContext, setContext } from 'svelte';
 import type { ChatAttachment } from '@workbench/types';
+import type { ChatDiagnostic } from './chat-diagnostics';
 
 /** What the chat views need from the app hosting them. */
 export interface ChatPlatform {
@@ -20,6 +21,12 @@ export interface ChatPlatform {
 			drop(attachments: ChatAttachment[], error: string | null): void;
 		}
 	): () => void;
+	/**
+	 * A chat's drift from the server or an unreadable frame, shape only (no
+	 * text, ids or URLs); hosts forward it to their error reporting. Hosts pass
+	 * it to `AgentChat`, since a chat can outlive the view this context is on.
+	 */
+	report?(diagnostic: ChatDiagnostic): void;
 }
 
 const KEY = Symbol('chat-platform');

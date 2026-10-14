@@ -20,6 +20,7 @@
 		agentName,
 		awaitsAnswer,
 		groupBlocks,
+		withHistory,
 		stepNames,
 		toolDetail,
 		type StepBlock
@@ -54,7 +55,7 @@
 		'Review my uncommitted changes'
 	];
 
-	const blocks = $derived(groupBlocks([...chat.historyItems, ...chat.items]));
+	const blocks = $derived(groupBlocks(withHistory(chat.historyItems, chat.items)));
 	const lastId = $derived(chat.items[chat.items.length - 1]?.id);
 	/** The newest message the running turn hasn't read, which carries Send now. */
 	const sendNowId = $derived(chat.canSendNow ? chat.unread[chat.unread.length - 1] : undefined);

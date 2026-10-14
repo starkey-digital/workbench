@@ -1,4 +1,5 @@
 import * as Sentry from '@sentry/svelte';
+import type { ChatDiagnostic } from '@workbench/chat-ui';
 
 // The desktop's public ingest DSN (write-only key); releases tell the apps apart.
 // Overridable via VITE_SENTRY_DSN at build time.
@@ -20,5 +21,23 @@ export function initSentry(): void {
 			...defaults.filter((i) => i.name !== 'Console'),
 			Sentry.breadcrumbsIntegration({ fetch: false, xhr: false })
 		]
+	});
+}
+
+/** A chat's drift from the server or unreadable frame: a warning, its event trace attached. */
+export function captureChatDiagnostic(d: ChatDiagnostic): void {
+	Sentry.withScope((scope) => {
+		scope.setTags({
+			agent: d.agent,
+			reason: d.reason ?? 'none',
+			mismatched: d.mismatched.join(',') || 'none'
+		});
+		scope.setContext('chat', d.fields);
+		scope.addAttachment({
+			filename: 'chat-trace.json',
+			data: JSON.stringify(d.trace),
+			contentType: 'application/json'
+		});
+		Sentry.captureMessage(`chat.${d.type}`, 'warning');
 	});
 }

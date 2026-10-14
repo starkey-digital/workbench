@@ -6,6 +6,9 @@
 	import { overlayScrollbars } from '$lib/utils/overlay-scrollbars';
 	import PanelsTopLeftIcon from '@lucide/svelte/icons/panels-top-left';
 	import GitBranchIcon from '@lucide/svelte/icons/git-branch';
+	import EllipsisIcon from '@lucide/svelte/icons/ellipsis';
+	import { toast } from 'svelte-sonner';
+	import * as DropdownMenu from '@workbench/ui/dropdown-menu';
 	import {
 		agentName,
 		ChatArtifacts,
@@ -163,6 +166,17 @@
 	 */
 	const follow = followLatest(chat, (host) => OverlayScrollbars(host)?.elements().viewport ?? host);
 
+	/** Shape only: counts, flags and recent socket events; nothing from the conversation. */
+	async function copyDiagnostics() {
+		const report = { app: `workbench@${__APP_VERSION__}`, ...chat.diagnostics() };
+		try {
+			await navigator.clipboard.writeText(JSON.stringify(report, null, 2));
+			toast.success('Copied chat diagnostics');
+		} catch (e) {
+			toast.error(`Couldn't copy diagnostics: ${e instanceof Error ? e.message : String(e)}`);
+		}
+	}
+
 	function onKeydown(event: KeyboardEvent) {
 		if (event.key === 'Escape' && chat.meta?.busy && !chat.waiting) {
 			event.preventDefault();
@@ -241,6 +255,24 @@
 					{chat.runningTasks > 0 ? `${chat.runningTasks} running` : 'Tasks'}
 				</button>
 			{/if}
+			<DropdownMenu.Root>
+				<DropdownMenu.Trigger>
+					{#snippet child({ props })}
+						<button
+							{...props}
+							type="button"
+							class="grid size-6 shrink-0 place-items-center rounded-md text-wb-ink-mute hover:bg-wb-panel2 focus-visible:ring-1 focus-visible:ring-wb-accent focus-visible:outline-none"
+							aria-label="Chat options"
+						>
+							<EllipsisIcon class="size-3.5" />
+						</button>
+					{/snippet}
+				</DropdownMenu.Trigger>
+				<DropdownMenu.Content align="end" class="w-44">
+					<DropdownMenu.Item onSelect={() => chat.resyncNow()}>Resync now</DropdownMenu.Item>
+					<DropdownMenu.Item onSelect={copyDiagnostics}>Copy diagnostics</DropdownMenu.Item>
+				</DropdownMenu.Content>
+			</DropdownMenu.Root>
 		</div>
 	</header>
 

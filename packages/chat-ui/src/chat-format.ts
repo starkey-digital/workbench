@@ -37,34 +37,48 @@ export type ChatBlock =
 	| { kind: 'steps'; id: string; blocks: StepBlock[]; tools: ToolItem[] };
 
 /**
- * Apply an update's `[index, item]` changes: replace by id, append new ones.
- * Indices below `start` belong to history the snapshot left out; placing them
- * would put an old item at the bottom of the chat.
+ * Apply an update's `[index, item]` changes: an item replaces the one with its
+ * id, else the one at its index, else is appended. Indices below `start`
+ * belong to history the snapshot left out; placing them would put an old item
+ * at the bottom of the chat. The server only appends or replaces in place
+ * (anything else comes as a snapshot), so a change whose index disagrees with
+ * the chat's is drift: `aligned` is false and the chat should resync.
  */
 export function applyChanges(
 	items: TranscriptItem[],
 	start: number,
 	changes: [number, TranscriptItem][]
-): TranscriptItem[] {
+): { items: TranscriptItem[]; aligned: boolean } {
 	const next = items.slice();
 	const at = new Map(next.map((item, i) => [item.id, i]));
+	let aligned = true;
 	for (const [index, item] of changes) {
 		if (index < start) continue;
+		const slot = index - start;
 		const i = at.get(item.id);
-		if (i === undefined) {
+		if (i !== undefined) {
+			next[i] = item;
+			aligned &&= i === slot;
+		} else if (slot < next.length) {
+			// The server holds another item there: the one shown is stale.
+			at.delete(next[slot].id);
+			at.set(item.id, slot);
+			next[slot] = item;
+			aligned = false;
+		} else {
+			aligned &&= slot === next.length;
 			at.set(item.id, next.length);
 			next.push(item);
-		} else {
-			next[i] = item;
 		}
 	}
-	return next;
+	return { items: next, aligned };
 }
 
 /**
  * The items before a same-session snapshot's window (a reconnect or resync
  * sends only the newest) that the chat already shows, so its scrollback isn't
- * cut. None when the snapshot starts at the beginning or shares no item.
+ * cut. None when the snapshot starts at the beginning or shares no item; never
+ * one the snapshot holds too, which would be keyed twice.
  */
 export function earlierItems(
 	items: TranscriptItem[],
@@ -72,7 +86,25 @@ export function earlierItems(
 ): TranscriptItem[] {
 	if (snapshot.start === 0 || snapshot.items.length === 0) return [];
 	const at = items.findIndex((i) => i.id === snapshot.items[0].id);
-	return at > 0 ? items.slice(0, at) : [];
+	if (at <= 0) return [];
+	const held = new Set(snapshot.items.map((i) => i.id));
+	return items.slice(0, at).filter((i) => !held.has(i.id));
+}
+
+/**
+ * Loaded history (Codex's earlier pages) followed by the live items, each id
+ * once: the pages and the live window can overlap, and a key shown twice
+ * throws in the transcript's keyed list. The live copy wins.
+ */
+export function withHistory(history: TranscriptItem[], items: TranscriptItem[]): TranscriptItem[] {
+	if (history.length === 0) return items;
+	const seen = new Set(items.map((i) => i.id));
+	const older = history.filter((i) => {
+		if (seen.has(i.id)) return false;
+		seen.add(i.id);
+		return true;
+	});
+	return [...older, ...items];
 }
 
 /** Group consecutive read-only tool calls so a turn reads as prose, not a log. */
