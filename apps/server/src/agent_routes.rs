@@ -36,8 +36,8 @@ use workbench_core::claude_accounts::{self, UsageLimit};
 use workbench_core::claude_transcript::{ApprovalDecision, ElicitationAction};
 
 use crate::agent::{
-    AgentKind, AgentSession, AgentSummary, CachePolicy, PromptFile, PromptImage, MAX_FILES,
-    MAX_IMAGES,
+    short_id, AgentKind, AgentSession, AgentSummary, CachePolicy, PromptFile, PromptImage,
+    MAX_FILES, MAX_IMAGES,
 };
 use crate::cwd::resolve_cwd;
 use crate::error::{ApiError, ApiResult};
@@ -166,6 +166,10 @@ pub async fn agent_attach(
     crate::auth::authorize_ws(&headers, auth.token.as_deref(), &state)?;
     // A browser socket can't read an HTTP status: say "not running" in the close.
     let Ok(session) = find(&state, &id) else {
+        tracing::info!(
+            "chat {}: attach refused, not running ({SESSION_GONE})",
+            short_id(&id)
+        );
         return Ok(ws.on_upgrade(|socket| {
             ws_close(
                 socket,
@@ -184,7 +188,15 @@ pub async fn agent_attach(
     Ok(ws
         .max_frame_size(MAX_PROMPT_BYTES)
         .max_message_size(MAX_PROMPT_BYTES)
-        .on_upgrade(move |socket| stream(socket, state, session, revoked, every_meta)))
+        .on_upgrade(move |socket| async move {
+            let id = session.id();
+            tracing::info!(
+                "chat {}: client attached (meta on every frame: {every_meta})",
+                short_id(&id)
+            );
+            let why = stream(socket, state, session, revoked, every_meta).await;
+            tracing::info!("chat {}: client socket closed ({why})", short_id(&id));
+        }))
 }
 
 const MAX_PROMPT_BYTES: usize = 160 * 1024 * 1024;
@@ -460,19 +472,19 @@ async fn stream(
     session: Arc<AgentSession>,
     mut revoked: watch::Receiver<bool>,
     every_meta: bool,
-) {
+) -> &'static str {
     let Some((snapshot, mut rx)) = subscribe(&session).await else {
-        return;
+        return "snapshot failed";
     };
     let already_exited = session.has_exited();
     if !ws_send(&mut socket, Message::Text(snapshot)).await {
-        return;
+        return "send failed";
     }
     if already_exited {
         // A finished session has nothing more to say; holding the socket open
         // would pin it (and its transcript) in memory.
         ws_close(socket, None).await;
-        return;
+        return "session had exited";
     }
     let mut heartbeat = crate::state::Heartbeat::new();
     // Client messages run one at a time, in order, on the blocking pool; the
@@ -487,12 +499,16 @@ async fn stream(
             if let Some(text) = queued.pop_front() {
                 // The client's view drifted: start it over, as when it falls behind.
                 if is_resync(&text) {
+                    tracing::info!(
+                        "chat {}: client asked for a resync",
+                        short_id(&session.id())
+                    );
                     let Some((snapshot, fresh)) = subscribe(&session).await else {
-                        return;
+                        return "snapshot failed";
                     };
                     rx = fresh;
                     if !ws_send(&mut socket, Message::Text(snapshot)).await {
-                        return;
+                        return "send failed";
                     }
                     continue;
                 }
@@ -514,34 +530,38 @@ async fn stream(
                 };
                 if let Some(frame) = frame {
                     if !ws_send(&mut socket, Message::Text(frame.to_string())).await {
-                        return;
+                        return "send failed";
                     }
                 }
             }
             alive = heartbeat.due(true) => {
-                if !alive || !ws_send(&mut socket, Message::Ping(Vec::new())).await {
-                    return;
+                if !alive {
+                    return "no pong";
+                }
+                if !ws_send(&mut socket, Message::Ping(Vec::new())).await {
+                    return "send failed";
                 }
             }
             frame = rx.recv(), if running.is_none() => {
                 let (frame, ended) = match frame {
                     Ok(frame) => (frame.render(every_meta).into_owned(), frame.ends()),
                     // Fell behind: start over from a fresh snapshot.
-                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::info!("chat {}: client fell {n} frames behind; resynced", short_id(&session.id()));
                         let Some((snapshot, fresh)) = subscribe(&session).await else {
-                            return;
+                            return "snapshot failed";
                         };
                         rx = fresh;
                         (snapshot, false)
                     }
-                    Err(broadcast::error::RecvError::Closed) => return,
+                    Err(broadcast::error::RecvError::Closed) => return "session gone",
                 };
                 if ended {
                     ws_close(socket, Some(Message::Text(frame))).await;
-                    return;
+                    return if session.is_replaced() { "replaced" } else { "session ended" };
                 }
                 if !ws_send(&mut socket, Message::Text(frame)).await {
-                    return;
+                    return "send failed";
                 }
             }
             msg = socket.recv() => match msg {
@@ -551,16 +571,22 @@ async fn stream(
                         let why = json!({"t": "error", "message":
                             "Too many messages while the session was busy restarting; reconnecting."});
                         ws_close(socket, Some(Message::Text(why.to_string()))).await;
-                        return;
+                        return "too many queued messages";
                     }
                     queued.push_back(text);
                 }
-                None | Some(Err(_)) | Some(Ok(Message::Close(_))) => return,
+                Some(Ok(Message::Close(frame))) => {
+                    return match frame.map(|f| f.code) {
+                        Some(1000 | 1001) => "client closed",
+                        _ => "client closed abnormally",
+                    };
+                }
+                None | Some(Err(_)) => return "client dropped",
                 Some(Ok(_)) => heartbeat.heard(),
             },
             _ = wait_revoked(&mut revoked) => {
                 ws_close(socket, Some(Message::Text(r#"{"t":"revoked"}"#.to_string()))).await;
-                return;
+                return "revoked";
             }
         }
     }

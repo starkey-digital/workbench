@@ -155,11 +155,9 @@ impl Frames {
 
     /// The session failed: its error is the last thing clients should read
     /// before the end, so changes still pending are dropped, not sent after it.
+    /// Any later frame carries meta again, as the dropped change may have been to it.
     pub fn fail(&self, error: String) {
-        let mut o = lock(&self.outbox.0);
-        o.items.clear();
-        o.dirty = false;
-        drop(o);
+        *lock(&self.outbox.0) = Outbox::default();
         self.send(error);
     }
 

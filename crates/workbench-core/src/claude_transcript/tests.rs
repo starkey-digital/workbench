@@ -179,6 +179,81 @@ fn streamed_text_is_replaced_in_place_by_the_final_block() {
 }
 
 #[test]
+fn a_reply_row_folded_after_its_result_leaves_the_chat_idle() {
+    let mut t = Transcript::default();
+    t.apply(&stream(
+        json!({"type":"message_start","message":{"id":"m1"}}),
+    ));
+    t.apply(&json!({"type":"result","subtype":"success","is_error":false}));
+    t.apply(&assistant(
+        "a1",
+        "m1",
+        json!({"type":"text","text":"Done."}),
+    ));
+    assert!(!t.meta().busy);
+    assert_eq!(t.items().len(), 1);
+}
+
+#[test]
+fn a_streamed_block_whose_id_names_a_tool_call_is_skipped_not_a_panic() {
+    let mut t = Transcript::default();
+    t.apply(&stream(
+        json!({"type":"message_start","message":{"id":"m1"}}),
+    ));
+    // A tool_use start without an id takes the `msg:index` id.
+    t.apply(&stream(json!({"type":"content_block_start","index":0,
+        "content_block":{"type":"tool_use","name":"Bash"}})));
+    t.apply(&stream(json!({"type":"content_block_start","index":0,
+        "content_block":{"type":"text","text":""}})));
+    assert_eq!(t.items().len(), 1);
+    assert!(t.stream_slots.is_empty());
+}
+
+#[test]
+fn streamed_items_wait_for_their_final_block_for_a_few_messages_only() {
+    let mut t = Transcript::default();
+    for m in 0..20 {
+        t.apply(&stream(
+            json!({"type":"message_start","message":{"id":format!("m{m}")}}),
+        ));
+        t.apply(&stream(json!({"type":"content_block_start","index":0,
+            "content_block":{"type":"text","text":""}})));
+    }
+    assert_eq!(t.stream_slots.len(), STREAM_SLOTS_KEPT);
+    t.apply(&assistant(
+        "a19",
+        "m19",
+        json!({"type":"text","text":"last"}),
+    ));
+    assert_eq!(t.stream_slots.len(), STREAM_SLOTS_KEPT - 1);
+}
+
+#[test]
+fn a_keep_alive_put_into_a_running_turn_hides_nothing() {
+    let mut t = Transcript::default();
+    t.apply(&stream(
+        json!({"type":"message_start","message":{"id":"m1"}}),
+    ));
+    t.apply(&json!({"type":"user","uuid":"k","workbench_queued":true,
+        "message":{"role":"user","content":KEEPALIVE_PROMPT}}));
+    t.apply(&stream(json!({"type":"content_block_start","index":0,
+        "content_block":{"type":"text","text":""}})));
+    assert_eq!(t.items().len(), 1, "the turn's reply still shows");
+    assert!(matches!(&t.items()[0], TranscriptItem::Text { .. }));
+}
+
+#[test]
+fn a_restarted_process_leaves_no_turn_running() {
+    let mut t = Transcript::default();
+    t.apply(&stream(
+        json!({"type":"message_start","message":{"id":"m1"}}),
+    ));
+    assert!(t.meta().busy);
+    t.restarted(Transcript::default());
+    assert!(!t.meta().busy);
+}
+
+#[test]
 fn a_streamed_tool_call_shows_running_then_gets_its_input() {
     let mut t = Transcript::default();
     t.apply(&stream(

@@ -311,22 +311,61 @@ test('a failed hello keeps the link and is said again; queued lines go then', as
 	expect(server.current()).not.toBeNull();
 
 	// Unattached: nothing is posted or polled.
-	server.emit({ type: 'system', subtype: 'init' });
+	const task = { type: 'system', subtype: 'task_started', task_id: 't1' };
+	server.emit({ type: 'user', n: 1 }, { type: 'conversation_reset' }, task, { type: 'assistant' });
 	calls = [];
 	await server.flush(fetch);
 	expect(await server.poll(fetch)).toEqual([]);
 	expect(calls).toEqual([]);
 
-	// The server loads the session's history: what was queued meanwhile goes.
+	// The server loads the session's history: the rows queued meanwhile go,
+	// and what history doesn't hold (a task starting) stays.
 	replies = [{ status: 204, text: '' }];
 	expect(await server.attach(fetch, true)).toBe(true);
 	expect(server.hello.needed).toBe(false);
-	await server.flush(fetch);
-	expect(paths()).toEqual(['/mod/hello']);
-
-	server.emit({ type: 'assistant' });
+	server.emit({ type: 'assistant', n: 2 });
 	await server.flush(fetch);
 	expect(paths()).toEqual(['/mod/hello', '/mod/out']);
+	const out = calls[1].body;
+	const seqs = out.seqs as number[];
+	expect(out.lines).toEqual([task, { type: 'assistant', n: 2 }]);
+	expect(seqs[1]).toBe(seqs[0] + 2);
+	expect(out.seq).toBe(seqs[0]);
+});
+
+test('a hello names the claude process, so the server tells a new one from a reload', async () => {
+	server.open({ url: 'http://127.0.0.1:1', token: 't', sessionId: 's', process: 'p1' });
+	replies = [ok];
+	await server.attach(fetch, false);
+	expect(calls[0].body.process).toBe('p1');
+});
+
+test('a 409 (another worker holds the session) says hello again and keeps the lines', async () => {
+	replies = [{ status: 409, text: '' }];
+	server.emit({ type: 'assistant' });
+	await server.flush(fetch);
+	expect(server.hello.needed).toBe(true);
+	replies = [{ status: 200, text: JSON.stringify({ inSeq: 0, loaded: false }) }];
+	await server.attach(fetch, true);
+	await advance(1_000);
+	await server.flush(fetch);
+	expect(calls.at(-1)?.body.lines).toEqual([{ type: 'assistant' }]);
+});
+
+test('a long outage drops streamed deltas before anything else', async () => {
+	server.hello.needed = true;
+	const delta = { type: 'stream_event', event: { type: 'content_block_delta' } };
+	const task = { type: 'system', subtype: 'task_started' };
+	server.emit(task);
+	for (let i = 0; i < 5_000; i++) server.emit(delta);
+	server.emit({ type: 'assistant' });
+	server.hello.needed = false;
+	await server.flush(fetch);
+	expect(calls[0].body.lines).toEqual([task, { type: 'assistant' }]);
+	// Confirmed by the numbers it carried: nothing goes again.
+	calls = [];
+	await server.flush(fetch);
+	expect(calls).toEqual([]);
 });
 
 test('the first hello keeps lines queued before it', async () => {

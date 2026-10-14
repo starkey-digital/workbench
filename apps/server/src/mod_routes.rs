@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use workbench_core::claude_accounts::RateWindow;
 use workbench_core::claude_transcript::WaitingSummary;
 
-use crate::agent::AgentSession;
+use crate::agent::{short_id, AgentSession, OtherWorker};
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -27,6 +27,9 @@ pub struct HelloBody {
     session_id: String,
     /// The plugin worker's numbering (absent: an older plugin).
     epoch: Option<String>,
+    /// The `claude` process the worker runs in, the same across its hot
+    /// reloads (absent: an older plugin).
+    process: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -38,6 +41,8 @@ pub struct OutBody {
     /// The first line's number, the rest following, in the worker's `epoch`
     /// (absent: an older plugin).
     seq: Option<u64>,
+    /// Each line's own number, where the plugin dropped some in between.
+    seqs: Option<Vec<u64>>,
     epoch: Option<String>,
 }
 
@@ -72,7 +77,19 @@ fn session(
     state
         .agents
         .mod_session(token(headers)?, id)
-        .ok_or_else(|| err(StatusCode::NOT_FOUND, "no such terminal session"))
+        .ok_or_else(|| {
+            // The plugin says hello again.
+            tracing::info!("chat link: no session {} for this terminal", short_id(id));
+            err(StatusCode::NOT_FOUND, "no such terminal session")
+        })
+}
+
+/// Lines from a plugin worker another has replaced: it says hello again.
+fn other_worker(_: OtherWorker) -> ApiError {
+    err(
+        StatusCode::CONFLICT,
+        "another plugin worker holds this session",
+    )
 }
 
 pub async fn hello(
@@ -88,17 +105,26 @@ pub async fn hello(
     let session_id = body.session_id.clone();
     // `hello_from` waits for a batch `/mod/out` is folding, which may read the
     // JSONL or wait for a process: never on an async worker.
-    let (session, in_seq) = crate::routes::blocking(move || {
+    let hello = crate::routes::blocking(move || {
         let session = agents.attach_mod(&token, &session_id)?;
         let link = session.mod_link();
-        if let Some(link) = link {
-            link.hello_from(body.epoch.as_deref());
+        let restarted = link.map_or(Ok(false), |l| {
+            l.hello_from(body.epoch.as_deref(), body.process.as_deref())
+        });
+        if restarted == Ok(true) {
+            session.restarted();
         }
         // Where its `/mod/in` lines stand: 0 for a new link.
         let in_seq = link.map_or(0, |l| l.acked());
-        Ok((session, in_seq))
+        Ok(restarted.map(|restarted| (session, in_seq, restarted)))
     })
     .await?;
+    let (session, in_seq, restarted) = hello.map_err(other_worker)?;
+    tracing::info!(
+        "chat {}: plugin hello (loaded: {loaded}, new claude process: {restarted})",
+        short_id(&body.session_id)
+    );
+    let loaded = loaded || restarted;
     // The plugin can only guess the model list; the CLI's own replaces it
     // when the (cached) probe answers.
     // A stale list is pinned at once; a newer one fetched behind it goes to
@@ -132,10 +158,11 @@ pub async fn out(
     note_usage(&state, &session, &body.lines);
     let agents = state.agents.clone();
     crate::routes::blocking(move || {
-        agents.feed_mod(&session, &body.lines, body.epoch.as_deref(), body.seq);
-        Ok(())
+        let seqs = body.seqs.as_deref();
+        Ok(agents.feed_mod(&session, &body.lines, body.epoch.as_deref(), body.seq, seqs))
     })
-    .await?;
+    .await?
+    .map_err(other_worker)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -178,6 +205,7 @@ pub struct AskBody {
     lines: Vec<Value>,
     /// The first of `lines`' numbers, as for `/mod/out`.
     seq: Option<u64>,
+    seqs: Option<Vec<u64>>,
     epoch: Option<String>,
     /// A chat's to answer even before one has it open: its turn came from chat.
     #[serde(default)]
@@ -209,21 +237,25 @@ pub async fn ask(
         .cloned()
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "no such terminal session"))?;
     let epoch = body.epoch.clone();
-    let feed = |lines: Vec<Value>, seq: Option<u64>| {
+    let feed = |lines: Vec<Value>, seq: Option<u64>, seqs: Option<Vec<u64>>| {
         let agents = state.agents.clone();
         let session = session.clone();
         let epoch = epoch.clone();
-        crate::routes::blocking(move || {
-            agents.feed_mod(&session, &lines, epoch.as_deref(), seq);
-            Ok(())
-        })
+        async move {
+            crate::routes::blocking(move || {
+                let seqs = seqs.as_deref();
+                Ok(agents.feed_mod(&session, &lines, epoch.as_deref(), seq, seqs))
+            })
+            .await?
+            .map_err(other_worker)
+        }
     };
     // Numbered lines fold once however often a retry brings them; an older
     // plugin's only come with the request's first call.
     let numbered = body.seq.is_some();
     if numbered {
         note_usage(&state, &session, &body.lines);
-        feed(body.lines.clone(), body.seq).await?;
+        feed(body.lines.clone(), body.seq, body.seqs.clone()).await?;
     }
     if let Some(line) = body.line {
         let tool_use_id = line
@@ -234,7 +266,7 @@ pub async fn ask(
         if new && body.terminal {
             if !numbered {
                 note_usage(&state, &session, &body.lines);
-                feed(body.lines, None).await?;
+                feed(body.lines, None, None).await?;
             }
             let tool = line.pointer("/request/tool_name").and_then(Value::as_str);
             link.fall_back(
@@ -256,7 +288,7 @@ pub async fn ask(
                 note_usage(&state, &session, &lines);
             }
             lines.push(line);
-            feed(lines, None).await?;
+            feed(lines, None, None).await?;
         }
     }
     // The terminal asks it (and a retry after a lost reply hears so again).
@@ -279,11 +311,16 @@ pub async fn ask(
             if let Some(answer) = link.fall_back(&body.request_id, waiting) {
                 return Ok(Json(json!({ "answer": answer })));
             }
+            tracing::info!(
+                "chat {}: no chat showed an approval; the terminal asks it",
+                short_id(&body.session_id)
+            );
             feed(
                 vec![
                     json!({"type": "control_cancel_request", "request_id": body.request_id,
                     "workbench_in_terminal": true}),
                 ],
+                None,
                 None,
             )
             .await?;
@@ -315,7 +352,9 @@ pub async fn bye(
     note_usage(&state, &session, &body.lines);
     let agents = state.agents.clone();
     crate::routes::blocking(move || {
-        agents.feed_mod(&session, &body.lines, body.epoch.as_deref(), body.seq);
+        let seqs = body.seqs.as_deref();
+        // Its last lines may come from a replaced worker: the chat detaches all the same.
+        let _ = agents.feed_mod(&session, &body.lines, body.epoch.as_deref(), body.seq, seqs);
         agents.detach(&session);
         Ok(())
     })

@@ -89,7 +89,20 @@ impl Inbox {
 struct Folded {
     epoch: Option<String>,
     last: u64,
+    /// The `claude` process the worker runs in (absent: an older plugin).
+    process: Option<String>,
+    /// Workers a newer one replaced, newest last: they can't take the link
+    /// back, or two live ones (a nested `claude` on the same token) would
+    /// take it from each other on every post.
+    retired: VecDeque<String>,
 }
+
+/// Replaced workers remembered.
+const RETIRED_KEPT: usize = 8;
+
+/// Lines a worker posted under another worker's numbering: it says hello again.
+#[derive(Debug, PartialEq)]
+pub struct OtherWorker;
 
 struct Ask {
     /// The tool call it is for.
@@ -311,6 +324,11 @@ impl ModLink {
         // One line of any size gets through: a long paste isn't a stuck link.
         let full = queue.lines.len() >= QUEUE_LINES || queue.bytes + bytes > QUEUE_BYTES;
         if full && !queue.lines.is_empty() {
+            tracing::warn!(
+                "chat link refused input: {} lines ({} bytes) wait for the plugin",
+                queue.lines.len(),
+                queue.bytes
+            );
             anyhow::bail!(
                 "Claude isn't reading chat input ({} messages wait in its terminal). Check the terminal, or restart the chat.",
                 queue.lines.len()
@@ -377,43 +395,94 @@ impl ModLink {
     }
 
     /// A plugin worker said hello: one with another `epoch` (it restarted)
-    /// numbers its lines from 1 again.
-    pub fn hello_from(&self, epoch: Option<&str>) {
+    /// numbers its lines from 1 again. True when it runs in another `claude`
+    /// process than the last one did (a new `claude --resume` in the same
+    /// terminal): nothing the old process asked or ran goes on.
+    /// Refused for a worker another has replaced.
+    pub fn hello_from(
+        &self,
+        epoch: Option<&str>,
+        process: Option<&str>,
+    ) -> Result<bool, OtherWorker> {
         let mut folded = lock(&self.folded);
-        if epoch.is_some() && folded.epoch.as_deref() != epoch {
-            *folded = Folded {
-                epoch: epoch.map(String::from),
-                last: 0,
-            };
+        if let Some(epoch) = epoch.filter(|e| folded.epoch.as_deref() != Some(*e)) {
+            if folded.retired.iter().any(|r| r == epoch) {
+                tracing::warn!("chat link: refused a hello from replaced plugin worker {epoch:?}");
+                return Err(OtherWorker);
+            }
+            tracing::info!("chat link: plugin worker {epoch:?} took over");
+            if let Some(old) = folded.epoch.replace(epoch.to_string()) {
+                folded.retired.push_back(old);
+                if folded.retired.len() > RETIRED_KEPT {
+                    folded.retired.pop_front();
+                }
+            }
+            folded.last = 0;
         }
+        let Some(process) = process else {
+            return Ok(false);
+        };
+        let restarted = folded.process.as_deref().is_some_and(|p| p != process);
+        folded.process = Some(process.to_string());
+        drop(folded);
+        if restarted {
+            lock(&self.asks).clear();
+            lock(&self.in_terminal).clear();
+        }
+        Ok(restarted)
     }
 
-    /// Fold the plugin's numbered `lines` (the first is `seq`) with `fold`,
-    /// skipping any already folded; one batch at a time. A worker's that has
-    /// been replaced (its slow post landing late) are dropped. Unnumbered (an
-    /// older plugin, or a line sent past the queue) all fold.
+    /// Fold the plugin's numbered `lines` (each numbered by `seqs`, else the
+    /// first is `seq` and the rest follow) with `fold`, skipping any already
+    /// folded; one batch at a time. A worker's that has been replaced (its slow
+    /// post landing late) are refused, so it says hello again. Unnumbered (an
+    /// older plugin, or a line sent past the queue) all fold. A line whose fold
+    /// panics counts as folded: sent again it would fail again, and hold up
+    /// every line after it.
     pub fn fold_new(
         &self,
         epoch: Option<&str>,
         seq: Option<u64>,
+        seqs: Option<&[u64]>,
         lines: &[Value],
         mut fold: impl FnMut(&Value),
-    ) {
+    ) -> Result<(), OtherWorker> {
+        let mut fold = |line: &Value| {
+            let folded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fold(line)));
+            if folded.is_err() {
+                let kind = line.get("type").and_then(Value::as_str);
+                tracing::error!("chat link: folding a {kind:?} line panicked; it was skipped");
+            }
+        };
         let Some(first) = seq.filter(|&s| s > 0) else {
             lines.iter().for_each(fold);
-            return;
+            return Ok(());
         };
+        let seqs = seqs.filter(|s| s.len() == lines.len());
         let mut folded = lock(&self.folded);
         if epoch.is_some() && folded.epoch.is_some() && folded.epoch.as_deref() != epoch {
-            return;
+            tracing::warn!(
+                "chat link: refused {} lines from replaced plugin worker {:?}",
+                lines.len(),
+                epoch
+            );
+            return Err(OtherWorker);
         }
         for (i, line) in lines.iter().enumerate() {
-            let n = first + i as u64;
+            let n = seqs.map_or(first + i as u64, |s| s[i]);
             if n > folded.last {
-                fold(line);
+                if n > folded.last + 1 {
+                    tracing::info!(
+                        "chat link: lines {}..{} never arrived (the plugin dropped them)",
+                        folded.last + 1,
+                        n - 1
+                    );
+                }
                 folded.last = n;
+                fold(line);
             }
         }
+        Ok(())
     }
 
     /// Whether a request carries this link's token (a constant-time compare).
@@ -672,27 +741,80 @@ mod tests {
         let mut folded = Vec::new();
         let n = |i: i64| json!({"n": i});
         let a = Some("a");
-        link.hello_from(a);
-        link.fold_new(a, Some(1), &[n(1), n(2)], |l| folded.push(l["n"].clone()));
+        link.hello_from(a, None).unwrap();
+        let mut fold = |seq, lines: &[Value]| {
+            link.fold_new(a, Some(seq), None, lines, |l| folded.push(l["n"].clone()))
+        };
+        fold(1, &[n(1), n(2)]).unwrap();
         // A retry after a lost reply carries them again, with the next one.
-        link.fold_new(a, Some(1), &[n(1), n(2), n(3)], |l| {
-            folded.push(l["n"].clone())
-        });
+        fold(1, &[n(1), n(2), n(3)]).unwrap();
         // A hung post that finally lands after a newer one.
-        link.fold_new(a, Some(2), &[n(2)], |l| folded.push(l["n"].clone()));
+        fold(2, &[n(2)]).unwrap();
         // Unnumbered (an older plugin, a withdraw past the queue) always folds.
-        link.fold_new(None, None, &[n(9)], |l| folded.push(l["n"].clone()));
+        link.fold_new(None, None, None, &[n(9)], |l| folded.push(l["n"].clone()))
+            .unwrap();
         assert_eq!(folded, vec![json!(1), json!(2), json!(3), json!(9)]);
 
         // The worker restarted: its numbers start again, and the old one's
-        // late post is dropped.
+        // late post is refused, so it says hello again.
         folded.clear();
-        link.hello_from(Some("b"));
-        link.hello_from(Some("b"));
-        link.fold_new(Some("b"), Some(1), &[n(10)], |l| {
+        link.hello_from(Some("b"), None).unwrap();
+        link.hello_from(Some("b"), None).unwrap();
+        link.fold_new(Some("b"), Some(1), None, &[n(10)], |l| {
             folded.push(l["n"].clone())
-        });
-        link.fold_new(a, Some(4), &[n(4)], |l| folded.push(l["n"].clone()));
+        })
+        .unwrap();
+        let late = link.fold_new(a, Some(4), None, &[n(4)], |l| folded.push(l["n"].clone()));
+        assert!(late.is_err());
         assert_eq!(folded, vec![json!(10)]);
+        // Nor can its hello take the link back.
+        assert!(link.hello_from(a, None).is_err());
+    }
+
+    #[test]
+    fn lines_the_plugin_dropped_leave_gaps_its_numbers_name() {
+        let link = ModLink::new("t".into(), None);
+        let mut folded = Vec::new();
+        let n = |i: i64| json!({"n": i});
+        link.fold_new(None, Some(1), Some(&[1, 4, 5]), &[n(1), n(4), n(5)], |l| {
+            folded.push(l["n"].clone())
+        })
+        .unwrap();
+        // Resent with the next line: only that one is new.
+        link.fold_new(None, Some(4), Some(&[4, 5, 6]), &[n(4), n(5), n(6)], |l| {
+            folded.push(l["n"].clone())
+        })
+        .unwrap();
+        assert_eq!(folded, vec![json!(1), json!(4), json!(5), json!(6)]);
+    }
+
+    #[test]
+    fn a_line_whose_fold_panics_is_not_folded_again_and_holds_up_nothing() {
+        let link = ModLink::new("t".into(), None);
+        let mut folded = Vec::new();
+        let lines = [json!({"n": 1}), json!({"n": 2})];
+        let mut fold = |l: &Value| {
+            if l["n"] == 1 {
+                panic!("poison");
+            }
+            folded.push(l["n"].clone());
+        };
+        link.fold_new(None, Some(1), None, &lines, &mut fold)
+            .unwrap();
+        link.fold_new(None, Some(1), None, &lines, &mut fold)
+            .unwrap();
+        assert_eq!(folded, vec![json!(2)]);
+    }
+
+    #[test]
+    fn a_new_claude_process_drops_what_the_old_one_asked() {
+        let link = ModLink::new("t".into(), None);
+        assert!(!link.hello_from(Some("a"), Some("p1")).unwrap());
+        link.expect_answer("r1", None);
+        // A hot reload: the same process, a new worker.
+        assert!(!link.hello_from(Some("b"), Some("p1")).unwrap());
+        assert!(lock(&link.asks).contains_key("r1"));
+        assert!(link.hello_from(Some("c"), Some("p2")).unwrap());
+        assert!(lock(&link.asks).is_empty());
     }
 }
