@@ -102,7 +102,7 @@
 	const pr = $derived(branch ? githubStore.getBranchStatus(project.path, branch)?.pr : null);
 
 	// The chat's Restart is the pane's: the server restarts it, then the chat re-attaches.
-	chat.onRestart = () => void workspaceStore.restartAISession('', tabId);
+	chat.onRestart = () => void claudeSessionStore.restartSession('', tabId, agent);
 	watch(
 		() => [status, generation],
 		() => followPane(paneId, { status, generation })
