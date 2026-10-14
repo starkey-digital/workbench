@@ -8,9 +8,10 @@
 //! carry this launch's secret, which only the processes the server starts get.
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -19,6 +20,12 @@ use tokio::sync::broadcast;
 mod http;
 
 const CONNECTION_READ_TIMEOUT: Duration = Duration::from_secs(10);
+/// All the time one connection gets, however it trickles in.
+const CONNECTION_DEADLINE: Duration = Duration::from_secs(30);
+/// Connections served at once (a thread each); more are closed unread.
+const MAX_CONNECTIONS: usize = 64;
+/// What one connection may send, headers and body or raw lines.
+const MAX_CONNECTION_BYTES: u64 = http::MAX_BODY as u64 + 64 * 1024;
 
 /// One event a process reported.
 #[derive(Debug, Clone)]
@@ -92,12 +99,20 @@ impl HookBridge {
         workbench_core::sandbox_runtime::set_hook_socket(Some(address.clone()));
         let secret = workbench_core::token::generate()?;
         let (events, expected) = (self.events.clone(), Arc::new(secret.clone()));
+        let open = Arc::new(AtomicUsize::new(0));
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
-                // A client that connects and goes quiet would hold its thread forever.
-                let _ = stream.set_read_timeout(Some(CONNECTION_READ_TIMEOUT));
-                let (events, expected) = (events.clone(), expected.clone());
-                std::thread::spawn(move || serve(&stream, &events, &expected));
+                if open.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
+                    open.fetch_sub(1, Ordering::SeqCst);
+                    tracing::warn!("hook bridge: too many connections, one refused");
+                    continue;
+                }
+                let (events, expected, slot) =
+                    (events.clone(), expected.clone(), Slot(open.clone()));
+                std::thread::spawn(move || {
+                    let _slot = slot;
+                    serve(&stream, &events, &expected);
+                });
             }
         });
         Ok(Listening { address, secret })
@@ -119,8 +134,39 @@ impl HookBridge {
     }
 }
 
-fn serve(stream: &std::net::TcpStream, events: &broadcast::Sender<HookEvent>, secret: &str) {
-    let mut reader = BufReader::new(stream);
+/// One of the [`MAX_CONNECTIONS`], given back when its thread ends however it ends.
+struct Slot(Arc<AtomicUsize>);
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// A connection's reads, each waiting at most what is left of its
+/// [`CONNECTION_DEADLINE`]: a client that goes quiet, or sends a byte at a
+/// time, can't hold its slot (and thread) for long.
+struct Deadline<'a> {
+    stream: &'a TcpStream,
+    until: Instant,
+}
+
+impl Read for Deadline<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let left = self.until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(std::io::ErrorKind::TimedOut.into());
+        }
+        self.stream
+            .set_read_timeout(Some(left.min(CONNECTION_READ_TIMEOUT)))?;
+        let mut stream = self.stream;
+        stream.read(buf)
+    }
+}
+
+fn serve(stream: &TcpStream, events: &broadcast::Sender<HookEvent>, secret: &str) {
+    let until = Instant::now() + CONNECTION_DEADLINE;
+    let mut reader = BufReader::new(Deadline { stream, until }.take(MAX_CONNECTION_BYTES));
     if !http::is_post(&mut reader) {
         return read_lines(reader, events, Some(secret));
     }

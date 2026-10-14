@@ -8,8 +8,6 @@
 //! (`DispatchQueue.main.sync` into SwiftTerm), so they run on
 //! `crate::blocking`; write only queues input.
 
-#![cfg(target_os = "macos")]
-
 use crate::native_terminal::NativeTerminalManager;
 use crate::server_control::ServerControl;
 use tauri::Manager;
@@ -20,6 +18,7 @@ use tauri::Manager;
 /// blocking pool in any order, then never touch each other, and every later
 /// call and event (resize, detach, `terminal:exit`) names the terminal.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn attach_native_terminal(
     terminal_id: String,
     x: f64,

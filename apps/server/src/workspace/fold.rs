@@ -149,6 +149,9 @@ impl WorkspaceService {
             let mut changed = false;
             for (pane, summary) in panes {
                 let rt = state.runtime.entry(pane.id.clone()).or_default();
+                if rt.spawns > 0 {
+                    continue;
+                }
                 let before = rt.clone();
                 let term = rt
                     .terminal_id

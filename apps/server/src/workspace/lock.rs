@@ -1,82 +1,76 @@
 //! One process keeps a config dir's workspace model: the desktop and a
 //! standalone server on the same dir would otherwise both boot (and run) every
-//! saved pane. An advisory pid file; a stale one (its process gone) is taken.
+//! saved pane. An OS file lock (flock / LockFileEx), so the kernel releases it
+//! when the process ends however it ends: a pid left in a file outlived every
+//! quit, and once the pid was reused the next launch never loaded its tabs.
 
+use std::fs::{File, OpenOptions, TryLockError};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, Weak};
 
 const FILE: &str = "workspaces.v2.lock";
 
-pub(super) struct ModelLock(PathBuf);
+/// Locks this process holds, by path: a second service on the same dir (a
+/// restart in tests) shares the lock instead of refusing itself.
+static HELD: Mutex<Vec<(PathBuf, Weak<File>)>> = Mutex::new(Vec::new());
+
+pub(super) struct ModelLock {
+    _file: Arc<File>,
+}
 
 impl ModelLock {
-    /// Take the dir's lock, or `None` while another live process holds it.
+    /// Take the dir's lock, or `None` while another process holds it.
     pub(super) fn take(dir: &Path) -> Option<Self> {
         let path = dir.join(FILE);
-        let me = std::process::id();
-        for _ in 0..2 {
-            match std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&path)
-            {
-                Ok(mut file) => {
-                    let _ = write!(file, "{me}");
-                    return Some(Self(path));
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => match holder(&path) {
-                    // A service of this process held it before (a restart in tests).
-                    Some(pid) if pid == me => return Some(Self(path)),
-                    Some(pid) if alive(pid) => return None,
-                    _ => {
-                        let _ = std::fs::remove_file(&path);
-                    }
-                },
-                Err(e) => {
-                    tracing::warn!("workspace lock {}: {e}", path.display());
-                    return None;
-                }
+        let mut held = HELD.lock().unwrap_or_else(|e| e.into_inner());
+        held.retain(|(_, file)| file.strong_count() > 0);
+        if let Some(file) = held
+            .iter()
+            .find(|(p, _)| *p == path)
+            .and_then(|(_, file)| file.upgrade())
+        {
+            return Some(Self { _file: file });
+        }
+        let opened = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&path);
+        let file = match opened {
+            Ok(file) => file,
+            Err(e) => {
+                tracing::warn!("workspace lock {}: {e}", path.display());
+                return None;
+            }
+        };
+        match file.try_lock() {
+            Ok(()) => {}
+            Err(TryLockError::WouldBlock) => return None,
+            // A filesystem without locks (some network mounts): keep the model
+            // anyway, as an unlocked one did before.
+            Err(TryLockError::Error(e)) => {
+                tracing::warn!("workspace lock {} not taken: {e}", path.display());
             }
         }
-        None
+        // Who holds it, for the banner of a process that can't take it.
+        let _ = file.set_len(0);
+        let _ = (&file).write_all(std::process::id().to_string().as_bytes());
+        let file = Arc::new(file);
+        held.push((path, Arc::downgrade(&file)));
+        Some(Self { _file: file })
     }
-}
 
-impl ModelLock {
-    /// The process holding `dir`'s lock, if it says.
+    /// The process holding `dir`'s lock, if it says (Windows' lock keeps
+    /// others from reading it).
     pub(super) fn holder_of(dir: &Path) -> Option<u32> {
-        holder(&dir.join(FILE))
+        std::fs::read_to_string(dir.join(FILE))
+            .ok()?
+            .trim()
+            .parse()
+            .ok()
     }
-}
-
-impl Drop for ModelLock {
-    fn drop(&mut self) {
-        if holder(&self.0) == Some(std::process::id()) {
-            let _ = std::fs::remove_file(&self.0);
-        }
-    }
-}
-
-fn holder(path: &Path) -> Option<u32> {
-    std::fs::read_to_string(path).ok()?.trim().parse().ok()
-}
-
-#[cfg(unix)]
-fn alive(pid: u32) -> bool {
-    let Ok(pid) = libc::pid_t::try_from(pid) else {
-        return false;
-    };
-    // Signal 0 only checks: EPERM means it exists under another user.
-    let found = unsafe { libc::kill(pid, 0) } == 0;
-    found || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-}
-
-#[cfg(windows)]
-fn alive(pid: u32) -> bool {
-    workbench_core::shell::command("tasklist")
-        .args(["/FI", &format!("PID eq {pid}"), "/NH"])
-        .output()
-        .is_ok_and(|out| String::from_utf8_lossy(&out.stdout).contains(&pid.to_string()))
 }
 
 #[cfg(test)]
@@ -84,19 +78,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_live_holder_keeps_it_and_a_stale_one_doesnt() {
+    fn held_by_the_os_not_by_a_pid_in_the_file() {
         let dir = tempfile::tempdir().unwrap();
         let held = ModelLock::take(dir.path()).expect("free");
         assert!(ModelLock::take(dir.path()).is_some(), "this process again");
-        drop(held);
-        assert!(!dir.path().join(FILE).exists(), "released");
-
-        // Process 1 is always alive and never us.
-        std::fs::write(dir.path().join(FILE), "1").unwrap();
         #[cfg(unix)]
+        assert_eq!(ModelLock::holder_of(dir.path()), Some(std::process::id()));
+        drop(held);
+
+        // Another process's lock: a separate open file holding it.
+        let other = File::open(dir.path().join(FILE)).unwrap();
+        other.try_lock().unwrap();
         assert!(ModelLock::take(dir.path()).is_none());
-        // A pid nothing runs as is stale.
-        std::fs::write(dir.path().join(FILE), "4194303999").unwrap();
+        drop(other);
+
+        // A pid left behind by one that quit (and may be reused) means nothing.
+        std::fs::write(dir.path().join(FILE), "1").unwrap();
         assert!(ModelLock::take(dir.path()).is_some());
     }
 }

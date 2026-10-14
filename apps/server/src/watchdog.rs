@@ -77,6 +77,7 @@ fn watch(handle: tokio::runtime::Handle) {
     loop {
         let slept = Instant::now();
         watch.swapins = swapins();
+        watch.power = power_events();
         std::thread::sleep(CHECK_EVERY);
         watch.note_freeze(slept.elapsed().saturating_sub(CHECK_EVERY));
         let async_ran = watch.probe("async workers", |done| {
@@ -98,6 +99,8 @@ struct Watch {
     sampled: Option<Instant>,
     /// Swap-ins so far, as of this tick's start.
     swapins: Option<u64>,
+    /// The machine's last sleep and wake, as of this tick's start.
+    power: Option<[i64; 4]>,
     reported: std::collections::HashMap<&'static str, Instant>,
 }
 
@@ -127,6 +130,9 @@ impl Watch {
         if cfg!(windows) || late < FROZE {
             return;
         }
+        if self.excused(late) {
+            return;
+        }
         // A breadcrumb first: Sentry attaches it to the error that follows.
         tracing::warn!(
             "no thread of the process ran for {:.1}s{}",
@@ -140,12 +146,47 @@ impl Watch {
         self.report("froze", &message);
     }
 
+    /// The watchdog was `late` for a reason outside the process: logged as
+    /// such, never a report.
+    fn excused(&self, late: Duration) -> bool {
+        // The monotonic clock runs on through DarkWake and while the system
+        // stops apps on the way into sleep.
+        if power_events() != self.power {
+            tracing::info!(
+                "the machine slept or woke while the watchdog was {:.1}s late",
+                late.as_secs_f64()
+            );
+            return true;
+        }
+        // `sample` suspends the process for each stack it takes.
+        if self.sampled.is_some_and(|at| at.elapsed() < late + FROZE) {
+            tracing::warn!(
+                "the process was stopped for {:.1}s while its threads were sampled",
+                late.as_secs_f64()
+            );
+            return true;
+        }
+        false
+    }
+
     /// Log when `start`'s task waits past [`STALL`] for a thread, and again
     /// when it runs. False once the runtime is gone.
     fn probe(&mut self, what: &'static str, start: impl FnOnce(mpsc::Sender<()>)) -> bool {
         let (done, ran) = mpsc::channel();
-        let started = Instant::now();
+        // Timed apart from the wait: the spawn itself blocking (a runtime
+        // lock, a thread that wouldn't start) is neither a stall nor a freeze.
+        let spawning = Instant::now();
         start(done);
+        let spawn_took = spawning.elapsed();
+        if spawn_took >= STALL && !self.excused(spawn_took) {
+            sample_threads(&mut self.sampled);
+            let message = format!(
+                "server watchdog blocked starting its {what} probe for {:.1}s",
+                spawn_took.as_secs_f64()
+            );
+            self.report("probe", &message);
+        }
+        let started = Instant::now();
         match ran.recv_timeout(STALL) {
             Ok(()) => return true,
             Err(mpsc::RecvTimeoutError::Disconnected) => return false,
@@ -268,6 +309,24 @@ fn swapins() -> Option<u64> {
     None
 }
 
+/// When the machine last went to sleep and woke, as seconds and microseconds.
+#[cfg(target_os = "macos")]
+fn power_events() -> Option<[i64; 4]> {
+    let slept: libc::timeval = sysctl(c"kern.sleeptime")?;
+    let woke: libc::timeval = sysctl(c"kern.waketime")?;
+    Some([
+        slept.tv_sec,
+        slept.tv_usec.into(),
+        woke.tv_sec,
+        woke.tv_usec.into(),
+    ])
+}
+
+#[cfg(not(target_os = "macos"))]
+fn power_events() -> Option<[i64; 4]> {
+    None
+}
+
 /// `; swap 5837 of 6144 MB used, 1234 system swap-ins during the freeze` on macOS, where a
 /// frozen process is most often one swapped out. Not the kernel's pressure
 /// level: it stayed `normal` through freezes with swap nearly full.
@@ -375,6 +434,24 @@ mod tests {
         assert_eq!(left.len(), SAMPLES_KEPT, "9 samples and the log");
         assert_eq!(left[0], "stall-1700000003.txt");
         assert!(left.contains(&"workbench.log".to_string()));
+    }
+
+    #[test]
+    fn a_freeze_across_a_sleep_or_wake_or_a_sample_is_not_reported_as_one() {
+        assert!(power_events().is_some(), "kern.sleeptime/waketime readable");
+        let mut watch = Watch {
+            power: Some([0; 4]),
+            ..Watch::default()
+        };
+        watch.note_freeze(FROZE * 2);
+        assert!(watch.reported.is_empty(), "the machine slept since");
+        watch.power = power_events();
+        watch.sampled = Some(Instant::now());
+        watch.note_freeze(FROZE * 2);
+        assert!(watch.reported.is_empty(), "a thread sample stopped it");
+        watch.sampled = None;
+        watch.note_freeze(FROZE * 2);
+        assert!(watch.reported.contains_key("froze"));
     }
 
     #[test]

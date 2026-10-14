@@ -74,6 +74,10 @@ pub struct PaneRuntime {
     /// Its session ran (a Claude chat attached): gone again is an exit.
     #[serde(skip)]
     ran: bool,
+    /// Spawns queued and not yet carried out: until then the old process may
+    /// still report, so `fold` leaves the pane as its spawn sets it.
+    #[serde(skip)]
+    spawns: u32,
 }
 
 struct State {
@@ -368,16 +372,23 @@ impl WorkspaceService {
                 | Effect::SpawnClaude { pane_id, .. }
                 | Effect::SpawnCodex { pane_id, .. } => {
                     let pane = exec::PaneCtx::of(&state.model, pane_id);
-                    let generation = state.runtime.get(pane_id).map_or(0, |r| r.generation) + 1;
+                    let (generation, spawns) = state
+                        .runtime
+                        .get(pane_id)
+                        .map_or((0, 0), |r| (r.generation, r.spawns));
                     state.runtime.insert(
                         pane_id.clone(),
                         PaneRuntime {
-                            generation,
+                            generation: generation + 1,
+                            spawns: spawns + 1,
                             ..PaneRuntime::default()
                         },
                     );
                     job.push((effect, pane));
                 }
+                // A trust answer goes to the terminal shown now; a stop or end
+                // finds the pane's terminals when it runs (one queued behind a
+                // spawn must also stop what that spawn starts).
                 Effect::Stop { pane_id, .. }
                 | Effect::End { pane_id, .. }
                 | Effect::TrustFolder { pane_id, .. } => {
@@ -433,6 +444,7 @@ impl WorkspaceService {
             }
             saving.writing = true;
         }
+        let _unstick = Unstick(&self.0.saving);
         loop {
             let (gen, file) = {
                 let mut saving = lock(&self.0.saving);
@@ -447,6 +459,11 @@ impl WorkspaceService {
             }
             lock(&self.0.saving).written = gen;
         }
+    }
+
+    /// The snapshots as they come, without asking for a fresh one.
+    fn published(&self) -> watch::Receiver<Arc<Published>> {
+        self.0.published.subscribe()
     }
 
     /// Change one pane's runtime state (an exec result).
@@ -488,6 +505,17 @@ impl WorkspaceService {
                 json,
             });
         });
+    }
+}
+
+/// A save that panicked leaves `writing` unset, or no later save would run.
+struct Unstick<'a>(&'a Mutex<Saving>);
+
+impl Drop for Unstick<'_> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            lock(self.0).writing = false;
+        }
     }
 }
 

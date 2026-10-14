@@ -57,6 +57,8 @@ pub use local::Tap;
 
 /// Scrollback kept per session for replay on reattach.
 const BUFFER_CAP: usize = 256 * 1024;
+/// The output [`TerminalManager::recent_output`] reads: enough for a screen.
+const RECENT: usize = 16 * 1024;
 
 /// Input chunks (one per WS message) queued for a session's writer thread.
 const INPUT_QUEUE: usize = 64;
@@ -159,6 +161,16 @@ impl TerminalManager {
             .values()
             .find(|s| s.pane_id.as_deref() == Some(pane_id))
             .map(|s| lock(&s.meta).clone())
+    }
+
+    /// Every terminal started for a pane: more than one while a restart is
+    /// in flight.
+    pub fn pane_terminals(&self, pane_id: &str) -> Vec<String> {
+        lock(&self.inner)
+            .iter()
+            .filter(|(_, s)| s.pane_id.as_deref() == Some(pane_id))
+            .map(|(id, _)| id.clone())
+            .collect()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -336,11 +348,10 @@ impl TerminalManager {
 
     pub fn list(&self) -> Vec<TerminalMeta> {
         let map = lock(&self.inner);
-        // Reap exited shells so they stop showing as alive (and don't linger as
-        // zombies). Sessions are kept in the map so they can still be inspected
-        // / resumed until the user dismisses them.
+        // A shell that exited stops showing as alive. Sessions are kept in the
+        // map so they can still be inspected / resumed until the user dismisses them.
         for s in map.values() {
-            if matches!(lock(&s.child).try_wait(), Ok(Some(_))) {
+            if s.exited() {
                 lock(&s.meta).alive = false;
             }
         }
@@ -355,12 +366,15 @@ impl TerminalManager {
         out
     }
 
-    /// The terminal's recent output (its replay buffer), lossily decoded.
+    /// The terminal's latest output (what its screen shows), lossily decoded.
     pub fn recent_output(&self, id: &str) -> Option<String> {
         let session = self.get(id)?;
         let buffer = lock(&session.buffer);
-        let (head, tail) = buffer.as_slices();
-        Some(String::from_utf8_lossy(&[head, tail].concat()).into_owned())
+        let tail: Vec<u8> = buffer
+            .range(buffer.len().saturating_sub(RECENT)..)
+            .copied()
+            .collect();
+        Some(String::from_utf8_lossy(&tail).into_owned())
     }
 
     /// Type into the terminal as an attached client would. `false` when it's
@@ -403,16 +417,24 @@ impl TerminalManager {
         };
         #[cfg(unix)]
         let groups = {
+            // Held throughout, so the reader can't reap the shell meanwhile.
+            let child = lock(&s.child);
+            // Reaped already (its shell exited): the pid may be another process's now.
+            let reaped = s.reaped();
             // Under job control the foreground command (`claude`) runs in its own
             // group, which the shell's group signal reaches only indirectly.
-            let shell = lock(&s.child).process_id().map(|p| p as libc::pid_t);
-            let foreground = lock(&s.master).process_group_leader();
+            let shell = child
+                .process_id()
+                .filter(|_| !reaped)
+                .map(|p| p as libc::pid_t);
+            let foreground = lock(&s.master).process_group_leader().filter(|_| !reaped);
             if let Some(fg) = foreground.filter(|&fg| Some(fg) != shell) {
                 unsafe {
                     libc::killpg(fg, libc::SIGHUP);
                     libc::killpg(fg, libc::SIGTERM);
                 }
             }
+            drop(child);
             [shell, foreground]
         };
         terminate_process_group(&s);
@@ -637,17 +659,9 @@ pub async fn terminal_attach(
 /// exit status if it has been reaped. Falls back to `null` when the status isn't yet
 /// available (e.g. PTY EOF observed a moment before the child is fully reaped).
 fn exit_frame(session: &TerminalSession) -> Message {
-    // Prefer the code the reader thread captured when it reaped the child; fall back
-    // to a best-effort try_wait (the child may have just become reapable).
-    //
-    // Copy the recorded code out and drop the exit_code guard BEFORE touching the
-    // child lock: terminate_process_group acquires child→exit_code, so holding
-    // exit_code across the try_wait here would be a lock-order inversion (deadlock).
-    let recorded = *lock(&session.exit_code);
-    let code = recorded.or_else(|| match lock(&session.child).try_wait() {
-        Ok(Some(status)) => Some(status.exit_code() as i64),
-        _ => None,
-    });
+    // The code the reader thread captured when it reaped the child (it does so
+    // before waking sockets). Never reaped here: see `TerminalSession::exited`.
+    let code = *lock(&session.exit_code);
     let json = match code {
         Some(c) => format!(r#"{{"t":"exit","code":{c}}}"#),
         None => r#"{"t":"exit","code":null}"#.to_string(),
@@ -701,7 +715,12 @@ fn wait_for_shell_prompt(session: &TerminalSession) {
 /// escalation blocks, so callers run it on a dedicated thread or the reader thread.
 #[cfg(unix)]
 fn terminate_process_group(session: &TerminalSession) {
-    let pgid = match lock(&session.child).process_id() {
+    let child = lock(&session.child);
+    // Reaped by an earlier call (the reader's EOF, then a kill): its pid is free.
+    if session.reaped() {
+        return;
+    }
+    let pgid = match child.process_id() {
         Some(pid) => pid as libc::pid_t,
         None => return,
     };
@@ -712,31 +731,48 @@ fn terminate_process_group(session: &TerminalSession) {
         libc::killpg(pgid, libc::SIGHUP);
         libc::killpg(pgid, libc::SIGTERM);
     }
+    drop(child);
     // Wait briefly for graceful exit (reaping the leader for its real code), then
-    // SIGKILL anything still alive.
-    let deadline = Instant::now() + Duration::from_millis(500);
-    loop {
-        // Bind the try_wait result so the child guard (a scrutinee temporary that
-        // would otherwise live for the whole match) is dropped before we sleep or
-        // take the exit_code lock — exit_frame takes exit_code first, so holding
-        // child across it would invert the lock order.
-        let reaped = lock(&session.child).try_wait();
-        match reaped {
-            Ok(Some(status)) => {
-                let mut code = lock(&session.exit_code);
-                if code.is_none() {
-                    *code = Some(status.exit_code() as i64);
-                }
-                return;
-            }
-            Ok(None) if Instant::now() >= deadline => break,
-            Ok(None) => std::thread::sleep(Duration::from_millis(25)),
-            Err(_) => break,
-        }
+    // SIGKILL anything still alive, and reap that.
+    if reap_within(session, Duration::from_millis(500)) {
+        return;
     }
     unsafe {
         libc::killpg(pgid, libc::SIGKILL);
     }
+    reap_within(session, Duration::from_millis(500));
+}
+
+/// Reap the shell, recording its exit code, if it exits within `wait`.
+#[cfg(unix)]
+fn reap_within(session: &TerminalSession, wait: Duration) -> bool {
+    let deadline = Instant::now() + wait;
+    loop {
+        // Recorded under the child lock (order: child, then exit_code), so a
+        // concurrent call sees the reap and doesn't signal the freed pid.
+        let mut child = lock(&session.child);
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                lock(&session.exit_code).get_or_insert(status.exit_code() as i64);
+                return true;
+            }
+            Ok(None) if Instant::now() < deadline => {
+                drop(child);
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            _ => return false,
+        }
+    }
+}
+
+/// Whether `pid` (our child) has exited, without reaping it.
+#[cfg(unix)]
+fn peek_exited(pid: libc::pid_t) -> bool {
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    let flags = libc::WEXITED | libc::WNOHANG | libc::WNOWAIT;
+    let ok = unsafe { libc::waitid(libc::P_PID, pid as libc::id_t, &mut info, flags) } == 0;
+    // WNOHANG with nothing to report leaves the zeroed `si_pid`.
+    ok && unsafe { info.si_pid() } != 0
 }
 
 /// Poll until no process is left in `groups`, SIGKILLing stragglers after a
@@ -778,13 +814,7 @@ fn terminate_process_group(session: &TerminalSession) {
         }
         None => return,
     }
-    let reaped = lock(&session.child).try_wait();
-    if let Ok(Some(status)) = reaped {
-        let mut code = lock(&session.exit_code);
-        if code.is_none() {
-            *code = Some(status.exit_code() as i64);
-        }
-    }
+    session.exited();
 }
 
 async fn attach(
@@ -819,12 +849,7 @@ async fn attach(
     // holds when it appends+broadcasts. This makes the handoff atomic: output
     // produced during attach can't slip between the snapshot and the subscription
     // (which would drop it) nor land in both (which would duplicate it).
-    let (replay, mut rx) = {
-        let buffer = lock(&session.buffer);
-        let rx = session.tx.subscribe();
-        let replay: Vec<u8> = buffer.iter().copied().collect();
-        (replay, rx)
-    };
+    let (replay, mut rx) = session.follow();
 
     // Replay scrollback so a resumed terminal shows its history.
     if !replay.is_empty() && !ws_send(&mut socket, Message::Binary(replay)).await {
@@ -892,10 +917,8 @@ async fn attach(
                         // Client fell behind and missed output; resync from the
                         // scrollback buffer (clear screen + replay) rather than
                         // leaving the terminal corrupted.
-                        let snap: Vec<u8> = lock(&session.buffer).iter().copied().collect();
-                        let mut resync = Vec::with_capacity(snap.len() + 7);
-                        resync.extend_from_slice(b"\x1b[2J\x1b[H");
-                        resync.extend_from_slice(&snap);
+                        let (resync, fresh) = session.resync();
+                        rx = fresh;
                         if !ws_send(&mut socket, Message::Binary(resync)).await {
                             break;
                         }
@@ -949,6 +972,63 @@ async fn attach(
     // Detach only — the shell keeps running so the session can be resumed.
 }
 
+impl TerminalSession {
+    /// The scrollback and a live subscription, taken under the buffer lock the
+    /// reader appends under, so each chunk is in exactly one of them.
+    fn follow(&self) -> (Vec<u8>, broadcast::Receiver<Vec<u8>>) {
+        let buffer = lock(&self.buffer);
+        (replay_of(&buffer), self.tx.subscribe())
+    }
+
+    /// For a receiver that lagged: clear the screen and replay, on a fresh
+    /// subscription (the old one would repeat what the replay holds).
+    fn resync(&self) -> (Vec<u8>, broadcast::Receiver<Vec<u8>>) {
+        let (replay, rx) = self.follow();
+        ([b"\x1b[2J\x1b[H".as_slice(), &replay].concat(), rx)
+    }
+
+    /// The shell has exited. Unix only peeks: the zombie keeps its pid, and so
+    /// its group id, ours until `terminate_process_group` has signalled the
+    /// group and reaped it. Windows' process handle keeps its pid ours anyway.
+    fn exited(&self) -> bool {
+        #[cfg(unix)]
+        {
+            let child = lock(&self.child);
+            self.reaped()
+                || child
+                    .process_id()
+                    .is_some_and(|p| peek_exited(p as libc::pid_t))
+        }
+        #[cfg(windows)]
+        {
+            let mut child = lock(&self.child);
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    lock(&self.exit_code).get_or_insert(status.exit_code() as i64);
+                    true
+                }
+                _ => self.reaped(),
+            }
+        }
+    }
+
+    /// Reaped (its exit code recorded): never signal its pid again.
+    fn reaped(&self) -> bool {
+        lock(&self.exit_code).is_some()
+    }
+}
+
+/// Scrollback to replay. Once the ring has dropped its oldest bytes it may
+/// start mid-line (mid escape sequence or character), so it starts at the next.
+fn replay_of(buffer: &VecDeque<u8>) -> Vec<u8> {
+    let start = if buffer.len() >= BUFFER_CAP {
+        buffer.iter().position(|&b| b == b'\n').map_or(0, |i| i + 1)
+    } else {
+        0
+    };
+    buffer.range(start..).copied().collect()
+}
+
 /// Queue input for the writer thread; hands it back when the queue is full.
 fn enqueue(session: &TerminalSession, bytes: Vec<u8>) -> Option<Vec<u8>> {
     session.activity.input();
@@ -976,3 +1056,6 @@ fn spawn_writer(mut writer: Box<dyn Write + Send>, mut rx: mpsc::Receiver<Vec<u8
         }
     });
 }
+
+#[cfg(test)]
+mod tests;

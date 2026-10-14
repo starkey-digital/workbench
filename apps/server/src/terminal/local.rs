@@ -3,8 +3,8 @@
 //! desktop's native macOS views), which sees the same PTY a socket would.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, OnceLock};
+use std::time::Instant;
 
 use portable_pty::PtySize;
 use tokio::sync::{broadcast, watch};
@@ -16,10 +16,11 @@ const ECHO_MS: u64 = 300;
 /// Busy until output has been quiet this long.
 const QUIET_MS: u64 = 1500;
 
+/// Monotonic, so a clock stepped back (NTP, a wake) can't hold a pane busy.
+/// Counted from an hour in, so 0 still means never and a test can step back.
 fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as u64)
+    static START: OnceLock<Instant> = OnceLock::new();
+    START.get_or_init(Instant::now).elapsed().as_millis() as u64 + 3_600_000
 }
 
 #[derive(Default)]
@@ -60,6 +61,14 @@ impl Tap {
     pub fn exit_code(&self) -> Option<i64> {
         *lock(&self.session.exit_code)
     }
+
+    /// After `output` lagged: what to show instead (clear screen, scrollback),
+    /// following on from a fresh subscription.
+    pub fn resync(&mut self) -> Vec<u8> {
+        let (resync, output) = self.session.resync();
+        self.output = output;
+        resync
+    }
 }
 
 impl TerminalManager {
@@ -67,10 +76,7 @@ impl TerminalManager {
     /// the single-attacher lease: the view and a remote client both see it.
     pub fn tap(&self, id: &str) -> Option<Tap> {
         let session = self.get(id)?;
-        let (replay, output) = {
-            let buffer = lock(&session.buffer);
-            (buffer.iter().copied().collect(), session.tx.subscribe())
-        };
+        let (replay, output) = session.follow();
         let done = session.done_tx.subscribe();
         Some(Tap {
             replay,

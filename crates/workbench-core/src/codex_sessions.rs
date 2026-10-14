@@ -14,9 +14,7 @@ const CODEX_JSONL_MAX_SCAN_LINES: usize = 200;
 // Session discovery
 // ---------------------------------------------------------------------------
 
-fn codex_session_meta_candidates<'a>(
-    obj: &'a serde_json::Value,
-) -> [Option<&'a serde_json::Value>; 4] {
+fn codex_session_meta_candidates(obj: &serde_json::Value) -> [Option<&serde_json::Value>; 4] {
     [
         obj.pointer("/item/meta"),
         obj.get("meta"),

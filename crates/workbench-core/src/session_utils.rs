@@ -1,4 +1,4 @@
-/// Shared helpers for Claude and Codex session JSONL parsing.
+//! Shared helpers for Claude and Codex session JSONL parsing.
 
 const SESSION_LABEL_MAX_LENGTH: usize = 80;
 const MIN_USER_MESSAGE_LENGTH: usize = 5;
