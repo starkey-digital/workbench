@@ -81,7 +81,7 @@ pub async fn open_in_vscode(path: String) -> Result<bool, String> {
 #[tauri::command]
 pub fn watch_git_projects(project_paths: Vec<String>, git_watcher: State<'_, GitWatcher>) {
     let unique: HashSet<String> = project_paths.into_iter().collect();
-    git_watcher.sync_projects(unique.into_iter().collect());
+    git_watcher.request_sync(unique.into_iter().collect());
 }
 
 // Async: it reads every session file of every account, off the main thread.
@@ -198,11 +198,12 @@ pub fn load_workbench_settings() -> Result<WorkbenchSettings, String> {
 
 #[tauri::command]
 pub fn save_workbench_settings(mut settings: WorkbenchSettings) -> Result<bool, String> {
-    // Each window holds its own settings store; one loaded before the LAN token
-    // was generated must not wipe it (and lock paired phones out) on save.
+    // Each window holds its own settings store, maybe loaded before the token
+    // was rotated or the account switched (each saved on its own path, by any
+    // device): the saved ones stand, or a stale form would undo them.
     let previous = config::load_workbench_settings().ok();
-    if settings.server_token.is_none() {
-        settings.server_token = previous.as_ref().and_then(|s| s.server_token.clone());
+    if let Some(previous) = &previous {
+        keep_saved_fields(&mut settings, previous);
     }
     config::save_workbench_settings(&settings).map_err(|e| e.to_string())?;
     let known: HashSet<String> = previous
@@ -216,6 +217,19 @@ pub fn save_workbench_settings(mut settings: WorkbenchSettings) -> Result<bool, 
         crate::claude_plugin::spawn_disable_marketplace_install(added);
     }
     Ok(true)
+}
+
+/// What `save_workbench_settings` takes from disk over the form's copy: the
+/// LAN token (`rotate_server_token`) and the active account (`set_active`),
+/// unless the form just removed that account.
+fn keep_saved_fields(settings: &mut WorkbenchSettings, saved: &WorkbenchSettings) {
+    if saved.server_token.is_some() {
+        settings.server_token = saved.server_token.clone();
+    }
+    settings.active_claude_account = saved
+        .active_claude_account
+        .clone()
+        .filter(|id| settings.claude_accounts.iter().any(|a| a.id == *id));
 }
 
 /// Regenerate the `srt` settings file and return its absolute path, for the
@@ -424,4 +438,39 @@ pub async fn get_package_info(path: String) -> Result<Option<PackageInfo>, Strin
         package_scripts::read(std::path::Path::new(&path)).map_err(|e| e.to_string())
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::ClaudeAccount;
+
+    #[test]
+    fn a_stale_form_keeps_the_saved_token_and_active_account() {
+        let account = |id: &str| ClaudeAccount {
+            id: id.into(),
+            name: id.into(),
+            config_dir: format!("/accounts/{id}"),
+        };
+        let saved = WorkbenchSettings {
+            server_token: Some("rotated".into()),
+            active_claude_account: Some("work".into()),
+            claude_accounts: vec![account("work"), account("home")],
+            ..Default::default()
+        };
+        let mut form = WorkbenchSettings {
+            server_token: Some("before rotation".into()),
+            active_claude_account: Some("home".into()),
+            claude_accounts: vec![account("work"), account("home")],
+            ..Default::default()
+        };
+        keep_saved_fields(&mut form, &saved);
+        assert_eq!(form.server_token.as_deref(), Some("rotated"));
+        assert_eq!(form.active_claude_account.as_deref(), Some("work"));
+
+        // The form removed the active account: none is active.
+        form.claude_accounts = vec![account("home")];
+        keep_saved_fields(&mut form, &saved);
+        assert_eq!(form.active_claude_account, None);
+    }
 }

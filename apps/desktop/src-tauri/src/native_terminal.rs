@@ -6,8 +6,6 @@
 //! (`terminal:activity`) and exit (`terminal:exit`) events still go to the
 //! frontend.
 
-#![cfg(target_os = "macos")]
-
 use std::collections::HashMap;
 use std::ffi::{c_void, CString};
 use std::os::raw::c_char;
@@ -338,39 +336,43 @@ impl NativeTerminalManager {
         let sessions = Arc::clone(&self.sessions);
         tauri::async_runtime::spawn(async move {
             let code = follow(tap, output, detached_rx).await;
-            let _ = pump.join();
-            if *was_detached.borrow() {
-                return; // the view went; the terminal runs on until its pane closes
-            }
-            // Ended on its own: the server lets it go, or it would stay listed
-            // (and count toward the cap) with no view.
-            terminals.kill(&shown);
-            // Still mapped (not killed): take the view down too.
-            let exited = {
-                let mut map = sessions.lock().unwrap_or_else(|e| e.into_inner());
-                let ours = map
-                    .get(&session_id)
-                    .is_some_and(|s| Arc::ptr_eq(s, &session));
-                if ours {
-                    map.remove(&session_id)
-                } else {
-                    None
+            // Joining the pump and `destroy_view` (a main-thread sync) block.
+            let _ = tauri::async_runtime::spawn_blocking(move || {
+                let _ = pump.join();
+                if *was_detached.borrow() {
+                    return; // the view went; the terminal runs on until its pane closes
                 }
-            };
-            if let Some(session) = exited {
-                session
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .destroy_view();
-            }
-            let _ = app_handle.emit(
-                "terminal:exit",
-                TerminalExitEvent {
-                    session_id,
-                    exit_code: code.map_or(1, |c| c as i32),
-                    signal: None,
-                },
-            );
+                // Ended on its own: the server lets it go, or it would stay listed
+                // (and count toward the cap) with no view.
+                terminals.kill(&shown);
+                // Still mapped (not killed): take the view down too.
+                let exited = {
+                    let mut map = sessions.lock().unwrap_or_else(|e| e.into_inner());
+                    let ours = map
+                        .get(&session_id)
+                        .is_some_and(|s| Arc::ptr_eq(s, &session));
+                    if ours {
+                        map.remove(&session_id)
+                    } else {
+                        None
+                    }
+                };
+                if let Some(session) = exited {
+                    session
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .destroy_view();
+                }
+                let _ = app_handle.emit(
+                    "terminal:exit",
+                    TerminalExitEvent {
+                        session_id,
+                        exit_code: code.map_or(1, |c| c as i32),
+                        signal: None,
+                    },
+                );
+            })
+            .await;
         });
         Ok(())
     }
@@ -482,7 +484,9 @@ async fn follow(
                 Ok(bytes) => {
                     let _ = output.send(bytes);
                 }
-                Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Lagged(_)) => {
+                    let _ = output.send(tap.resync());
+                }
                 Err(RecvError::Closed) => break,
             },
             changed = tap.done.changed() => {

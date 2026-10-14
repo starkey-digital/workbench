@@ -68,7 +68,7 @@ pub(super) fn start(service: WorkspaceService, jobs: mpsc::Receiver<Job>) {
                 let service = service.clone();
                 std::thread::spawn(move || {
                     for (effect, pane) in rx {
-                        run(&service, effect, pane);
+                        run_one(&service, effect, pane);
                     }
                 });
                 tx
@@ -79,6 +79,32 @@ pub(super) fn start(service: WorkspaceService, jobs: mpsc::Receiver<Job>) {
             }
         }
     });
+}
+
+/// One effect, then a spawn's mark taken off its pane (see `PaneRuntime::spawns`).
+/// A panic is logged and the worker carries on: a dead one would drop every
+/// later effect of its pane, so neither Restart nor End would work.
+fn run_one(service: &WorkspaceService, effect: Effect, pane: PaneCtx) {
+    let spawned = matches!(
+        effect,
+        Effect::SpawnShell { .. } | Effect::SpawnClaude { .. } | Effect::SpawnCodex { .. }
+    )
+    .then(|| pane_of(&effect).map(str::to_string))
+    .flatten();
+    let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        run(service, effect, pane);
+    }));
+    if ran.is_err() {
+        tracing::error!("a workspace pane effect panicked");
+    }
+    if let Some(pane_id) = spawned {
+        service.update(&pane_id, |rt| {
+            rt.spawns = rt.spawns.saturating_sub(1);
+            if ran.is_err() {
+                failed(rt, &anyhow::anyhow!("starting it failed unexpectedly"));
+            }
+        });
+    }
 }
 
 fn pane_of(effect: &Effect) -> Option<&str> {
@@ -177,15 +203,15 @@ fn run(service: &WorkspaceService, effect: Effect, pane: PaneCtx) {
             let starting = session_id.as_deref().map(|id| agents.start_lock(id));
             let _starting = starting.as_deref().map(super::lock);
             // One process per session file: the old one is gone before a respawn.
-            if let Some(id) = &pane.terminal_id {
-                terminals.kill_and_wait(id);
+            for id in terminals.pane_terminals(&pane_id) {
+                terminals.kill_and_wait(&id);
             }
             agents.stop_pane(&pane_id);
         }
         Effect::End { pane_id, .. } => {
-            if let Some(id) = &pane.terminal_id {
-                agents.end_terminal(id);
-                terminals.kill(id);
+            for id in terminals.pane_terminals(&pane_id) {
+                agents.end_terminal(&id);
+                terminals.kill(&id);
             }
             agents.stop_pane(&pane_id);
         }

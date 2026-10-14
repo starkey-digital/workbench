@@ -108,19 +108,12 @@ impl GitHubPoller {
                             .iter()
                             .map(|(project_path, _)| {
                                 let path = project_path.as_str();
-                                s.spawn(move || github::get_project_status(path))
+                                s.spawn(move || github::project_status(path))
                             })
                             .collect();
                         handles
                             .into_iter()
-                            .map(|h| {
-                                h.join().unwrap_or_else(|_| GitHubProjectStatus {
-                                    remote: None,
-                                    prs: vec![],
-                                    branch_runs: HashMap::new(),
-                                    pr_checks: HashMap::new(),
-                                })
-                            })
+                            .map(|h| h.join().ok())
                             .collect()
                     });
 
@@ -128,6 +121,14 @@ impl GitHubPoller {
                     for ((project_path, persistent), status) in
                         due_projects.into_iter().zip(results)
                     {
+                        // PRs unlisted this time: what was seen of them stands
+                        // (nothing to keep on a first poll: show the rest).
+                        let Some((status, _)) = status.filter(|(_, listed)| {
+                            *listed || !Self::has_pr_state(&state, &project_path)
+                        }) else {
+                            Self::poll_again(&state, &project_path, persistent, SLOW_POLL_INTERVAL);
+                            continue;
+                        };
                         let interval = if status_has_pending(&status) {
                             FAST_POLL_INTERVAL
                         } else {
@@ -162,20 +163,38 @@ impl GitHubPoller {
                             let _ = app_handle.emit("trello:merge-action-applied", merge_event);
                         }
 
-                        let mut guard = state.lock().unwrap_or_else(|e| e.into_inner());
-                        if persistent {
-                            if let Some(project) = guard.projects.get_mut(&project_path) {
-                                project.next_poll_at = Instant::now() + interval;
-                            }
-                        } else {
-                            guard.projects.remove(&project_path);
-                        }
+                        Self::poll_again(&state, &project_path, persistent, interval);
                     }
                 }
 
                 std::thread::sleep(WORKER_TICK);
             }
         });
+    }
+
+    fn has_pr_state(state: &Arc<Mutex<PollerState>>, project_path: &str) -> bool {
+        let prefix = format!("{project_path}::");
+        let guard = state.lock().unwrap_or_else(|e| e.into_inner());
+        guard
+            .previous_pr_states
+            .keys()
+            .any(|key| key.starts_with(&prefix))
+    }
+
+    fn poll_again(
+        state: &Arc<Mutex<PollerState>>,
+        project_path: &str,
+        persistent: bool,
+        interval: Duration,
+    ) {
+        let mut guard = state.lock().unwrap_or_else(|e| e.into_inner());
+        if persistent {
+            if let Some(project) = guard.projects.get_mut(project_path) {
+                project.next_poll_at = Instant::now() + interval;
+            }
+        } else {
+            guard.projects.remove(project_path);
+        }
     }
 
     fn take_due_projects(state: &Arc<Mutex<PollerState>>) -> Vec<(String, bool)> {

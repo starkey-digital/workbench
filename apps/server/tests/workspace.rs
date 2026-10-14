@@ -20,8 +20,10 @@ use workbench_server::{spawn_embedded, Managers, ServerHandle};
 const TOKEN: &str = "e2e-token-0123456789abcdef0123456789";
 
 /// Idles until its stdin closes (the bridge makes it a chat); a `/clear`
-/// moves it to [`CLEARED`], as the plugin reports one.
+/// moves it to [`CLEARED`], as the plugin reports one. Signalled while
+/// [`SLOW_EXIT`] exists, it takes a second to exit, as a real `claude` does.
 const FAKE_CLAUDE: &str = r#"#!/bin/sh
+trap '[ -e "$HOME/slow-exit" ] && sleep 1; exit 0' HUP TERM
 while IFS= read -r line; do
   case "$line" in
     *'/clear'*)
@@ -31,6 +33,8 @@ while IFS= read -r line; do
 done
 "#;
 const CLEARED: &str = "c1ea4ed0-0000-4000-8000-000000000001";
+/// In `HOME`: the fake `claude` exits slowly.
+const SLOW_EXIT: &str = "slow-exit";
 /// Prints how it was launched, then idles like a TUI.
 const FAKE_CODEX: &str =
     "#!/bin/sh\n[ \"$1\" = --help ] && exit 0\necho \"FAKECODEX $*\"\nexec cat\n";
@@ -528,13 +532,19 @@ async fn an_unreadable_model_is_kept_aside_reported_and_never_saved_over() {
 #[tokio::test]
 async fn a_model_another_process_keeps_is_shown_as_unsaved() {
     let _serial = serial().await;
-    let lock = env().dir.join("workspaces.v2.lock");
-    // Process 1 is always alive and never us.
+    // A dir of its own: this process keeps the shared one's lock (earlier tests).
+    let dir = tempfile::tempdir().unwrap();
+    let lock = dir.path().join("workspaces.v2.lock");
     std::fs::write(&lock, "1").unwrap();
+    // Another process's: a separate open file holds the OS lock.
+    let held = std::fs::File::open(&lock).unwrap();
+    held.try_lock().unwrap();
+    std::env::set_var("WORKBENCH_CONFIG_DIR", dir.path());
     let managers = persistent();
     let (handle, base) = serve(managers.clone()).await;
     let mut sse = Sse::open(&base).await;
     let snap = sse.until("a snapshot", |_| true).await;
+    std::env::set_var("WORKBENCH_CONFIG_DIR", &env().dir);
     assert_eq!(snap["persistence"]["status"], "locked");
     assert!(snap["persistence"]["message"]
         .as_str()
@@ -542,7 +552,6 @@ async fn a_model_another_process_keeps_is_shown_as_unsaved() {
         .contains("pid 1"));
     handle.stop().await;
     managers.kill_all();
-    let _ = std::fs::remove_file(&lock);
 }
 
 #[tokio::test]
@@ -804,6 +813,80 @@ async fn a_normal_spawn_has_no_notice() {
     let snap = sse.until("running", |s| running(s, &id)).await;
     let p = pane(&snap, &id).unwrap();
     assert!(p.get("notice").is_some_and(Value::is_null), "{p}");
+    command(&base, json!({ "type": "closePane", "paneId": id })).await;
+    handle.stop().await;
+}
+
+/// A running Claude pane: its id, tab, session, terminal and generation.
+async fn running_claude(base: &str, sse: &mut Sse) -> (String, String, String, Value, u64) {
+    let reply = command(base, new_session("claude")).await;
+    let (id, tab) = (
+        reply["paneId"].as_str().unwrap().to_string(),
+        reply["tabId"].as_str().unwrap().to_string(),
+    );
+    let snap = sse.until("running", |s| running(s, &id)).await;
+    let p = pane(&snap, &id).unwrap();
+    let sid = p["sessionId"].as_str().unwrap().to_string();
+    let (terminal, generation) = (p["terminalId"].clone(), p["generation"].as_u64().unwrap());
+    support::wait_for_agent(base, &sid).await;
+    (id, tab, sid, terminal, generation)
+}
+
+#[tokio::test]
+async fn a_second_restart_before_the_first_lands_leaves_one_process() {
+    let _serial = serial().await;
+    let (handle, base) = serve(Managers::default()).await;
+    let mut sse = Sse::open(&base).await;
+    let (id, tab, sid, _, _) = running_claude(&base, &mut sse).await;
+
+    let restart = json!({ "type": "restart", "tabId": tab });
+    tokio::join!(command(&base, restart.clone()), command(&base, restart));
+
+    let mut settled = Vec::new();
+    for _ in 0..100 {
+        settled = session_terminals(&base, &sid).await;
+        let snap = Sse::open(&base).await.next().await.unwrap();
+        let shown = pane(&snap, &id).unwrap()["terminalId"].clone();
+        if settled.len() == 1 && shown == settled[0].as_str() && running(&snap, &id) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(settled.len(), 1, "one claude: {settled:?}");
+    assert_eq!(
+        alive_terminals(&base).await,
+        settled,
+        "no orphaned terminal"
+    );
+    command(&base, json!({ "type": "closePane", "paneId": id })).await;
+    handle.stop().await;
+}
+
+#[tokio::test]
+async fn a_restarted_pane_never_shows_its_old_process() {
+    let _serial = serial().await;
+    let (handle, base) = serve(Managers::default()).await;
+    let mut sse = Sse::open(&base).await;
+    let (id, tab, _, old, generation) = running_claude(&base, &mut sse).await;
+
+    // The old process lingers, still reported, while the restart waits it out.
+    let slow = env().dir.join(SLOW_EXIT);
+    std::fs::write(&slow, "").unwrap();
+    command(&base, json!({ "type": "restart", "tabId": tab })).await;
+    loop {
+        let snap = sse.next().await.expect("the stream");
+        let p = pane(&snap, &id).unwrap();
+        if p["generation"].as_u64().unwrap() <= generation {
+            continue;
+        }
+        assert_ne!(p["status"], "exited", "{p}");
+        assert_ne!(p["terminalId"], old, "{p}");
+        if running(&snap, &id) {
+            break;
+        }
+    }
+    std::fs::remove_file(&slow).unwrap();
     command(&base, json!({ "type": "closePane", "paneId": id })).await;
     handle.stop().await;
 }

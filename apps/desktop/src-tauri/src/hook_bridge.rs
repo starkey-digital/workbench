@@ -50,7 +50,9 @@ impl HookBridgeState {
             use tokio::sync::broadcast::error::RecvError;
             match events.blocking_recv() {
                 Ok(event) => handle_event(event, &app_handle, &logs),
-                Err(RecvError::Lagged(_)) => continue,
+                Err(RecvError::Lagged(missed)) => {
+                    log::warn!("hook bridge: {missed} events missed (display fell behind)");
+                }
                 Err(RecvError::Closed) => break,
             }
         });
@@ -189,7 +191,13 @@ fn handle_event(event: HookEvent, handle: &AppHandle, logs: &LogBuffer) {
         HookEvent::Claude { pane_id, hook } => {
             let refreshed = should_emit_project_refresh_for_hook(&hook);
             if refreshed {
-                emit_project_refresh_event(handle, &hook);
+                // Finding the repo runs `git`: not on the one thread every event waits on.
+                let hook =
+                    serde_json::json!({ "cwd": hook["cwd"], "tool_name": hook["tool_name"] });
+                let handle = handle.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    emit_project_refresh_event(&handle, &hook);
+                });
             }
 
             let event_name = hook

@@ -431,28 +431,34 @@ fn derive_branch_status(runs: &[GitHubWorkflowRun]) -> GitHubChecksStatus {
 /// GraphQL query for PRs and their checks, ETag-cached REST for workflow runs); each
 /// half falls back to the `gh` CLI on its own when the API path fails.
 pub fn get_project_status(path: &str) -> GitHubProjectStatus {
+    project_status(path).0
+}
+
+/// [`get_project_status`], and whether its PRs were listed: on a failure (a
+/// network blip, `gh` logged out) its empty list says nothing about them, so a
+/// poller keeps the PR state it saw last rather than dropping it and missing a merge.
+pub fn project_status(path: &str) -> (GitHubProjectStatus, bool) {
     let remotes = github_remotes(path).unwrap_or_default();
     let Some(origin) = remotes.iter().find(|r| r.name == "origin") else {
-        return GitHubProjectStatus {
+        let status = GitHubProjectStatus {
             remote: None,
             prs: vec![],
             branch_runs: HashMap::new(),
             pr_checks: HashMap::new(),
         };
+        return (status, true);
     };
     // The repo `gh` itself would read; with no clear answer, the CLI decides.
     let api = crate::github_api::api_remote(path, &remotes);
 
-    let ((prs, pr_checks), workflow_runs) = std::thread::scope(|s| {
+    let (listed, workflow_runs) = std::thread::scope(|s| {
         let prs_handle = s.spawn(|| {
             api.as_ref()
                 .and_then(|r| crate::github_api::fetch_pr_json(path, r).ok())
                 .map_or_else(|| fetch_pr_json(path), Ok)
                 .and_then(|raw| prs_with_checks(&raw))
-                .unwrap_or_else(|e| {
-                    log::warn!("[github] Failed to list PRs for {path}: {e}");
-                    (vec![], HashMap::new())
-                })
+                .inspect_err(|e| log::warn!("[github] Failed to list PRs for {path}: {e}"))
+                .ok()
         });
         let runs_handle = s.spawn(|| {
             api.as_ref()
@@ -460,19 +466,19 @@ pub fn get_project_status(path: &str) -> GitHubProjectStatus {
                 .unwrap_or_else(|| list_workflow_runs(path))
         });
         (
-            prs_handle
-                .join()
-                .unwrap_or_else(|_| (vec![], HashMap::new())),
+            prs_handle.join().ok().flatten(),
             runs_handle.join().unwrap_or_default(),
         )
     });
-
-    GitHubProjectStatus {
+    let prs_listed = listed.is_some();
+    let (prs, pr_checks) = listed.unwrap_or_default();
+    let status = GitHubProjectStatus {
         remote: Some(origin.remote.clone()),
         prs,
         branch_runs: group_runs_by_branch(workflow_runs),
         pr_checks,
-    }
+    };
+    (status, prs_listed)
 }
 
 fn parse_pr_json(v: &serde_json::Value) -> Result<GitHubPR> {

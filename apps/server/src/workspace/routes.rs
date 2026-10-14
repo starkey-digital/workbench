@@ -31,7 +31,7 @@ const PUBLISH_WAIT: Duration = Duration::from_secs(2);
 
 pub async fn command(State(state): State<AppState>, Json(mut body): Json<Value>) -> Response {
     let service = state.workspace.clone();
-    let rev = || service.subscribe().borrow().rev;
+    let rev = || service.published().borrow().rev;
     let request_id = body
         .as_object_mut()
         .and_then(|o| o.remove("requestId"))
@@ -72,7 +72,7 @@ pub async fn command(State(state): State<AppState>, Json(mut body): Json<Value>)
         Ok(Err(e)) => return refused(rev(), format!("{e:#}")),
         Err(e) => return refused(rev(), e.to_string()),
     };
-    let mut published = service.subscribe();
+    let mut published = service.published();
     let shown =
         tokio::time::timeout(PUBLISH_WAIT, published.wait_for(|p| p.gen >= applied.gen)).await;
     let rev = match shown {

@@ -1,7 +1,5 @@
 //! Tauri commands exposing the native macOS notification bridge.
 
-#![cfg(target_os = "macos")]
-
 use crate::native_notifications;
 
 /// Whether the frontend should use the native path. False on unbundled dev builds,

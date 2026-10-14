@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{mpsc, Mutex};
 
 use anyhow::{anyhow, Result};
 use notify::RecursiveMode;
@@ -18,6 +18,9 @@ pub struct GitWatcher {
     /// Projects that couldn't be watched (no `.git` yet): reported once,
     /// retried every [`RETRY_FAILED`] (a `git init` later) and on each sync.
     failed: Mutex<HashSet<PathBuf>>,
+    /// Syncs for the watcher's own thread, which runs them in order (FSEvents
+    /// calls can be slow, and the command runs on the main thread).
+    syncs: mpsc::Sender<Vec<String>>,
 }
 
 /// How often a project that couldn't be watched is tried again: syncs only
@@ -27,10 +30,19 @@ const RETRY_FAILED: std::time::Duration = std::time::Duration::from_secs(30);
 impl GitWatcher {
     pub fn new(app_handle: AppHandle) -> Self {
         let app = app_handle.clone();
+        let (syncs, requested) = mpsc::channel::<Vec<String>>();
         std::thread::spawn(move || loop {
-            std::thread::sleep(RETRY_FAILED);
+            let sync = match requested.recv_timeout(RETRY_FAILED) {
+                // Only the newest of those queued matters.
+                Ok(paths) => Some(requested.try_iter().last().unwrap_or(paths)),
+                Err(mpsc::RecvTimeoutError::Timeout) => None,
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            };
             if let Some(watcher) = app.try_state::<GitWatcher>() {
-                watcher.retry_failed();
+                match sync {
+                    Some(paths) => watcher.sync_projects(paths),
+                    None => watcher.retry_failed(),
+                }
             }
         });
         let debouncer = Self::create_debouncer(app_handle);
@@ -39,7 +51,13 @@ impl GitWatcher {
             debouncer: Mutex::new(debouncer),
             watched_paths: Mutex::new(HashSet::new()),
             failed: Mutex::new(HashSet::new()),
+            syncs,
         }
+    }
+
+    /// Have the watcher's thread watch exactly `project_paths`.
+    pub fn request_sync(&self, project_paths: Vec<String>) {
+        let _ = self.syncs.send(project_paths);
     }
 
     fn create_debouncer(app_handle: AppHandle) -> Option<FileWatcher> {

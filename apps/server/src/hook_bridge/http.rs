@@ -4,7 +4,7 @@
 
 use std::io::{self, BufRead, Read};
 
-const MAX_BODY: usize = 16 * 1024 * 1024;
+pub(super) const MAX_BODY: usize = 16 * 1024 * 1024;
 const MAX_HEADER_LINE: u64 = 8 * 1024;
 
 pub const ACCEPTED: &[u8] = b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n";

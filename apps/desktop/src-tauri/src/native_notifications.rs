@@ -5,8 +5,6 @@
 //! macOS 11 and no longer delivering. It also swallows the delivery error
 //! (`desktop.rs`: `let _ = notification.show()`), so nothing surfaced the failure.
 
-#![cfg(target_os = "macos")]
-
 use std::ffi::{c_void, CStr, CString};
 use std::os::raw::c_char;
 use std::sync::OnceLock;

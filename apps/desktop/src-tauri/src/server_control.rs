@@ -173,6 +173,17 @@ impl ServerControl {
     /// stopped (disconnecting its clients) and restarted on `bind`/`port`.
     async fn ensure_lan(&self, bind: &str, port: u16, token: String) -> Result<String, String> {
         let mut slot = self.lan.lock().await;
+        self.ensure_lan_in(&mut slot, bind, port, token).await
+    }
+
+    /// [`Self::ensure_lan`] with the `lan` slot already held.
+    async fn ensure_lan_in(
+        &self,
+        slot: &mut Option<Lan>,
+        bind: &str,
+        port: u16,
+        token: String,
+    ) -> Result<String, String> {
         if let Some(lan) = slot.as_ref().filter(|lan| lan.token == token) {
             return Ok(lan.handle.addr().to_string());
         }
@@ -193,15 +204,14 @@ impl ServerControl {
 
     /// Switch a running LAN listener to `token` on its current bind and port.
     /// No-op when server mode is off.
+    /// One hold of the slot throughout, so a `stop_server` meanwhile isn't undone.
     async fn restart_lan_with_token(&self, token: String) -> Result<(), String> {
-        let running = self
-            .lan
-            .lock()
-            .await
+        let mut slot = self.lan.lock().await;
+        let running = slot
             .as_ref()
             .map(|lan| (lan.bind.clone(), lan.handle.addr().port()));
         if let Some((bind, port)) = running {
-            self.ensure_lan(&bind, port, token).await?;
+            self.ensure_lan_in(&mut slot, &bind, port, token).await?;
         }
         Ok(())
     }
@@ -254,11 +264,15 @@ pub async fn rotate_server_token(
     app: tauri::AppHandle,
     state: tauri::State<'_, ServerControl>,
 ) -> Result<String, String> {
-    let token = workbench_core::token::generate().map_err(|e| e.to_string())?;
-    let mut settings =
-        workbench_core::config::load_workbench_settings().map_err(|e| e.to_string())?;
-    settings.server_token = Some(token.clone());
-    workbench_core::config::save_workbench_settings(&settings).map_err(|e| e.to_string())?;
+    let token = crate::blocking(|| {
+        let token = workbench_core::token::generate()?;
+        let mut settings = workbench_core::config::load_workbench_settings()?;
+        settings.server_token = Some(token.clone());
+        workbench_core::config::save_workbench_settings(&settings)?;
+        anyhow::Ok(token)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
     state.restart_lan_with_token(token.clone()).await?;
     if let Err(e) = app.emit("settings:changed", ()) {
         log::warn!("failed to emit settings:changed after token rotation: {e}");
