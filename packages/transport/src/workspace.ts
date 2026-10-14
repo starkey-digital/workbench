@@ -52,7 +52,7 @@ export class WorkspaceStream {
 			const base = baseUrl.replace(/\/$/, '');
 			url = `${base}/events/workspace${token ? `?token=${encodeURIComponent(token)}` : ''}`;
 		} catch {
-			return this.fail();
+			return this.fail('server-lookup');
 		}
 		if (this.stopped || typeof EventSource === 'undefined') return;
 		const source = this.openSource(url);
@@ -62,9 +62,11 @@ export class WorkspaceStream {
 		source.addEventListener('snapshot', (ev) => {
 			if (!current()) return;
 			let snapshot: WorkspaceSnapshot;
+			const data: string = (ev as MessageEvent).data;
 			try {
-				snapshot = JSON.parse((ev as MessageEvent).data);
+				snapshot = JSON.parse(data);
 			} catch {
+				console.warn('[workspace-stream] unreadable snapshot dropped', { length: data.length });
 				return;
 			}
 			this.heard();
@@ -80,7 +82,7 @@ export class WorkspaceStream {
 		// EventSource retries some failures itself and gives up on others (a 401):
 		// always take over with our own backoff.
 		source.addEventListener('error', () => {
-			if (current()) this.fail();
+			if (current()) this.fail('error');
 		});
 		this.armStale();
 	}
@@ -95,11 +97,12 @@ export class WorkspaceStream {
 
 	private armStale(): void {
 		if (this.staleTimer) clearTimeout(this.staleTimer);
-		this.staleTimer = setTimeout(() => this.fail(), STALE_MS);
+		this.staleTimer = setTimeout(() => this.fail('stale'), STALE_MS);
 	}
 
-	private fail(): void {
+	private fail(reason: 'error' | 'stale' | 'server-lookup'): void {
 		if (this.stopped) return;
+		console.warn('[workspace-stream] lost, retrying', { reason, retryMs: this.retryMs });
 		this.close();
 		this.handlers.status?.(false);
 		this.retryTimer = setTimeout(() => {

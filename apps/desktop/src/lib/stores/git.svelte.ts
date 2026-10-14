@@ -10,6 +10,9 @@ import type {
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
+/** Watcher-driven refreshes of one project run at most this often (with a trailing run). */
+const REFRESH_MIN_MS = 500;
+
 export class GitStore {
 	worktreesByProject: Record<string, WorktreeInfo[]> = $state({});
 	branchByProject: Record<string, string> = $state({});
@@ -20,6 +23,12 @@ export class GitStore {
 	// Non-reactive concurrency/staleness bookkeeping
 	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- internal bookkeeping only
 	private refreshInFlight = new Set<string>();
+	/** Projects asked to refresh again while one was running. */
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- internal bookkeeping only
+	private refreshAgain = new Set<string>();
+	private trailingRefresh: Record<string, ReturnType<typeof setTimeout>> = {};
+	/** The latest request per fetch and project: an older answer arriving later is dropped. */
+	private fetchSeq: Record<string, number> = {};
 	lastRefreshedAt: Record<string, number> = {};
 
 	constructor() {
@@ -41,9 +50,24 @@ export class GitStore {
 		}
 	}
 
+	/** `tryInvoke` for a project's state: undefined too when a newer request for it was sent meanwhile. */
+	private async latest<T>(
+		command: string,
+		path: string,
+		args: Record<string, unknown>,
+		warnPrefix: string
+	): Promise<T | undefined> {
+		const key = `${command}\0${path}`;
+		const seq = (this.fetchSeq[key] ?? 0) + 1;
+		this.fetchSeq[key] = seq;
+		const value = await this.tryInvoke<T>(command, args, warnPrefix);
+		return this.fetchSeq[key] === seq ? value : undefined;
+	}
+
 	async fetchGitInfo(projectPath: string) {
-		const info = await this.tryInvoke<{ branch: string; repoRoot: string; isWorktree: boolean }>(
+		const info = await this.latest<{ branch: string; repoRoot: string; isWorktree: boolean }>(
 			'git_info',
+			projectPath,
 			{ path: projectPath },
 			'[GitStore] Not a git repo or git info failed:'
 		);
@@ -53,8 +77,9 @@ export class GitStore {
 	}
 
 	async fetchWorktrees(projectPath: string) {
-		const wts = await this.tryInvoke<WorktreeInfo[]>(
+		const wts = await this.latest<WorktreeInfo[]>(
 			'list_worktrees',
+			projectPath,
 			{ path: projectPath },
 			'[GitStore] Failed to list worktrees:'
 		);
@@ -64,8 +89,9 @@ export class GitStore {
 	}
 
 	async fetchStatus(projectPath: string) {
-		const status = await this.tryInvoke<GitStatusResult>(
+		const status = await this.latest<GitStatusResult>(
 			'git_status',
+			projectPath,
 			{ path: projectPath },
 			'[GitStore] Failed to fetch status:'
 		);
@@ -75,8 +101,9 @@ export class GitStore {
 	}
 
 	async fetchLog(projectPath: string, maxCount = 20) {
-		const log = await this.tryInvoke<GitLogEntry[]>(
+		const log = await this.latest<GitLogEntry[]>(
 			'git_log',
+			projectPath,
 			{ path: projectPath, maxCount },
 			'[GitStore] Failed to fetch log:'
 		);
@@ -86,8 +113,9 @@ export class GitStore {
 	}
 
 	async fetchStashes(projectPath: string) {
-		const stashes = await this.tryInvoke<GitStashEntry[]>(
+		const stashes = await this.latest<GitStashEntry[]>(
 			'git_stash_list',
+			projectPath,
 			{ path: projectPath },
 			'[GitStore] Failed to fetch stashes:'
 		);
@@ -174,10 +202,23 @@ export class GitStore {
 		await this.fetchStatus(projectPath);
 	}
 
+	/**
+	 * Requests during a refresh, or within `REFRESH_MIN_MS` of one, coalesce into
+	 * one trailing refresh: the last event of a burst is the one that matters.
+	 */
 	async refreshGitState(projectPath: string) {
-		if (this.refreshInFlight.has(projectPath)) return;
-		const lastRefresh = this.lastRefreshedAt[projectPath] ?? 0;
-		if (Date.now() - lastRefresh < 500) return;
+		if (this.refreshInFlight.has(projectPath)) {
+			this.refreshAgain.add(projectPath);
+			return;
+		}
+		const wait = REFRESH_MIN_MS - (Date.now() - (this.lastRefreshedAt[projectPath] ?? 0));
+		if (wait > 0) {
+			this.trailingRefresh[projectPath] ??= setTimeout(() => {
+				delete this.trailingRefresh[projectPath];
+				void this.refreshGitState(projectPath);
+			}, wait);
+			return;
+		}
 		this.refreshInFlight.add(projectPath);
 		try {
 			await Promise.all([
@@ -190,6 +231,7 @@ export class GitStore {
 			this.lastRefreshedAt[projectPath] = Date.now();
 		} finally {
 			this.refreshInFlight.delete(projectPath);
+			if (this.refreshAgain.delete(projectPath)) void this.refreshGitState(projectPath);
 		}
 	}
 

@@ -29,6 +29,8 @@
 	let resizeTimeout: ReturnType<typeof setTimeout> | null = null;
 	let created = $state(false);
 	let overlayOpen = $state(false);
+	/** Set by onDestroy: the async onMount checks it after each await, so no view outlives the pane. */
+	let destroyed = false;
 
 	// Convert DOM coordinates to NSView coordinates.
 	// NSView uses points (same as CSS pixels) but y=0 is at the bottom.
@@ -82,6 +84,19 @@
 
 	onMount(async () => {
 		try {
+			// Listen before attaching, so an exit right after the attach isn't missed.
+			// Without the listener the view still attaches; only the exit overlay is lost.
+			unlistenExit = await onSessionTerminalExit(terminalId, () => {
+				exited = true;
+			}).catch((e) => {
+				console.warn('[NativeTerminalPane] exit listener failed:', e);
+				return null;
+			});
+			if (destroyed) {
+				unlistenExit?.();
+				return;
+			}
+
 			const rect = container.getBoundingClientRect();
 			const nsRect = domToNSView(rect);
 
@@ -94,16 +109,18 @@
 				fontSize: fontPrefs.value.terminalSize
 			});
 
+			if (destroyed) {
+				// onDestroy ran mid-attach, before there was a view to take down.
+				void detachNativeTerminal(terminalId);
+				return;
+			}
 			created = true;
 
 			// Set initial visibility
 			if (!active) {
 				await setNativeTerminalVisible(terminalId, false);
+				if (destroyed) return;
 			}
-
-			unlistenExit = await onSessionTerminalExit(terminalId, () => {
-				exited = true;
-			});
 
 			// Track size changes
 			resizeObserver = new ResizeObserver(() => {
@@ -124,11 +141,12 @@
 				childList: true
 			});
 		} catch (error) {
-			terminalError = `Failed to show native terminal: ${String(error)}`;
+			if (!destroyed) terminalError = `Failed to show native terminal: ${String(error)}`;
 		}
 	});
 
 	onDestroy(() => {
+		destroyed = true;
 		if (resizeTimeout) clearTimeout(resizeTimeout);
 		unlistenExit?.();
 		resizeObserver?.disconnect();

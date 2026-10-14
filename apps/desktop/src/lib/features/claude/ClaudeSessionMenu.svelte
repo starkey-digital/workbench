@@ -6,25 +6,21 @@
 	import * as Tooltip from '@workbench/ui/tooltip';
 	import { getClaudeSessionStore } from '$stores/context';
 	import { formatSessionDate } from '$lib/utils/format';
-	import type { SessionType } from '$types/workbench';
 
 	const claudeSessionStore = getClaudeSessionStore();
 
 	let {
-		type = 'claude' as SessionType,
-		onResume,
-		onOpen
+		type = 'claude',
+		cwd,
+		onResume
 	}: {
-		type?: SessionType;
+		type?: 'claude' | 'codex';
+		/** The workspace's cwd, whose sessions it lists. */
+		cwd: string;
 		onResume: (sessionId: string, label: string) => void;
-		onOpen: () => void;
 	} = $props();
 
-	const sessions = $derived(
-		type === 'codex'
-			? claudeSessionStore.discoveredCodexSessions
-			: claudeSessionStore.discoveredSessions
-	);
+	const sessions = $derived(claudeSessionStore.discoveredFor(cwd, type));
 
 	const tooltipLabel = $derived(
 		type === 'codex' ? 'Resume Codex Session' : 'Resume Claude Session'
@@ -33,7 +29,7 @@
 
 <DropdownMenu.Root
 	onOpenChange={(open) => {
-		if (open) onOpen();
+		if (open) void claudeSessionStore.discoverSessions(cwd, type);
 	}}
 >
 	<Tooltip.Root>

@@ -338,8 +338,8 @@ export class GitHubStore {
 		const available = await this.checkGhAvailable();
 		if (!available) return;
 
-		await invoke('github_set_tracked_projects', { projectPaths });
-		this.trackedProjectsFingerprint = projectPaths.slice().sort().join('\n');
+		// Polling stays on projects with sessions; every project's status is fetched once.
+		await this.syncTrackedProjects();
 		await Promise.all(projectPaths.map((p) => this.refreshProject(p)));
 	}
 }

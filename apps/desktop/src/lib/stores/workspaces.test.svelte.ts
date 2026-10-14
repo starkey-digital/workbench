@@ -8,9 +8,12 @@ import type {
 } from '$types/workspace';
 import { WorkspaceStore } from './workspaces.svelte';
 import { UI_KEY } from './workspace-ui';
-import { releaseChat } from '$features/chat/chat-registry.svelte';
+import { followPane, releaseChat } from '$features/chat/chat-registry.svelte';
 
-vi.mock('$features/chat/chat-registry.svelte', () => ({ releaseChat: vi.fn() }));
+vi.mock('$features/chat/chat-registry.svelte', () => ({
+	releaseChat: vi.fn(),
+	followPane: vi.fn()
+}));
 vi.mock('svelte-sonner', () => ({ toast: { error: vi.fn(), info: vi.fn() } }));
 
 const mockGitStore = {
@@ -186,6 +189,27 @@ describe('WorkspaceStore', () => {
 			transport.emitWorkspace(snap(2, [ws('w1', [tab('t1', [pane('p1')])])]));
 			expect(releaseChat).toHaveBeenCalledExactlyOnceWith('p2');
 		});
+
+		it("hands every pane's process to its chat, shown or not", async () => {
+			await loaded(snap(1, [ws('w1', [tab('t1', [pane('p1', { generation: 3 })])])]));
+			expect(followPane).toHaveBeenCalledWith('p1', { status: 'running', generation: 3 });
+			vi.mocked(followPane).mockClear();
+			transport.emitWorkspace(
+				snap(2, [ws('w1', [tab('t1', [pane('p1', { generation: 3, busy: true })])])])
+			);
+			expect(followPane).not.toHaveBeenCalled();
+			transport.emitWorkspace(snap(3, [ws('w1', [tab('t1', [pane('p1', { generation: 4 })])])]));
+			expect(followPane).toHaveBeenCalledWith('p1', { status: 'running', generation: 4 });
+		});
+
+		it('says when the stream is down and back', async () => {
+			await loaded(snap(1, []));
+			expect(store.streamLive).toBe(true);
+			transport.emitWorkspaceStatus(false);
+			expect(store.streamLive).toBe(false);
+			transport.emitWorkspaceStatus(true);
+			expect(store.streamLive).toBe(true);
+		});
 	});
 
 	describe('local state', () => {
@@ -327,6 +351,38 @@ describe('WorkspaceStore', () => {
 			expect(savedUi().selectedId).toBe('w9');
 			transport.emitWorkspace(snap(3, [ws('w1', []), ws('w9', [])]));
 			expect(store.activeWorkspaceId).toBe('w9');
+		});
+
+		it("keeps a command's ids when it answered with an older rev than the snapshot showing them", async () => {
+			await loaded(snap(1, [ws('w1', [])]));
+			// The server's publish wait ran out: the answer carries the rev before the change.
+			transport.mockWorkspaceCommand(() => ({ rev: 1, workspaceId: 'w9' }));
+			await store.open({ name: 'Repo', path: '/repo' });
+			transport.emitWorkspace(snap(2, [ws('w1', [])]));
+			expect(savedUi().selectedId).toBe('w9');
+			transport.emitWorkspace(snap(3, [ws('w1', []), ws('w9', [])]));
+			expect(store.activeWorkspaceId).toBe('w9');
+		});
+
+		it("lets a command's ids go when no snapshot shows them for a while", async () => {
+			await loaded(snap(1, [ws('w1', [])]));
+			transport.mockWorkspaceCommand(() => ({ rev: 1, workspaceId: 'w9' }));
+			await store.open({ name: 'Repo', path: '/repo' });
+			const later = Date.now() + 11_000;
+			const clock = vi.spyOn(Date, 'now').mockReturnValue(later);
+			transport.emitWorkspace(snap(2, [ws('w1', [])]));
+			clock.mockRestore();
+			expect(savedUi().selectedId).toBeNull();
+		});
+
+		it('releases the chat of a pane shown as terminal again', async () => {
+			await loaded(
+				snap(1, [ws('w1', [tab('t1', [pane('p1', { kind: 'claude', sessionId: 's' })])])])
+			);
+			await store.setPaneView('p1', 'chat');
+			expect(releaseChat).not.toHaveBeenCalled();
+			await store.setPaneView('p1', 'terminal');
+			expect(releaseChat).toHaveBeenCalledExactlyOnceWith('p1');
 		});
 
 		it('opens a new Claude tab as chat when that is the default', async () => {

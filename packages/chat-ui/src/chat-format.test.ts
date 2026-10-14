@@ -6,6 +6,8 @@ import {
 	agentName,
 	answerFor,
 	applyChanges,
+	earlierItems,
+	withHistory,
 	contextUsed,
 	canPickModel,
 	currentModel,
@@ -80,14 +82,48 @@ describe('applyChanges', () => {
 			[1, { ...running, status: 'ok' }],
 			[2, text('c', 'done')]
 		]);
-		expect(next.map((i) => i.id)).toEqual(['a', 't1', 'c']);
-		expect(next[1]).toMatchObject({ status: 'ok' });
+		expect(next.aligned).toBe(true);
+		expect(next.items.map((i) => i.id)).toEqual(['a', 't1', 'c']);
+		expect(next.items[1]).toMatchObject({ status: 'ok' });
 		expect(items[1]).toMatchObject({ status: 'running' });
 	});
 
 	it('ignores changes to history the snapshot left out', () => {
 		const next = applyChanges([text('b', 'kept')], 10, [[3, text('old', 'from history')]]);
-		expect(next.map((i) => i.id)).toEqual(['b']);
+		expect(next.items.map((i) => i.id)).toEqual(['b']);
+		expect(next.aligned).toBe(true);
+	});
+
+	it('replaces a stale item the server no longer holds at that index', () => {
+		const next = applyChanges([text('a', 'x'), text('ghost', 'y')], 0, [[1, text('b', 'z')]]);
+		expect(next.items.map((i) => i.id)).toEqual(['a', 'b']);
+		expect(next.aligned).toBe(false);
+	});
+
+	it('flags a gap or an item found away from its index', () => {
+		expect(applyChanges([text('a', 'x')], 0, [[3, text('d', 'z')]]).aligned).toBe(false);
+		const moved = applyChanges([text('a', 'x'), text('b', 'y')], 0, [[0, text('b', 'y2')]]);
+		expect(moved.items.map((i) => i.id)).toEqual(['a', 'b']);
+		expect(moved.aligned).toBe(false);
+	});
+});
+
+describe('earlierItems', () => {
+	it('keeps scrollback before the window, never an item the snapshot holds', () => {
+		const shown = [text('a', ''), text('b', ''), text('c', ''), text('d', '')];
+		const snapshot = { start: 2, items: [text('c', ''), text('b', ''), text('d', '')] };
+		expect(earlierItems(shown, snapshot).map((i) => i.id)).toEqual(['a']);
+		expect(earlierItems(shown, { start: 0, items: snapshot.items })).toEqual([]);
+	});
+});
+
+describe('withHistory', () => {
+	it('shows each id once, the live copy winning', () => {
+		const history = [text('h1', ''), text('h2', ''), text('h1', ''), text('live', 'old')];
+		const items = [text('live', 'new'), text('n', '')];
+		const joined = withHistory(history, items);
+		expect(joined.map((i) => i.id)).toEqual(['h1', 'h2', 'live', 'n']);
+		expect(joined[2]).toMatchObject({ text: 'new' });
 	});
 });
 

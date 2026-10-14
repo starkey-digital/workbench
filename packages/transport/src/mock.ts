@@ -22,6 +22,8 @@ export interface MockTransport extends ControlPlaneTransport {
 	): void;
 	/** Deliver a snapshot to every workspace subscriber; `fresh` as on a new connection. */
 	emitWorkspace(snapshot: WorkspaceSnapshot, fresh?: boolean): void;
+	/** Report the workspace stream up or down to every subscriber. */
+	emitWorkspaceStatus(live: boolean): void;
 }
 
 /**
@@ -48,6 +50,10 @@ export function createMockTransport(): MockTransport {
 
 		emitWorkspace(snapshot, fresh = false) {
 			workspaceSubscribers.forEach((h) => h.snapshot(snapshot, fresh));
+		},
+
+		emitWorkspaceStatus(live) {
+			workspaceSubscribers.forEach((h) => h.status?.(live));
 		},
 
 		async workspaceCommand(cmd) {

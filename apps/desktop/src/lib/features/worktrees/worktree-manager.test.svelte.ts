@@ -198,23 +198,28 @@ describe('WorktreeManagerStore', () => {
 	});
 
 	describe('open', () => {
-		it('delegates to workspaceStore.openWorktree', () => {
+		it('opens the worktree and resolves to its workspace once the server applied it', async () => {
 			const project = makeProject({ name: 'Repo', path: '/projects/repo' });
 			vi.mocked(mocks.projectStore.getByPath).mockReturnValue(project);
+			vi.mocked(mocks.workspaceStore.openWorktree).mockResolvedValue({
+				rev: 2,
+				workspaceId: 'ws-9'
+			});
 
-			manager.open('/projects/repo', '/projects/repo-wt', 'feature');
+			const id = await manager.open('/projects/repo', '/projects/repo-wt', 'feature');
 
 			expect(mocks.workspaceStore.openWorktree).toHaveBeenCalledWith(
 				project,
 				'/projects/repo-wt',
 				'feature'
 			);
+			expect(id).toBe('ws-9');
 		});
 
-		it('does nothing if project not found', () => {
+		it('does nothing if project not found', async () => {
 			vi.mocked(mocks.projectStore.getByPath).mockReturnValue(undefined);
 
-			manager.open('/nonexistent', '/wt', 'branch');
+			expect(await manager.open('/nonexistent', '/wt', 'branch')).toBeNull();
 
 			expect(mocks.workspaceStore.openWorktree).not.toHaveBeenCalled();
 		});

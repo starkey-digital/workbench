@@ -58,6 +58,33 @@ describe('InstancesStore', () => {
 		store.dispose();
 	});
 
+	it('load() skips entries that are not server configs', () => {
+		localStorage.setItem(
+			'workbench.instances',
+			JSON.stringify([null, 'x', { id: 'a' }, { id: 'b', name: 'box', url: 'http://box:4317' }])
+		);
+		const store = new InstancesStore();
+		store.load();
+		expect(store.remotes.map((r) => r.config.id)).toEqual(['b']);
+		store.dispose();
+	});
+
+	it('add() and remove() work while storage refuses writes', () => {
+		vi.spyOn(console, 'warn').mockImplementation(() => {});
+		vi.stubGlobal('localStorage', {
+			getItem: () => null,
+			setItem: () => {
+				throw new Error('blocked');
+			}
+		});
+		const store = new InstancesStore();
+		const inst = store.add({ name: 'box', url: 'http://box:4317' });
+		expect(store.remotes).toHaveLength(1);
+		store.remove(inst.config.id);
+		expect(store.remotes).toHaveLength(0);
+		store.dispose();
+	});
+
 	it('remove() resets active to local', () => {
 		const store = new InstancesStore();
 		const inst = store.add({ name: 'box', url: 'http://box:4317' });

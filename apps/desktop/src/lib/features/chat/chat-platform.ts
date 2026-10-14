@@ -1,13 +1,16 @@
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { openUrl } from '$lib/utils/open-url';
-import type { ChatPlatform } from '@workbench/chat-ui';
+import { captureChatDiagnostic } from '$lib/sentry';
+import { throttled, type ChatPlatform } from '@workbench/chat-ui';
 import type { ChatAttachment } from '$types/workbench';
 
 export const desktopChatPlatform: ChatPlatform = {
 	openLink(href) {
 		void openUrl(href);
 	},
+
+	report: throttled(captureChatDiagnostic),
 
 	/** Tauri takes OS file drops before the page sees them; keep the ones over `node`. */
 	watchDrops(node, on) {

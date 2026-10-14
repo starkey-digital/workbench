@@ -1,6 +1,7 @@
 import type { ChatTarget } from '$types/workbench';
 import { AgentChat, ChatDraft, owned, type PaneProcess } from '@workbench/chat-ui';
 import { loopbackAgentApi } from './agent-api';
+import { desktopChatPlatform } from './chat-platform';
 
 /**
  * Chat connections by pane. A chat outlives its view: hidden workspaces
@@ -49,7 +50,12 @@ export function acquireChat(
 	if (!draft) drafts.set(paneId, (draft = owned(() => new ChatDraft())[0]));
 	// Its own root: it outlives the `SessionChat` that first asks for it.
 	const [chat, destroy] = owned(
-		() => new AgentChat(body, loopbackAgentApi, { draft, pane: () => processOf(paneId) })
+		() =>
+			new AgentChat(body, loopbackAgentApi, {
+				draft,
+				pane: () => processOf(paneId),
+				report: desktopChatPlatform.report
+			})
 	);
 	chats.set(paneId, { chat, destroy, generation: pane.generation, pane });
 	return { chat, created: true };
