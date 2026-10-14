@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { notifiedJob, startJob } from '../hooks/jobs';
+import { ENDED_KEPT, notifiedJob, startJob } from '../hooks/jobs';
 
 const note = (id: string, status: string) =>
 	`<task-notification><task-id>${id}</task-id><status>${status}</status></task-notification>`;
@@ -22,4 +22,13 @@ test('a subagent this load tracks ends its own task, not by its notification', (
 test("a known job's notification reports its outcome", () => {
 	expect(startJob('b2')).toBe(true);
 	expect(notifiedJob(note('b2', 'killed'))).toMatchObject({ task_id: 'b2', status: 'stopped' });
+});
+
+test('ended jobs are forgotten oldest first, running ones never', () => {
+	expect(startJob('keep')).toBe(true);
+	for (let i = 0; i <= ENDED_KEPT; i++) notifiedJob(note(`old${i}`, 'completed'));
+	// The oldest ended job was forgotten, so its report is said again.
+	expect(notifiedJob(note('old0', 'completed'))).toBeDefined();
+	expect(notifiedJob(note('old5', 'completed'))).toBeUndefined();
+	expect(startJob('keep')).toBe(false);
 });

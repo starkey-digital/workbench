@@ -42,6 +42,8 @@ pub(super) struct Effects {
     pub snapshot: bool,
     /// The session is ready under this id, or failed to start.
     pub ready: Option<Result<String, String>>,
+    /// A cache keep-alive's turn began: its end is nobody's "turn complete".
+    pub keepalive: bool,
 }
 
 /// A process to spawn, the driver for it, and its opening lines.

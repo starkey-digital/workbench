@@ -68,6 +68,7 @@ pub(super) fn apply_line(t: &mut Transcript, line: &str) -> Effects {
         commands: applied.commands,
         new_id: applied.new_session_id,
         resumed: applied.resumed,
+        keepalive: applied.keepalive_started,
         ..Effects::default()
     }
 }

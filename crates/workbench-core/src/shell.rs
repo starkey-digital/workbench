@@ -266,12 +266,14 @@ pub fn login_args() -> &'static [&'static str] {
 /// What a Workbench sets for one pane's or chat's processes. A Workbench
 /// started from another one's terminal inherits that one's, which would
 /// report its hooks and chats to the wrong server and pane: never pass them on.
-pub const PARENT_ONLY_ENV: [&str; 5] = [
+/// `WORKBENCH_MOD_PROCESS` is the plugin's own mark on its `claude` process.
+pub const PARENT_ONLY_ENV: [&str; 6] = [
     "WORKBENCH_MOD_URL",
     "WORKBENCH_MOD_TOKEN",
     "WORKBENCH_HOOK_SOCKET",
     "WORKBENCH_PANE_ID",
     "WORKBENCH_PERMISSION_MODE",
+    "WORKBENCH_MOD_PROCESS",
 ];
 
 /// Keep [`PARENT_ONLY_ENV`] from `cmd`: only what the caller sets after this reaches it.
