@@ -1,5 +1,6 @@
 import { IsDocumentVisible, onCleanup, watch, type IsDocumentVisibleOptions } from 'runed';
 import type { RateLimitInfo, TranscriptMeta, UsageLimit } from '@workbench/types';
+import { owned } from './owned.svelte.ts';
 import { usageChips } from './usage-format.ts';
 
 /** The server caches `/usage` for a minute, so this mostly bounds the requests. */
@@ -89,10 +90,7 @@ export function usePlanUsage(
 ): PlanUsage {
 	let entry = shared[key];
 	if (!entry) {
-		let usage!: PlanUsage;
-		const dispose = $effect.root(() => {
-			usage = new PlanUsage(load, options);
-		});
+		const [usage, dispose] = owned(() => new PlanUsage(load, options));
 		entry = { usage, refs: 0, dispose };
 		shared[key] = entry;
 	}

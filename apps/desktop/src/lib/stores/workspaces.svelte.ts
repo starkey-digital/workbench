@@ -18,7 +18,7 @@ import {
 } from '$types/workspace';
 import { transport } from '$lib/transport';
 import { effectivePath } from '$lib/utils/path';
-import { releaseChat } from '$features/chat/chat-registry';
+import { releaseChat } from '$features/chat/chat-registry.svelte';
 import { getGitStore, getWorkbenchSettingsStore } from './context';
 import { hasSavedUi, loadUi, pruneUi, saveUi, seededUi, type WorkspaceUi } from './workspace-ui';
 import { workspaceView } from './workspace-view';

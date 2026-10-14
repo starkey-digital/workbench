@@ -8,9 +8,9 @@ import type {
 } from '$types/workspace';
 import { WorkspaceStore } from './workspaces.svelte';
 import { UI_KEY } from './workspace-ui';
-import { releaseChat } from '$features/chat/chat-registry';
+import { releaseChat } from '$features/chat/chat-registry.svelte';
 
-vi.mock('$features/chat/chat-registry', () => ({ releaseChat: vi.fn() }));
+vi.mock('$features/chat/chat-registry.svelte', () => ({ releaseChat: vi.fn() }));
 vi.mock('svelte-sonner', () => ({ toast: { error: vi.fn(), info: vi.fn() } }));
 
 const mockGitStore = {

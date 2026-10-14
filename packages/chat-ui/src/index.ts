@@ -1,5 +1,6 @@
 export { AgentChat, type PaneProcess, type TaskOutput } from './agent-chat.svelte.ts';
 export { ChatDraft } from './chat-draft.svelte.ts';
+export { owned } from './owned.svelte.ts';
 export {
 	CHAT_FONT_SIZES,
 	CHAT_FONTS,
