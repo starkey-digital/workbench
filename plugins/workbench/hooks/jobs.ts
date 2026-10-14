@@ -5,6 +5,19 @@ import { taskNotification, taskStatus, type Line } from './lines';
 // Stop hook's job list is the fallback when no notification names it.
 
 const jobs = new Map<string, string>();
+// Ended jobs are kept only so a repeated report is said once: the oldest go.
+export const ENDED_KEPT = 200;
+
+function prune() {
+	let ended = [...jobs.values()].filter((status) => status !== 'running').length;
+	for (const [id, status] of jobs) {
+		if (ended <= ENDED_KEPT) return;
+		if (status !== 'running') {
+			jobs.delete(id);
+			ended--;
+		}
+	}
+}
 
 /** A job just went to the background; false if it was reported already. */
 export function startJob(id: string): boolean {
@@ -17,6 +30,7 @@ function report(id: string, status: string, summary?: string): Line | undefined 
 	if (jobs.get(id) === status) return undefined;
 	jobs.set(id, status);
 	if (status === 'running') return undefined;
+	prune();
 	return {
 		type: 'system',
 		subtype: 'task_notification',

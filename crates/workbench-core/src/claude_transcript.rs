@@ -116,6 +116,8 @@ pub struct Applied {
     pub unknown_kind: Option<String>,
     /// The slash command list changed (kept out of meta: it's large).
     pub commands: bool,
+    /// A keep-alive prompt's echo started its turn.
+    pub keepalive_started: bool,
 }
 
 /// A model switch asked of the CLI and not yet answered, with what was shown
@@ -152,8 +154,9 @@ pub struct Transcript {
     saved_title: SavedTitle,
     /// Message id of the assistant message currently streaming.
     streaming_message: Option<String>,
-    /// Streamed text/thinking items, in block order, awaiting their final block.
-    stream_slots: HashMap<String, VecDeque<usize>>,
+    /// Streamed text/thinking items, in block order, awaiting their final
+    /// block, for the latest [`STREAM_SLOTS_KEPT`] messages.
+    stream_slots: VecDeque<(String, VecDeque<usize>)>,
     /// Open approvals, the terminal-asked (`in_terminal`) ones included:
     /// those wait for their call's result, and no chat answers them.
     approvals: HashMap<String, PendingApproval>,
@@ -177,6 +180,10 @@ pub struct Transcript {
     /// Folding a subagent's own transcript, whose every row is a sidechain.
     sidechain: bool,
 }
+
+/// Messages whose streamed items still wait for their final block: one that
+/// never gets it (an aborted request) mustn't be kept for good.
+const STREAM_SLOTS_KEPT: usize = 8;
 
 /// Largest tool output kept whole for "show full output".
 pub(crate) const MAX_FULL_OUTPUT_BYTES: usize = 1024 * 1024;
@@ -235,6 +242,7 @@ impl Transcript {
             return Applied::default();
         }
         let before = self.meta.clone();
+        let was_keepalive = self.keepalive;
         let mut changed = Vec::new();
         let mut applied = Applied::default();
         let kind = protocol::kind(obj);
@@ -378,6 +386,7 @@ impl Transcript {
         }
         applied.items = changed;
         applied.meta = self.meta != before;
+        applied.keepalive_started = self.keepalive && !was_keepalive;
         applied
     }
 
@@ -571,6 +580,21 @@ impl Transcript {
             models_pinned: self.models_pinned,
             ..loaded
         };
+    }
+
+    /// A new `claude` process took over the session: history as it wrote it,
+    /// and nothing of the old process's turn still running.
+    pub fn restarted(&mut self, loaded: Self) {
+        self.resume_loaded(loaded);
+        self.meta.busy = false;
+        self.meta.retry = None;
+        self.meta.compacting_since = None;
+        self.meta.unread_queued.clear();
+    }
+
+    /// Put back the meta a client's request changed when it couldn't be sent.
+    pub fn restore_meta(&mut self, meta: TranscriptMeta) {
+        self.meta = meta;
     }
 
     fn expire_approval(&mut self, obj: &Value, changed: &mut Vec<usize>) {
@@ -1072,6 +1096,11 @@ impl Transcript {
         }
         // The files list the plugin adds for the model; the mentions stay.
         let text = text.find(ATTACHED_FILES).map_or(text, |end| &text[..end]);
+        let queued_echo = obj.get("workbench_queued") == Some(&Value::Bool(true));
+        // A keep-alive put into a turn typed at the terminal: that turn's reply must show.
+        if queued_echo && text == KEEPALIVE_PROMPT {
+            return;
+        }
         if self.start_keepalive(id.clone(), text, changed) {
             return;
         }
@@ -1093,9 +1122,7 @@ impl Transcript {
         };
         self.skill_bodies_due.clear();
         let timestamp = str_at(obj, "timestamp").unwrap_or_default().to_string();
-        if obj.get("workbench_queued") == Some(&Value::Bool(true))
-            && !self.meta.unread_queued.contains(&id)
-        {
+        if queued_echo && !self.meta.unread_queued.contains(&id) {
             self.meta.unread_queued.push(id.clone());
         }
         self.upsert(
@@ -1308,10 +1335,11 @@ impl Transcript {
                     _ => return,
                 };
                 let streams_text = !matches!(item, TranscriptItem::Tool { .. });
+                let before = changed.len();
                 self.upsert(item, changed);
-                if streams_text {
-                    let i = *changed.last().expect("upsert records the index");
-                    self.stream_slots.entry(msg).or_default().push_back(i);
+                // Nothing recorded: the id names a tool call or approval already.
+                if let Some(&i) = changed.get(before).filter(|_| streams_text) {
+                    self.add_stream_slot(msg, i);
                 }
             }
             Some("content_block_delta") => {
@@ -1462,14 +1490,30 @@ impl Transcript {
                         ),
                     }
                 }
-                _ => continue,
+                _ => {}
             }
-            self.meta.busy = true;
+        }
+    }
+
+    fn add_stream_slot(&mut self, msg: String, i: usize) {
+        match self.stream_slots.iter_mut().find(|(m, _)| *m == msg) {
+            Some((_, slots)) => slots.push_back(i),
+            None => {
+                self.stream_slots.push_back((msg, VecDeque::from([i])));
+                if self.stream_slots.len() > STREAM_SLOTS_KEPT {
+                    self.stream_slots.pop_front();
+                }
+            }
         }
     }
 
     fn take_stream_slot(&mut self, msg_id: &str) -> Option<usize> {
-        self.stream_slots.get_mut(msg_id)?.pop_front()
+        let at = self.stream_slots.iter().position(|(m, _)| m == msg_id)?;
+        let i = self.stream_slots[at].1.pop_front();
+        if self.stream_slots[at].1.is_empty() {
+            self.stream_slots.remove(at);
+        }
+        i
     }
 
     fn upsert(&mut self, item: TranscriptItem, changed: &mut Vec<usize>) {

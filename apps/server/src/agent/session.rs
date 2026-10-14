@@ -389,7 +389,7 @@ impl AgentSession {
                 if session.has_exited() {
                     break;
                 }
-                let _ = session.run(|d| Ok(d.tick()));
+                let _ = session.run("tick", |d| Ok(d.tick()));
             });
         }
         session.refresh_attention();
@@ -416,6 +416,7 @@ impl AgentSession {
 
     /// Replace a terminal plugin's guessed model list with the CLI's own.
     pub fn pin_models(&self, models: Vec<workbench_core::claude_transcript::ModelOption>) {
+        let _writer = lock(&self.writer);
         let mut d = lock(&self.driver);
         if let Driver::Claude(t) = &mut *d {
             t.pin_models(models);
@@ -451,6 +452,7 @@ impl AgentSession {
         else {
             return false;
         };
+        let _writer = lock(&self.writer);
         let mut d = lock(&self.driver);
         if let Driver::Claude(t) = &mut *d {
             if t.learn_cache_ttl(ttl) {
@@ -686,10 +688,16 @@ impl AgentSession {
 
     /// Publish changes and enqueue effects in protocol order under the driver
     /// lock. Only the separate pipe writer performs blocking process IO.
-    fn run(&self, op: impl FnOnce(&mut Driver) -> Result<Effects>) -> Result<()> {
+    fn run(&self, what: &str, op: impl FnOnce(&mut Driver) -> Result<Effects>) -> Result<()> {
         let _writer = lock(&self.writer);
         let mut d = lock(&self.driver);
+        let was_busy = d.view().meta().busy;
+        // A Claude request the plugin's queue refuses never reaches `claude`:
+        // what it showed (busy, a model pick) is put back.
+        let before = matches!(&*d, Driver::Claude(_)).then(|| d.view().meta().clone());
+        let since = *lock(&self.busy_since);
         let effects = op(&mut d)?;
+        self.note_busy(was_busy, d.view(), || what.to_string());
         for frame in &effects.frames {
             self.frames.emit(d.view(), frame.to_string());
         }
@@ -708,6 +716,13 @@ impl AgentSession {
                 // RPC would leave its state out of sync with the owned process.
                 if self.pid.is_some() {
                     self.fail_io("write", &e);
+                } else if let (Driver::Claude(t), Some(meta)) = (&mut *d, before) {
+                    let was_busy = t.meta().busy;
+                    t.restore_meta(meta);
+                    // No turn started, so none ends: no "turn complete".
+                    *lock(&self.busy_since) = since;
+                    self.note_busy(was_busy, d.view(), || format!("unsent {what}"));
+                    self.broadcast_update(d.view(), &[]);
                 }
                 return Err(e);
             }
@@ -721,7 +736,9 @@ impl AgentSession {
         action: workbench_core::codex_controls::Action,
         params: &Value,
     ) -> Result<()> {
-        self.run(|d| d.codex_action(request_id, action, params))
+        self.run("codex action", |d| {
+            d.codex_action(request_id, action, params)
+        })
     }
 
     /// `now`: a Claude chat ends its running turn first; Codex ignores it (it steers).
@@ -732,19 +749,13 @@ impl AgentSession {
         files: &[PromptFile],
         now: bool,
     ) -> Result<()> {
-        self.keepalive_turn
-            .store(text == KEEPALIVE_PROMPT, Ordering::SeqCst);
-        let sent = if self.link.is_some() && !(images.is_empty() && files.is_empty()) {
-            super::attachment::attachments_saved(&self.id(), text, images, files)
-                .and_then(|(text, paths)| self.run(|d| d.prompt_attached(&text, &paths, now)))
+        if self.link.is_some() && !(images.is_empty() && files.is_empty()) {
+            super::attachment::attachments_saved(&self.id(), text, images, files).and_then(
+                |(text, paths)| self.run("prompt", |d| d.prompt_attached(&text, &paths, now)),
+            )
         } else {
-            self.run(|d| d.prompt(text, images, files, now))
-        };
-        // No turn started, so the flag must not swallow the next one's end.
-        if sent.is_err() {
-            self.keepalive_turn.store(false, Ordering::SeqCst);
+            self.run("prompt", |d| d.prompt(text, images, files, now))
         }
-        sent
     }
 
     pub fn approve(
@@ -753,7 +764,7 @@ impl AgentSession {
         decision: ApprovalDecision,
         answers: Option<&Map<String, Value>>,
     ) -> Result<()> {
-        self.run(|d| d.approve(request_id, decision, answers))
+        self.run("approval", |d| d.approve(request_id, decision, answers))
     }
 
     pub fn elicit(
@@ -762,21 +773,21 @@ impl AgentSession {
         action: ElicitationAction,
         content: Option<&Map<String, Value>>,
     ) -> Result<()> {
-        self.run(|d| d.elicit(request_id, action, content))
+        self.run("elicitation", |d| d.elicit(request_id, action, content))
     }
 
     pub fn interrupt(&self) -> Result<()> {
-        self.run(Driver::interrupt)
+        self.run("interrupt", Driver::interrupt)
     }
 
     pub fn set_mode(&self, mode: &str) -> Result<()> {
-        self.run(|d| d.set_mode(mode))
+        self.run("mode", |d| d.set_mode(mode))
     }
 
     /// The `set_model` request a Claude session was sent, for a restart to repeat.
     pub fn set_model(&self, model: &str) -> Result<Option<Value>> {
         let mut sent = None;
-        self.run(|d| {
+        self.run("model", |d| {
             let effects = d.set_model(model)?;
             if matches!(d, Driver::Claude(_)) {
                 sent = effects.send.first().cloned();
@@ -797,7 +808,7 @@ impl AgentSession {
     /// The effort request a Claude session was sent, for a restart to repeat.
     pub fn set_effort(&self, level: &str) -> Result<Option<Value>> {
         let mut sent = None;
-        self.run(|d| {
+        self.run("effort", |d| {
             let effects = d.set_effort(level)?;
             if matches!(d, Driver::Claude(_)) {
                 sent = effects.send.first().cloned();
@@ -888,7 +899,7 @@ impl AgentSession {
     }
 
     /// Relaunched under the same id: a newer session now runs the conversation.
-    pub(super) fn is_replaced(&self) -> bool {
+    pub(crate) fn is_replaced(&self) -> bool {
         self.replaced.load(Ordering::SeqCst)
     }
 
@@ -1005,7 +1016,14 @@ impl AgentSession {
                 return false;
             }
         }
+        let was_busy = d.view().meta().busy;
         let effects = d.apply_line(line);
+        self.note_busy(was_busy, d.view(), || line_kind(line));
+        // Set by the echo, not the send: a keep-alive the plugin dropped (a turn
+        // typed at the terminal was running) must not swallow that turn's end.
+        if effects.keepalive {
+            self.keepalive_turn.store(true, Ordering::SeqCst);
+        }
         for frame in &effects.frames {
             self.frames.emit(d.view(), frame.to_string());
         }
@@ -1026,8 +1044,12 @@ impl AgentSession {
             *lock(&self.session_id) = new_id.clone();
             if effects.resumed {
                 // Another conversation: the old ids are free to start again,
-                // and the policy is the resumed one's own.
-                lock(&self.previous_ids).clear();
+                // and the policy is the resumed one's own. Nothing is known
+                // under them any more, so the attention feed forgets them too.
+                let gone = std::mem::take(&mut *lock(&self.previous_ids));
+                for id in gone.iter().chain([&old_id]).filter(|id| **id != new_id) {
+                    self.attention.forget(self.attention_source, id);
+                }
                 *lock(&self.cache_policy) = self.cache_policies.get(&new_id);
             } else {
                 if !old_id.is_empty() && old_id != new_id {
@@ -1068,6 +1090,39 @@ impl AgentSession {
         true
     }
 
+    /// A new `claude` process attached in place of the one that fed this
+    /// session (see [`ModLink::hello_from`]): its history is read again and
+    /// nothing of the old process's turn runs on.
+    pub(crate) fn restarted(&self) {
+        let _writer = lock(&self.writer);
+        let loaded = self
+            .history_path()
+            .map(|path| workbench_core::claude_transcript::Transcript::load(&path))
+            .unwrap_or_default();
+        let mut d = lock(&self.driver);
+        let Driver::Claude(t) = &mut *d else {
+            return;
+        };
+        let was_busy = t.meta().busy;
+        t.restarted(loaded);
+        self.note_busy(was_busy, d.view(), || "claude restarted".into());
+        // The old process's turn ended without finishing: no "turn complete".
+        *lock(&self.busy_since) = None;
+        self.keepalive_turn.store(false, Ordering::SeqCst);
+        self.touch(d.view());
+        self.broadcast_snapshot(d.view());
+    }
+
+    /// Log a busy/idle change and what made it. Never the line's text.
+    fn note_busy(&self, was: bool, t: &dyn ChatView, cause: impl FnOnce() -> String) {
+        let busy = t.meta().busy;
+        if busy != was {
+            let id = self.id();
+            let state = if busy { "busy" } else { "idle" };
+            tracing::info!("chat {}: {state} ({})", short_id(&id), cause());
+        }
+    }
+
     /// Approvals a Claude chat still shows as answerable.
     pub(super) fn pending_approvals(&self) -> Vec<String> {
         match &*lock(&self.driver) {
@@ -1078,6 +1133,7 @@ impl AgentSession {
 
     /// Show a line from Workbench in a Claude chat.
     pub(super) fn notice(&self, text: String) {
+        let _writer = lock(&self.writer);
         let mut d = lock(&self.driver);
         let Driver::Claude(t) = &mut *d else {
             return;
@@ -1197,6 +1253,26 @@ impl AgentSession {
                 let _ = child.kill();
             }
         }
+    }
+}
+
+/// A session id as logs show it: enough to tell sessions apart.
+pub fn short_id(id: &str) -> &str {
+    id.get(..8).unwrap_or(id)
+}
+
+/// What a line is, for a log: its type and subtype (or stream event), never its text.
+fn line_kind(line: &str) -> String {
+    let Ok(value) = serde_json::from_str::<Value>(line) else {
+        return "unparsable line".into();
+    };
+    let kind = value["type"].as_str().unwrap_or("untyped");
+    match value["subtype"]
+        .as_str()
+        .or_else(|| value.pointer("/event/type").and_then(Value::as_str))
+    {
+        Some(sub) => format!("{kind}:{sub}"),
+        None => kind.to_string(),
     }
 }
 

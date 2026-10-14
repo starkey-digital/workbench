@@ -7,10 +7,11 @@ import { askAnswer, type Answer, type Line } from './lines';
 // needs, spelled there.
 //
 // Both directions are numbered so a lost reply costs nothing: every line this
-// side sends carries its number (`seq`, the first line's, the rest following)
-// and stays queued until a reply confirms it, so each request resends all the
-// unconfirmed ones from the oldest and the server folds a number once; the
-// server keeps each `/mod/in` line until a later poll acknowledges it (`ack`).
+// side sends carries its number (`seqs`, and `seq` the first line's for an
+// older server) and stays queued until a reply confirms it, so each request
+// resends all the unconfirmed ones from the oldest and the server folds a
+// number once; the server keeps each `/mod/in` line until a later poll
+// acknowledges it (`ack`).
 // The numbering is this worker's (`epoch`): a restarted worker (a hot reload)
 // starts again at 1 and the server counts afresh from its hello.
 
@@ -29,8 +30,17 @@ export const HELLO_MS = 5_000;
 const ASK_TRIES = 3;
 // A failed post is retried after this, not on every tick with a growing body.
 const RETRY_MS = 1_000;
-// Lines kept while the server can't take them (it's down); the oldest go.
+// Lines kept while the server can't take them (it's down): streamed text goes
+// first (the reply's final row carries it whole), then the oldest.
 const OUTBOX_KEPT = 5_000;
+// What a session the server loads afresh already has from its history file
+// (a reset: it loaded the new id's); the rest (tasks, notices, the goal) only
+// ever reaches it as a line. A request's start stays, so the chat shows the
+// turn still running.
+const inHistory = (line: Line) =>
+	['user', 'assistant', 'conversation_reset'].includes(String(line.type)) ||
+	(line.type === 'stream_event' &&
+		(line.event as { type?: unknown } | undefined)?.type !== 'message_start');
 /** Between hellos while the server doesn't know the session. */
 export const HELLO_EVERY_MS = 5_000;
 
@@ -38,6 +48,8 @@ interface Link {
 	url: string;
 	token: string;
 	sessionId: string;
+	/** The `claude` process this runs in, the same across hot reloads. */
+	process?: string;
 }
 
 let link: Link | null = null;
@@ -77,27 +89,39 @@ export function sessionQuery() {
 	return `sessionId=${encodeURIComponent(link?.sessionId ?? '')}`;
 }
 
+const isDelta = (line: Line) =>
+	line.type === 'stream_event' &&
+	(line.event as { type?: unknown } | undefined)?.type === 'content_block_delta';
+
 // Queued, then posted in order (see the top).
 export function emit(...lines: Line[]) {
 	if (!link) return;
 	for (const line of lines) outbox.push({ seq: ++lastSeq, line });
+	if (outbox.length > OUTBOX_KEPT) outbox = outbox.filter((e) => !isDelta(e.line));
 	if (outbox.length > OUTBOX_KEPT) outbox.splice(0, outbox.length - OUTBOX_KEPT);
 	tick();
 }
 
-type Batch = { seq?: number; lines: Line[] };
+type Batch = { seq?: number; seqs?: number[]; lines: Line[] };
 
 /** Every unconfirmed line, as a request carries them. */
 function unconfirmed(): Batch & { epoch: string } {
-	return { epoch, seq: outbox[0]?.seq, lines: outbox.map((e) => e.line) };
+	return {
+		epoch,
+		seq: outbox[0]?.seq,
+		seqs: outbox.map((e) => e.seq),
+		lines: outbox.map((e) => e.line)
+	};
 }
 
 /** A reply showed the server has `batch`. */
 function confirm(batch: Batch) {
-	if (batch.seq === undefined) return;
-	const last = batch.seq + batch.lines.length - 1;
-	outbox = outbox.filter((e) => e.seq > last);
+	const last = batch.seqs?.at(-1);
+	if (last !== undefined) outbox = outbox.filter((e) => e.seq > last);
 }
+
+/** The server doesn't know the session (404), or another worker holds it (409). */
+const helloAgain = (status: number | undefined) => status === 404 || status === 409;
 
 /** Everything queued, for the last request a session sends (`/mod/bye`). */
 export function takeOutbox() {
@@ -149,7 +173,7 @@ export async function flush(fetch: Fetch) {
 	const post = fetch(`${link.url}/mod/out`, init('POST', { sessionId: link.sessionId, ...batch }));
 	flushing = within(POST_MS, post)
 		.then((res) => {
-			if (res?.status === 404) hello.needed = true;
+			if (helloAgain(res?.status)) hello.needed = true;
 			if (res?.ok) confirm(batch);
 			else retryAt = clock.now() + RETRY_MS;
 		})
@@ -162,8 +186,9 @@ export async function flush(fetch: Fetch) {
 
 /**
  * Attach the session (`/mod/hello`). When the server loaded it afresh (it had
- * lost it), the history it read holds what was queued meanwhile: those lines
- * go. A session it still had (an earlier hello's reply was lost) keeps them.
+ * lost it), the history it read holds the rows queued meanwhile: those lines
+ * go, the rest (tasks, notices) stay. A session it still had (an earlier
+ * hello's reply was lost) keeps them all.
  */
 export async function attach(fetch: Fetch, again: boolean, after?: After): Promise<boolean> {
 	if (!link) return false;
@@ -171,9 +196,10 @@ export async function attach(fetch: Fetch, again: boolean, after?: After): Promi
 	hello.last = clock.now();
 	const res = await within(
 		HELLO_MS,
-		fetch(`${link.url}/mod/hello`, init('POST', { sessionId: link.sessionId, epoch })).catch(
-			() => null
-		),
+		fetch(
+			`${link.url}/mod/hello`,
+			init('POST', { sessionId: link.sessionId, epoch, process: link.process })
+		).catch(() => null),
 		after
 	);
 	if (!res?.ok) {
@@ -186,7 +212,7 @@ export async function attach(fetch: Fetch, again: boolean, after?: After): Promi
 	// Where the server's lines stand: a new link starts at 0; one it still had
 	// counts from the newest this worker (or the one before it) acknowledged.
 	inSeq = reply.loaded ? reply.inSeq : Math.max(inSeq, reply.inSeq);
-	if (again && reply.loaded) outbox = outbox.filter((e) => e.seq > queued);
+	if (again && reply.loaded) outbox = outbox.filter((e) => e.seq > queued || !inHistory(e.line));
 	return true;
 }
 
@@ -312,7 +338,7 @@ export async function askInChat(
 		if (signal.aborted) break;
 		// A lost reply is asked again: the server keeps an answer until its call has a result.
 		if (!res?.ok) {
-			if (res?.status === 404) hello.needed = true;
+			if (helloAgain(res?.status)) hello.needed = true;
 			if (++failed < ASK_TRIES) continue;
 			// The chat's card would stay answerable with nobody waiting on it.
 			withdraw(fetch, requestId, true);

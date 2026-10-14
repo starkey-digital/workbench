@@ -144,6 +144,12 @@ impl AttentionFeed {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn known_ids(&self) -> Vec<String> {
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.sessions.keys().cloned().collect()
+    }
+
     /// Codex terminal `notify` is already an event, with no chat driver.
     pub fn publish(&self, event: Attention) {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());

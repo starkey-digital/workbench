@@ -106,11 +106,17 @@ const runningSkills = new Map<string, { skill: string; before: Set<string> }>();
 let chatTurn = false;
 // Marks a turn this plugin submits for the chat as the chat's: its own
 // `prompt.submit` hook doesn't see the submit it raises. A refused one isn't.
-const chatSubmit = (submitted: Promise<PromptSubmitResult>) =>
-	submitted.then((r) => {
-		if (!r.drop) chatTurn = true;
-		return r;
-	});
+// Chat prompts submitted whose turn hasn't started yet.
+let submitting = 0;
+const chatSubmit = (submitted: Promise<PromptSubmitResult>) => {
+	submitting++;
+	return submitted
+		.then((r) => {
+			if (r.drop === undefined) chatTurn = true;
+			return r;
+		})
+		.finally(() => submitting--);
+};
 // The chat's latest command: whether it started a turn or compaction or got its
 // `result` (`answered`), and whether `$.command.run` has resolved (`settled`).
 type ChatCommand = { answered: boolean; settled: boolean };
@@ -124,6 +130,8 @@ let replacing: string | undefined;
 let owedResult = false;
 /** Send now's abort and prompt, which later chat prompts wait behind. */
 let sendingNow: Promise<void> | undefined;
+/** A turn Send now's abort didn't end in time: the prompt went into it, so its end answers it. */
+let sentInto: string | undefined;
 const LIVE_AGENT = new Set(['pending', 'running', 'waiting']);
 // Chat prompts appended into the running turn that no request has read yet.
 let injected: string[] = [];
@@ -163,6 +171,16 @@ function reply(requestId: unknown, error?: string, response: Line = {}) {
 			? { subtype: 'error', request_id: requestId, error }
 			: { subtype: 'success', request_id: requestId, response }
 	});
+}
+
+/**
+ * A chat prompt that started no turn: the chat shows why and goes idle. Mid-turn
+ * (a turn typed at the terminal) that turn's own `result` ends the wait.
+ */
+function promptFailed(why: string) {
+	const uuid = `wbmod-failed-${load}-${++askSeq}`;
+	if (!runningTurn) emit({ type: 'result', subtype: 'error', is_error: true, result: why, uuid });
+	else emit({ type: 'system', subtype: 'local_command_output', content: why, uuid });
 }
 
 function linkAgent(agent: string, task: string) {
@@ -332,7 +350,17 @@ export const register: Register = (on) => {
 		if (!url || !token) return result;
 		const sessionId = await $.session.id();
 		model = await $.session.model();
-		server.open({ url, token, sessionId });
+		// Set for this process only: a hot reload finds it, a new `claude` doesn't,
+		// so the server can tell the two apart.
+		let process = await $.env.get('WORKBENCH_MOD_PROCESS').catch(() => undefined);
+		if (!process) {
+			const minted = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+			process = await $.env.set('WORKBENCH_MOD_PROCESS', minted).then(
+				() => minted,
+				() => undefined
+			);
+		}
+		server.open({ url, token, sessionId, process });
 		const fetch = (u: string, i: Parameters<typeof $.http.fetch>[1]) => $.http.fetch(u, i);
 		const after: server.After = (ms, fn) => $.clock.after(ms, fn);
 		// Bounded: `claude` waits on this hook before its first prompt. A failed
@@ -362,8 +390,12 @@ export const register: Register = (on) => {
 						$.clock.sleep(SEND_NOW_ABORT_MS)
 					]);
 					// Still running: it ends on its own, with its own `result`, and
-					// this prompt joins it as any mid-turn prompt does.
-					if (replacing === turnId) replacing = undefined;
+					// this prompt joins it as any mid-turn prompt does. The abort may
+					// still land: that end then asks for this prompt's answer.
+					if (replacing === turnId) {
+						replacing = undefined;
+						sentInto = turnId;
+					}
 					await chatPrompt(after, true);
 				})().finally(() => (sendingNow = undefined));
 				return;
@@ -424,6 +456,9 @@ export const register: Register = (on) => {
 				})();
 				return;
 			}
+			// The running turn keeps the cache warm itself, and a keep-alive put
+			// into it would hide its reply: its `result` ends the chat's wait.
+			if (text === KEEPALIVE_PROMPT && runningTurn) return;
 			const appended = runningTurn
 				? await $.session
 						.append({
@@ -441,18 +476,17 @@ export const register: Register = (on) => {
 					message: { role: 'user', content: text }
 				});
 			} else {
-				// A replaced turn sent no `result`; nothing replaced it after all.
-				const unowe = () => {
-					if (owedResult && !runningTurn) {
-						owedResult = false;
-						emit({ type: 'result', subtype: 'success', is_error: false });
-					}
+				// Refused (a hook's drop) or failed: no turn starts, so none ends the
+				// chat's wait. A replaced turn sent no `result` either; it's owed now.
+				const refused = (why: string) => {
+					if (owedResult && !runningTurn) owedResult = false;
+					promptFailed(why);
 				};
 				// Not awaited: it resolves when its turn starts, and polling must go
 				// on meanwhile (approval answers, interrupts).
 				void chatSubmit($.prompt.submit({ text: withAttachments(text, files), asUser: true })).then(
-					(r) => r.drop && unowe(),
-					unowe
+					(r) => r.drop !== undefined && refused(r.drop || 'The prompt was not sent.'),
+					(err: unknown) => refused(`The prompt was not sent: ${String(err)}`)
 				);
 			}
 		};
@@ -468,6 +502,9 @@ export const register: Register = (on) => {
 			const sub = req.subtype;
 			if (sub === 'interrupt') {
 				if (runningTurn) await $.turn.abort({ turnId: runningTurn }).catch(() => {});
+				// No turn runs or is about to (the chat lost track, or this load never
+				// saw it start): Stop still ends the chat's wait.
+				else if (submitting === 0) emit({ type: 'result', subtype: 'success', is_error: false });
 				for (const agent of await $.agent.list().catch(() => []))
 					if (asyncAgents.has(agent.id) && LIVE_AGENT.has(agent.status))
 						stoppedAgents.add(agent.id);
@@ -522,8 +559,12 @@ export const register: Register = (on) => {
 					try {
 						if (line.type === 'user') await chatPrompt(line);
 						else if (line.type === 'control_request') await controlRequest(line);
-					} catch {
-						// Not run again: a line that fails would fail every time.
+					} catch (err) {
+						// Not run again: a line that fails would fail every time. The chat
+						// hears why, rather than wait on a turn that never starts.
+						if (line.type === 'user')
+							promptFailed(`Workbench couldn't send the prompt: ${String(err)}`);
+						else if (line.type === 'control_request') reply(line.request_id, String(err));
 					} finally {
 						server.handled(line);
 					}
@@ -887,8 +928,11 @@ export const register: Register = (on) => {
 			injected = [];
 			// Entries live one turn at most, so a stale one can't hide a later prompt.
 			echoed.clear();
-			// Stopped: the prompt stays in the chat, as an interrupted CLI leaves it.
-			if (e.reason === 'aborted' || !unread) return next(e);
+			const lateSendNow = e.turnId === sentInto;
+			sentInto = undefined;
+			// Stopped: the prompt stays in the chat, as an interrupted CLI leaves it,
+			// unless it was Send now's, which went in as the abort ended the turn.
+			if ((e.reason === 'aborted' && !lateSendNow) || !unread) return next(e);
 			// The unread prompts are in the conversation already; only ask for an answer.
 			echoed.add(QUEUED_NUDGE);
 			void chatSubmit($.prompt.submit({ text: QUEUED_NUDGE, asUser: true })).catch(() => {});

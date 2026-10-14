@@ -168,3 +168,53 @@ fn only_the_end_frame_ends_the_stream() {
     let ends: Vec<bool> = drain(&mut rx).iter().map(|f| f.ends()).collect();
     assert_eq!(ends, [false, true]);
 }
+
+#[test]
+fn a_prompt_the_plugin_cannot_take_leaves_the_chat_idle() {
+    let session = terminal_session();
+    let link = session.mod_link().unwrap().clone();
+    // A `claude` that stopped polling: its queue is full.
+    while link.push(json!({"type": "user"})).is_ok() {}
+    assert!(session.prompt("hi", &[], &[], false).is_err());
+    let summary = session.summary();
+    assert!(!summary.busy);
+    assert_eq!(
+        summary.turn_ended_at, None,
+        "no turn ran, so none completed"
+    );
+}
+
+#[test]
+fn a_resumed_conversation_leaves_nothing_under_the_old_id_in_the_attention_feed() {
+    let session = terminal_session();
+    let old = session.id();
+    session.apply_line(
+        &stream_event(json!({"type":"message_start","message":{"id":"m1"}})),
+        |_, _| true,
+    );
+    assert!(session.attention.known_ids().contains(&old));
+    let new = "9a8b7c6d-0000-4000-8000-00000000abcd";
+    session.apply_line(
+        &json!({"type": "conversation_reset", "new_conversation_id": new, "resumed": true})
+            .to_string(),
+        |_, _| true,
+    );
+    assert_eq!(session.attention.known_ids(), [new]);
+}
+
+#[test]
+fn a_new_claude_process_ends_the_old_ones_turn() {
+    let session = terminal_session();
+    session.apply_line(
+        &stream_event(json!({"type":"message_start","message":{"id":"m1"}})),
+        |_, _| true,
+    );
+    assert!(session.summary().busy);
+    session.restarted();
+    let summary = session.summary();
+    assert!(!summary.busy);
+    assert_eq!(
+        summary.turn_ended_at, None,
+        "the crashed turn didn't complete"
+    );
+}

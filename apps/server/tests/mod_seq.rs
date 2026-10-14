@@ -146,12 +146,44 @@ async fn link_lines_are_delivered_until_acknowledged_and_folded_once() {
     assert_eq!(title().await, "Second");
 
     // The worker restarted: it numbers from 1 again, and the old one's late
-    // post is dropped.
+    // post is refused (409), so that worker says hello again.
     assert!(hello("w2").await.unwrap().status().is_success());
     assert!(posted(out("w2", 1, &["Third"]).await));
     assert_eq!(title().await, "Third");
-    assert!(posted(out("w1", 3, &["Old"]).await));
+    let late = out("w1", 3, &["Old"]).await.unwrap();
+    assert_eq!(late.status(), reqwest::StatusCode::CONFLICT);
     assert_eq!(title().await, "Third");
+
+    // A new `claude` in the same terminal (the old one died mid-turn) ends the
+    // old one's turn; a hot reload in the same process doesn't.
+    let hello_in = |epoch: &str, process: &str| {
+        client
+            .post(format!("{mod_url}/mod/hello"))
+            .header("x-workbench-mod-token", &mod_token)
+            .json(&json!({"sessionId": SID, "epoch": epoch, "process": process}))
+            .send()
+    };
+    let busy = || async {
+        let agents: Value = client
+            .get(format!("{base}/agent"))
+            .bearer_auth(TOKEN)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        agents[0]["busy"] == true
+    };
+    assert!(hello_in("w3", "p1").await.unwrap().status().is_success());
+    assert!(prompt("three").await.unwrap().status().is_success());
+    assert!(busy().await);
+    let reload: Value = hello_in("w4", "p1").await.unwrap().json().await.unwrap();
+    assert_eq!(reload["loaded"], false);
+    assert!(busy().await);
+    let restart: Value = hello_in("w5", "p2").await.unwrap().json().await.unwrap();
+    assert_eq!(restart["loaded"], true);
+    assert!(!busy().await);
 
     support::close_pane(&base, &pane).await;
     handle.stop().await;

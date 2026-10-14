@@ -28,8 +28,8 @@ mod session;
 pub use attachment::{PromptFile, PromptImage, MAX_FILES, MAX_IMAGES};
 pub use cache::CachePolicy;
 pub use frames::Frame;
-pub use modlink::{ModGrant, ModLink};
-pub use session::AgentSession;
+pub use modlink::{ModGrant, ModLink, OtherWorker};
+pub use session::{short_id, AgentSession};
 
 const DEFAULT_MAX_AGENTS: usize = 16;
 /// How long a start waits for codex to open (or resume) its thread.
@@ -234,6 +234,13 @@ pub struct AgentManager {
     model_picks: Arc<Mutex<HashMap<String, serde_json::Value>>>,
     effort_picks: Arc<Mutex<HashMap<String, serde_json::Value>>>,
     restart_picks: Arc<Mutex<HashMap<String, Vec<serde_json::Value>>>>,
+}
+
+type Picks = Mutex<HashMap<String, serde_json::Value>>;
+
+fn forget_picks(model: &Picks, effort: &Picks, session_id: &str) {
+    lock(model).remove(session_id);
+    lock(effort).remove(session_id);
 }
 
 /// How long a stopped process may take to be reaped after its grace ran out.
@@ -789,8 +796,7 @@ impl AgentManager {
         }
         if to.is_some() {
             // Picks resolved against the old login's models may not exist on the new one.
-            lock(&self.model_picks).remove(&session_id);
-            lock(&self.effort_picks).remove(&session_id);
+            forget_picks(&self.model_picks, &self.effort_picks, &session_id);
         }
         let owed = self.picks(&session_id);
         if !owed.is_empty() {
@@ -916,14 +922,17 @@ impl AgentManager {
     }
 
     /// Fold lines a terminal's plugin posted into its session; numbered from
-    /// `seq`, a line already folded (a retry, or a slow post's copy) is skipped.
+    /// `seq` (or each by `seqs`), a line already folded (a retry, or a slow
+    /// post's copy) is skipped. Refused when they come from a plugin worker
+    /// another has replaced.
     pub fn feed_mod(
         &self,
         session: &Arc<AgentSession>,
         lines: &[serde_json::Value],
         epoch: Option<&str>,
         seq: Option<u64>,
-    ) {
+        seqs: Option<&[u64]>,
+    ) -> Result<(), modlink::OtherWorker> {
         let mut let_go = false;
         let fold = |line: &serde_json::Value| {
             if let_go {
@@ -992,10 +1001,18 @@ impl AgentManager {
         match session.mod_link() {
             Some(link) => {
                 link.touch();
-                link.fold_new(epoch, seq, lines, fold);
+                link.fold_new(epoch, seq, seqs, lines, fold)
             }
-            None => lines.iter().for_each(fold),
+            None => {
+                lines.iter().for_each(fold);
+                Ok(())
+            }
         }
+    }
+
+    /// A session's chat picks go with it: a later `claude` starts on the defaults.
+    fn forget_picks(&self, session: &AgentSession) {
+        forget_picks(&self.model_picks, &self.effort_picks, &session.id());
     }
 
     /// A model picked in the TUI (a `system:init` naming another pick) replaces
@@ -1038,6 +1055,7 @@ impl AgentManager {
             let grants = Arc::downgrade(&self.mod_grants);
             let terminals = self.terminals.clone();
             let attention = self.attention.clone();
+            let picks = (self.model_picks.clone(), self.effort_picks.clone());
             std::thread::spawn(move || loop {
                 std::thread::sleep(cache::TICK);
                 let Some(registry) = weak.upgrade() else {
@@ -1054,6 +1072,12 @@ impl AgentManager {
                 for session in sessions {
                     // The terminal's `claude` quit (or the pane closed) without saying so.
                     if session.mod_link().is_some_and(|l| l.is_stale()) {
+                        let id = session.id();
+                        tracing::info!(
+                            "chat {}: its terminal's claude stopped polling; dropped",
+                            session::short_id(&id)
+                        );
+                        forget_picks(&picks.0, &picks.1, &id);
                         if let Some(registry) = weak.upgrade() {
                             lock(&registry).retain(|_, s| !Arc::ptr_eq(s, &session));
                         }
@@ -1081,6 +1105,8 @@ impl AgentManager {
             }
             self.halt(session);
         }
+        tracing::info!("chat {}: detached", session::short_id(&session.id()));
+        self.forget_picks(session);
         self.stop_halted(std::slice::from_ref(session));
     }
 
@@ -1088,6 +1114,7 @@ impl AgentManager {
     /// process is its terminal's `claude`, so that terminal goes too. Blocking.
     pub fn stop_pane(&self, pane_id: &str) -> usize {
         let owned = self.halt_matching(|s| s.pane_id.as_deref() == Some(pane_id));
+        owned.iter().for_each(|s| self.forget_picks(s));
         self.stop_halted(&owned);
         for session in &owned {
             self.kill_terminal(session);
@@ -1101,6 +1128,7 @@ impl AgentManager {
             s.mod_link()
                 .is_some_and(|l| l.terminal_id.as_deref() == Some(terminal_id))
         });
+        hosted.iter().for_each(|s| self.forget_picks(s));
         self.stop_halted(&hosted);
     }
 
@@ -1359,12 +1387,18 @@ mod tests {
         // Only an effort picked in the TUI replaces the chat's, not a request
         // that ran with another (one queued before the pick, a model without effort).
         let init = |effort: serde_json::Value| serde_json::json!({"type": "system", "subtype": "init", "effort": effort});
-        agents.feed_mod(&session, &[init(serde_json::Value::Null)], None, None);
-        agents.feed_mod(&session, &[init("low".into())], None, None);
+        agents
+            .feed_mod(&session, &[init(serde_json::Value::Null)], None, None, None)
+            .unwrap();
+        agents
+            .feed_mod(&session, &[init("low".into())], None, None, None)
+            .unwrap();
         assert!(lock(&agents.effort_picks).contains_key(sid));
         let mut cleared = init("low".into());
         cleared["effortCleared"] = true.into();
-        agents.feed_mod(&session, &[cleared], None, None);
+        agents
+            .feed_mod(&session, &[cleared], None, None, None)
+            .unwrap();
         assert!(!lock(&agents.effort_picks).contains_key(sid));
     }
 }
