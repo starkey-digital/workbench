@@ -93,6 +93,9 @@ const taskAgents = new Map<string, string>();
 // Background agents: their Agent call returned at launch, so their own
 // `turn.complete` ends the task.
 const asyncAgents = new Set<string>();
+// Teammates (a named Agent call) idle after each turn until a message wakes
+// them: each turn's end ends the task, and the next turn's start resumes it.
+const teammates = new Set<string>();
 // Background agents the chat's Stop asked to end. No call stops one, so each ends
 // at its next model request or tool call (`endedByStop`), and then its "finished"
 // notification starts no turn. One that answered first keeps its notification.
@@ -292,6 +295,7 @@ function unlinkTask(task: string) {
 	if (agent) {
 		agentTasks.delete(agent);
 		asyncAgents.delete(agent);
+		teammates.delete(agent);
 	}
 }
 
@@ -651,7 +655,18 @@ export const register: Register = (on) => {
 	// `agentId`: only the main thread's turn is the chat's. Commands come and go
 	// (a plugin or skill loaded), so the chat's list is re-read here.
 	on('turn.start', async ($, e, next) => {
-		if (e.agentId) return next(e);
+		if (e.agentId) {
+			const task = teammates.has(e.agentId) ? agentTasks.get(e.agentId) : undefined;
+			if (task && server.current())
+				emit({
+					type: 'system',
+					subtype: 'task_updated',
+					task_id: task,
+					patch: { status: 'running' },
+					uuid: `wbmod-task-wake-${load}-${++askSeq}`
+				});
+			return next(e);
+		}
 		runningTurn = e.turnId;
 		owedResult = false;
 		// A prompt-type command's turn ends with its own `result`.
@@ -857,7 +872,8 @@ export const register: Register = (on) => {
 		const task = e.agentId && asyncAgents.has(e.agentId) ? agentTasks.get(e.agentId) : undefined;
 		if (e.agentId) stoppedAgents.delete(e.agentId);
 		if (linked && task && e.agentId) {
-			unlinkTask(task);
+			const teammate = teammates.has(e.agentId);
+			if (!teammate) unlinkTask(task);
 			emit({
 				type: 'system',
 				subtype: 'task_notification',
@@ -868,7 +884,7 @@ export const register: Register = (on) => {
 						: e.reason === 'answer'
 							? 'completed'
 							: 'failed',
-				uuid: `wbmod-done-${task}`
+				uuid: teammate ? `wbmod-done-${task}-${load}-${++askSeq}` : `wbmod-done-${task}`
 			});
 		}
 		// A call denied in the terminal's dialog never reaches `tool.call`.
@@ -1250,8 +1266,10 @@ export const register: Register = (on) => {
 			}
 			runningSkills.delete(id);
 		}
-		if (isAgent && id && launched?.status === 'async_launched' && launched.agentId) {
+		const teammate = launched?.status === 'teammate_spawned';
+		if (isAgent && id && (launched?.status === 'async_launched' || teammate) && launched.agentId) {
 			asyncAgents.add(launched.agentId);
+			if (teammate) teammates.add(launched.agentId);
 			linkAgent(launched.agentId, id);
 		} else if (isAgent && id) {
 			unlinkTask(id);

@@ -1269,6 +1269,16 @@ fn a_notification_naming_a_subagent_ends_its_task() {
 }
 
 #[test]
+fn a_woken_teammate_runs_again() {
+    let mut t = Transcript::default();
+    t.apply(&json!({"type":"system","subtype":"task_started","task_id":"toolu_1","description":"PVP"}));
+    t.apply(&json!({"type":"system","subtype":"task_notification","task_id":"toolu_1","status":"completed"}));
+    t.apply(&json!({"type":"system","subtype":"task_updated","task_id":"toolu_1","patch":{"status":"running"}}));
+    assert_eq!(t.meta().tasks.len(), 1);
+    assert!(t.meta().tasks[0].is_running());
+}
+
+#[test]
 fn slash_commands_come_from_initialize_and_updates() {
     let mut t = Transcript::default();
     let a = t.apply(&json!({"type":"control_response","response":{"subtype":"success","request_id":"i",
