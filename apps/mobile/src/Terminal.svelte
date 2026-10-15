@@ -6,7 +6,7 @@
 	import '@xterm/xterm/css/xterm.css';
 	import { terminalWsUrl } from '@workbench/transport';
 	import { breadcrumb } from '@workbench/telemetry';
-	import { fontPrefs, terminalFont } from '@workbench/chat-ui';
+	import { fontPrefs, TERMINAL_PALETTES, terminalFont, themePrefs } from '@workbench/chat-ui';
 	import { watch } from 'runed';
 	import { untrack } from 'svelte';
 	import { touchScroll } from './touch-scroll.ts';
@@ -63,6 +63,16 @@
 	/** The mounted terminal, for font changes. */
 	let view: { term: Terminal; fit: FitAddon } | undefined;
 
+	const palette = $derived(TERMINAL_PALETTES[themePrefs.theme]);
+
+	watch(
+		() => palette,
+		(theme) => {
+			if (view) view.term.options.theme = theme;
+		},
+		{ lazy: true }
+	);
+
 	watch(
 		() => [fontPrefs.terminalFamily, fontPrefs.value.terminalSize] as const,
 		() =>
@@ -77,7 +87,8 @@
 	const mountTerminal: Attachment<HTMLDivElement> = (host) => {
 		const term = new Terminal({
 			cursorBlink: true,
-			theme: { background: '#0f1115', foreground: '#e7eaf0' }
+			// Untracked: theme changes go through the watch above, not a remount.
+			theme: untrack(() => palette)
 		});
 		const fit = new FitAddon();
 		term.loadAddon(fit);
@@ -246,6 +257,7 @@
 		{@attach mountTerminal}
 		{@attach touchScroll}
 		class="min-h-0 flex-1 overflow-hidden p-1"
+		style:background={palette.background}
 	></div>
 
 	<!-- Extra keys row — sits above the soft keyboard. pointerdown+preventDefault

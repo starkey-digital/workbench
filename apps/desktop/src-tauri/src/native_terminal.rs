@@ -58,6 +58,8 @@ extern "C" {
 
     fn swift_term_set_visible(session_id: *const c_char, visible: bool);
 
+    fn swift_term_set_colors(session_id: *const c_char, colors: *const c_char);
+
     fn swift_term_write(session_id: *const c_char, text: *const c_char);
 
     fn swift_term_destroy(session_id: *const c_char);
@@ -71,6 +73,13 @@ struct CallbackContext {
     session_id: String,
     input: Sender<Vec<u8>>,
     app_handle: AppHandle,
+}
+
+/// Hand a palette to SwiftTerm, which applies it on the main thread.
+fn set_colors(session_cstr: &CString, colors: &str) -> Result<()> {
+    let colors = CString::new(colors).context("Invalid colors for CString")?;
+    unsafe { swift_term_set_colors(session_cstr.as_ptr(), colors.as_ptr()) };
+    Ok(())
 }
 
 /// Called by SwiftTerm, on the main thread, when the user types or pastes.
@@ -258,12 +267,14 @@ impl NativeTerminalManager {
 
     /// Show server terminal `terminal_id` in a SwiftTerm view keyed by the pane
     /// id `session_id`, sized to the view.
+    #[allow(clippy::too_many_arguments)]
     pub fn attach(
         &self,
         session_id: String,
         terminal_id: String,
         terminals: TerminalManager,
         (x, y, width, height, font_size): (f64, f64, f64, f64, f64),
+        colors: &str,
         ns_view_ptr: *mut c_void,
         app_handle: AppHandle,
     ) -> Result<()> {
@@ -301,6 +312,8 @@ impl NativeTerminalManager {
             let _ = unsafe { Box::from_raw(ctx_ptr as *mut CallbackContext) };
             return Err(anyhow!("swift_term_create failed for session {session_id}"));
         }
+        // Before any output, so the scrollback never paints in the other theme.
+        set_colors(&session_cstr, colors)?;
 
         // The PTY takes SwiftTerm's actual grid size.
         let (mut cols, mut rows) = (80u16, 24u16);
@@ -436,6 +449,19 @@ impl NativeTerminalManager {
             swift_term_set_visible(session_cstr.as_ptr(), visible);
         }
         Ok(())
+    }
+
+    /// Repaint the view in another palette (`swift_term_set_colors`'s format).
+    pub fn set_colors(&self, session_id: &str, colors: &str) -> Result<()> {
+        let session = self
+            .get_session(session_id)
+            .ok_or_else(|| anyhow!("Session not found: {session_id}"))?;
+        let session_cstr = session
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .session_id_cstr
+            .clone();
+        set_colors(&session_cstr, colors)
     }
 
     /// Queue input for the terminal; never blocks.

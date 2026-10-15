@@ -10,6 +10,15 @@ export {
 	terminalFont,
 	type FontChoice
 } from './font-prefs.svelte.ts';
+export {
+	applyTheme,
+	TERMINAL_PALETTES,
+	THEME_CHOICES,
+	themePrefs,
+	type TerminalPalette,
+	type Theme,
+	type ThemeChoice
+} from './theme-prefs.svelte.ts';
 export { agentClient, type AgentApi, type AgentClient } from './agent-api.ts';
 export { useAccountPlanUsage } from './plan-usage.svelte.ts';
 export { setChatPlatform, type ChatPlatform } from './platform.ts';

@@ -2,12 +2,12 @@
 	import { log } from '$lib/log';
 	import { watch } from 'runed';
 	import { onDestroy, onMount } from 'svelte';
-	import { TERMINAL_BG } from '$lib/terminal-config';
-	import { fontPrefs } from '@workbench/chat-ui';
+	import { fontPrefs, TERMINAL_PALETTES, themePrefs } from '@workbench/chat-ui';
 	import {
 		attachNativeTerminal,
 		detachNativeTerminal,
 		resizeNativeTerminal,
+		setNativeTerminalColors,
 		setNativeTerminalVisible,
 		onSessionTerminalExit
 	} from '$lib/utils/terminal';
@@ -62,6 +62,16 @@
 		}, 100);
 	}
 
+	const palette = $derived(TERMINAL_PALETTES[themePrefs.theme]);
+
+	watch(
+		() => palette,
+		(colors) => {
+			if (created && !exited) void setNativeTerminalColors(terminalId, colors);
+		},
+		{ lazy: true }
+	);
+
 	// Show/hide based on active state AND overlay state.
 	// Also re-measure and resize when becoming active, since the container
 	// may have been display:none (class:hidden) when first mounted.
@@ -100,6 +110,7 @@
 
 			const rect = container.getBoundingClientRect();
 			const nsRect = domToNSView(rect);
+			const attachedWith = palette;
 
 			await attachNativeTerminal({
 				terminalId,
@@ -107,7 +118,8 @@
 				y: nsRect.y,
 				width: nsRect.width,
 				height: nsRect.height,
-				fontSize: fontPrefs.value.terminalSize
+				fontSize: fontPrefs.value.terminalSize,
+				palette: attachedWith
 			});
 
 			if (destroyed) {
@@ -116,6 +128,8 @@
 				return;
 			}
 			created = true;
+			// The theme changed while attaching; the watch skipped it.
+			if (palette !== attachedWith) void setNativeTerminalColors(terminalId, palette);
 
 			// Set initial visibility
 			if (!active) {
@@ -159,13 +173,13 @@
 	});
 </script>
 
-<div class="native-terminal-wrapper" style:background={TERMINAL_BG} bind:this={container}>
+<div class="native-terminal-wrapper" style:background={palette.background} bind:this={container}>
 	{#if terminalError}
-		<div class="terminal-error" style:background={TERMINAL_BG}>
+		<div class="terminal-error" style:background={palette.background}>
 			<div class="text-center">
 				<p>{terminalError}</p>
 				<button
-					class="mt-2 rounded bg-white/10 px-3 py-1 text-xs hover:bg-white/20"
+					class="mt-2 rounded bg-wb-ink/10 px-3 py-1 text-xs hover:bg-wb-ink/20"
 					type="button"
 					onclick={() => (terminalError = '')}
 				>
@@ -175,7 +189,7 @@
 		</div>
 	{/if}
 	{#if exited}
-		<div class="terminal-error" style:background={TERMINAL_BG}>
+		<div class="terminal-error" style:background={palette.background}>
 			<p class="text-sm text-muted-foreground">[process exited]</p>
 		</div>
 	{/if}
@@ -196,7 +210,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		color: #fca5a5;
+		color: var(--wb-err);
 		font-size: 13px;
 	}
 </style>

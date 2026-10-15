@@ -22,7 +22,7 @@
 			<p class="font-mono text-[11px] break-all">{cwd}</p>
 			<button
 				type="button"
-				class="mt-1 rounded bg-wb-accent px-3 py-1 text-xs text-white hover:opacity-90"
+				class="mt-1 rounded bg-wb-accent px-3 py-1 text-xs text-wb-accent-ink hover:opacity-90"
 				onclick={() => workspaceStore.trustFolder(pane.id)}
 			>
 				Trust folder
@@ -32,7 +32,7 @@
 			{#if ai}
 				<button
 					type="button"
-					class="mt-1 rounded bg-white/10 px-3 py-1 text-xs text-wb-ink hover:bg-white/20"
+					class="mt-1 rounded bg-wb-ink/10 px-3 py-1 text-xs text-wb-ink hover:bg-wb-ink/20"
 					onclick={() => claudeSessionStore.restartSession('', tabId, pane.type)}
 				>
 					Restart
@@ -40,7 +40,7 @@
 			{:else}
 				<button
 					type="button"
-					class="mt-1 rounded bg-white/10 px-3 py-1 text-xs text-wb-ink hover:bg-white/20"
+					class="mt-1 rounded bg-wb-ink/10 px-3 py-1 text-xs text-wb-ink hover:bg-wb-ink/20"
 					onclick={() => workspaceStore.removePane('', pane.id)}
 				>
 					Close

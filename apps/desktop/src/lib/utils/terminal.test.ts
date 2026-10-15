@@ -17,6 +17,7 @@
  */
 
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { TERMINAL_PALETTES } from '@workbench/chat-ui';
 import { invokeSpy, clearInvokeMocks } from '../../test/tauri-mocks';
 
 beforeEach(() => {
@@ -36,9 +37,25 @@ describe('native terminal IPC wrappers', () => {
 			fontSize: 13
 		};
 
-		await attachNativeTerminal(request);
+		await attachNativeTerminal({ ...request, palette: TERMINAL_PALETTES.light });
 
-		expect(invokeSpy).toHaveBeenCalledWith('attach_native_terminal', request);
+		expect(invokeSpy).toHaveBeenCalledWith('attach_native_terminal', {
+			...request,
+			colors: expect.stringMatching(/^#1f2328,#fbfbfc,(#[0-9a-f]{6},){15}#[0-9a-f]{6}$/)
+		});
+	});
+
+	it('setNativeTerminalColors repaints a view in the palette', async () => {
+		invokeSpy.mockResolvedValueOnce(undefined);
+		const { nativeColors, setNativeTerminalColors } = await import('./terminal');
+
+		await setNativeTerminalColors('ses-1', TERMINAL_PALETTES.dark);
+
+		expect(invokeSpy).toHaveBeenCalledWith('set_native_terminal_colors', {
+			sessionId: 'ses-1',
+			colors: nativeColors(TERMINAL_PALETTES.dark)
+		});
+		expect(nativeColors(TERMINAL_PALETTES.dark).split(',')).toHaveLength(18);
 	});
 
 	it('resizeNativeTerminal invokes resize_native_terminal', async () => {

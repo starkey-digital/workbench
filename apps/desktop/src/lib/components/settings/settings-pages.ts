@@ -65,8 +65,8 @@ export const SETTINGS_NAV: SettingsNavGroup[] = [
 			},
 			{
 				id: 'fonts',
-				label: 'Fonts',
-				description: 'Font and text size of terminals and chats on this computer.',
+				label: 'Appearance',
+				description: 'Theme, and the font and text size of terminals and chats, on this computer.',
 				store: 'immediate'
 			},
 			{

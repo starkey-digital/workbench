@@ -1,12 +1,13 @@
 import './app.css';
 import { mount } from 'svelte';
 import { initSentry } from '$lib/sentry';
+import { applyTheme, themePrefs } from '@workbench/chat-ui';
 
 // Error tracking — no-op in dev, reports only in production builds.
 initSentry();
 
-// Force dark mode
-document.documentElement.classList.add('dark');
+// Before mount, so the first paint is already in the chosen theme.
+applyTheme(themePrefs.theme);
 
 const target = document.getElementById('app')!;
 

@@ -36,6 +36,9 @@ void swift_term_get_size(const char *session_id, uint16_t *out_cols, uint16_t *o
 // Show or hide the terminal view
 void swift_term_set_visible(const char *session_id, bool visible);
 
+// Apply a palette: comma-separated hex, foreground, background, then the 16 ANSI colors
+void swift_term_set_colors(const char *session_id, const char *colors);
+
 // Write data to the terminal (for startup commands injected from Rust side)
 void swift_term_write(const char *session_id, const char *text);
 

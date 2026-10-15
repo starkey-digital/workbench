@@ -96,26 +96,28 @@ private class BridgeDelegate: NSObject, TerminalViewDelegate {
 
 // MARK: - Theme Configuration
 
-/// Parses a hex color string (e.g. "#1a1a1e") into an NSColor.
-private func nsColorFromHex(_ hex: String) -> NSColor {
+/// Parses a hex color string (e.g. "#1a1a1e") into its 8-bit RGB components.
+private func rgbFromHex(_ hex: String) -> (UInt64, UInt64, UInt64)? {
     var hexSanitized = hex.trimmingCharacters(in: .whitespacesAndNewlines)
     if hexSanitized.hasPrefix("#") {
         hexSanitized.removeFirst()
     }
-    guard hexSanitized.count == 6 else { return NSColor.black }
+    guard hexSanitized.count == 6 else { return nil }
     var rgbValue: UInt64 = 0
-    guard Scanner(string: hexSanitized).scanHexInt64(&rgbValue) else { return NSColor.black }
-    let r = CGFloat((rgbValue & 0xFF0000) >> 16) / 255.0
-    let g = CGFloat((rgbValue & 0x00FF00) >> 8) / 255.0
-    let b = CGFloat(rgbValue & 0x0000FF) / 255.0
-    return NSColor(srgbRed: r, green: g, blue: b, alpha: 1.0)
+    guard Scanner(string: hexSanitized).scanHexInt64(&rgbValue) else { return nil }
+    return ((rgbValue & 0xFF0000) >> 16, (rgbValue & 0x00FF00) >> 8, rgbValue & 0x0000FF)
 }
 
-/// Applies the Workbench dark terminal theme to a TerminalView.
-/// Colors match the xterm.js theme defined in src/lib/terminal-config.ts.
-private func applyTheme(to view: TerminalView) {
-    view.nativeForegroundColor = nsColorFromHex("#dcdcde")
-    view.nativeBackgroundColor = nsColorFromHex("#1a1a1e")
+private func nsColorFromHex(_ hex: String) -> NSColor? {
+    guard let (r, g, b) = rgbFromHex(hex) else { return nil }
+    return NSColor(
+        srgbRed: CGFloat(r) / 255.0, green: CGFloat(g) / 255.0, blue: CGFloat(b) / 255.0, alpha: 1.0)
+}
+
+private func termColorFromHex(_ hex: String) -> SwiftTerm.Color? {
+    guard let (r, g, b) = rgbFromHex(hex) else { return nil }
+    // 0...255 to SwiftTerm's 0...65535.
+    return SwiftTerm.Color(red: UInt16(r * 257), green: UInt16(g * 257), blue: UInt16(b * 257))
 }
 
 // MARK: - FFI Functions
@@ -166,8 +168,6 @@ public func swift_term_create(
         let terminalView = TerminalView(frame: frame)
         terminalView.font = font
         terminalView.autoresizingMask = []  // We control frame manually
-
-        applyTheme(to: terminalView)
 
         let delegate = BridgeDelegate(
             inputCallback: input_callback,
@@ -292,6 +292,37 @@ public func swift_term_set_visible(
     let work = {
         guard let session = getSession(sessionId) else { return }
         session.view.isHidden = !visible
+    }
+
+    if Thread.isMainThread {
+        work()
+    } else {
+        DispatchQueue.main.async { work() }
+    }
+}
+
+/// Applies the light or dark palette of the xterm.js panes (`TERMINAL_PALETTES`
+/// in @workbench/chat-ui). `colors` is comma-separated hex: foreground,
+/// background, then the 16 ANSI colors. Anything else is ignored.
+@_cdecl("swift_term_set_colors")
+public func swift_term_set_colors(
+    _ session_id: UnsafePointer<CChar>,
+    _ colors: UnsafePointer<CChar>
+) {
+    let sessionId = String(cString: session_id)
+    let hex = String(cString: colors).split(separator: ",").map(String.init)
+    guard hex.count == 18,
+        let foreground = nsColorFromHex(hex[0]),
+        let background = nsColorFromHex(hex[1])
+    else { return }
+    let ansi = hex[2...].compactMap(termColorFromHex)
+    guard ansi.count == 16 else { return }
+
+    let work = {
+        guard let session = getSession(sessionId) else { return }
+        session.view.nativeForegroundColor = foreground
+        session.view.nativeBackgroundColor = background
+        session.view.installColors(ansi)
     }
 
     if Thread.isMainThread {

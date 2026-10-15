@@ -60,6 +60,7 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { effectivePath } from '$lib/utils/path';
 	import { watch } from 'runed';
+	import { applyTheme, themePrefs } from '@workbench/chat-ui';
 	import { Toaster, toast } from 'svelte-sonner';
 	import { attempt } from '$lib/utils/attempt';
 
@@ -133,6 +134,10 @@
 	watch(
 		() => workbenchSettingsStore.accentColor,
 		(accent) => document.documentElement.setAttribute('data-accent', accent)
+	);
+	watch(
+		() => themePrefs.theme,
+		(theme) => applyTheme(theme)
 	);
 	watch(() => workbenchSettingsStore.extendedDiagnostics, setExtendedDiagnostics);
 

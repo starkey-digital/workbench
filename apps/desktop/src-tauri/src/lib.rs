@@ -273,6 +273,7 @@ pub fn run() {
                 native_terminal_commands::attach_native_terminal,
                 native_terminal_commands::resize_native_terminal,
                 native_terminal_commands::set_native_terminal_visible,
+                native_terminal_commands::set_native_terminal_colors,
                 native_terminal_commands::detach_native_terminal,
                 native_terminal_commands::write_native_terminal,
                 native_notification_commands::is_native_notification_available,

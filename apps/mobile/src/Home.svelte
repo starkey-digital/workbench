@@ -12,7 +12,9 @@
 		fontPrefs,
 		shortPath,
 		TERMINAL_FONT_SIZES,
-		TERMINAL_FONTS
+		TERMINAL_FONTS,
+		THEME_CHOICES,
+		themePrefs
 	} from '@workbench/chat-ui';
 	import { cn } from '@workbench/ui';
 	import type { RunningTasks } from '@workbench/types';
@@ -355,6 +357,26 @@
 				<p class="text-xs text-wb-ink-mute">
 					Claude sessions can switch between chat and terminal from their header.
 				</p>
+			</div>
+			<div class="flex flex-col gap-2">
+				<span class="text-[13px] font-semibold">Theme on this phone</span>
+				<div class="grid grid-cols-3 gap-1 rounded-xl border border-wb-hair bg-wb-panel2 p-1">
+					{#each THEME_CHOICES as option (option.id)}
+						<button
+							type="button"
+							class={cn(
+								'h-9 rounded-lg text-[13px] font-medium',
+								themePrefs.choice === option.id
+									? 'bg-wb-bg text-wb-ink shadow-sm'
+									: 'text-wb-ink-soft'
+							)}
+							aria-pressed={themePrefs.choice === option.id}
+							onclick={() => themePrefs.set(option.id)}
+						>
+							{option.label}
+						</button>
+					{/each}
+				</div>
 			</div>
 			<div class="flex flex-col gap-2">
 				<span class="text-[13px] font-semibold">Fonts on this phone</span>

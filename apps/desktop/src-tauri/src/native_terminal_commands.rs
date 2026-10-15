@@ -26,6 +26,7 @@ pub async fn attach_native_terminal(
     width: f64,
     height: f64,
     font_size: f64,
+    colors: String,
     window: tauri::WebviewWindow,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
@@ -40,6 +41,7 @@ pub async fn attach_native_terminal(
                 terminal_id,
                 terminals,
                 (x, y, width, height, font_size),
+                &colors,
                 ns_view as *mut std::ffi::c_void,
                 app_handle.clone(),
             )
@@ -79,6 +81,18 @@ pub async fn set_native_terminal_visible(
 ) -> Result<(), String> {
     manager
         .set_visible(&session_id, visible)
+        .map_err(|e| e.to_string())
+}
+
+/// Repaint a native pane in the light or dark palette.
+#[tauri::command]
+pub async fn set_native_terminal_colors(
+    session_id: String,
+    colors: String,
+    manager: tauri::State<'_, NativeTerminalManager>,
+) -> Result<(), String> {
+    manager
+        .set_colors(&session_id, &colors)
         .map_err(|e| e.to_string())
 }
 

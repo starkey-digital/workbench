@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import type { TerminalPalette } from '@workbench/chat-ui';
 import type { IntegrationStatus, TerminalExitEvent } from '$types/workbench';
 
 // ── Exit event listener for native SwiftTerm terminals ─────────────────────
@@ -76,8 +77,43 @@ export async function attachNativeTerminal(request: {
 	width: number;
 	height: number;
 	fontSize: number;
+	palette: TerminalPalette;
 }): Promise<void> {
-	await invoke('attach_native_terminal', request);
+	const { palette, ...rest } = request;
+	await invoke('attach_native_terminal', { ...rest, colors: nativeColors(palette) });
+}
+
+/** `swift_term_set_colors`' format: foreground, background, then the 16 ANSI colours. */
+export function nativeColors(p: TerminalPalette): string {
+	return [
+		p.foreground,
+		p.background,
+		p.black,
+		p.red,
+		p.green,
+		p.yellow,
+		p.blue,
+		p.magenta,
+		p.cyan,
+		p.white,
+		p.brightBlack,
+		p.brightRed,
+		p.brightGreen,
+		p.brightYellow,
+		p.brightBlue,
+		p.brightMagenta,
+		p.brightCyan,
+		p.brightWhite
+	].join(',');
+}
+
+export async function setNativeTerminalColors(
+	sessionId: string,
+	palette: TerminalPalette
+): Promise<void> {
+	await invoke('set_native_terminal_colors', { sessionId, colors: nativeColors(palette) }).catch(
+		ignoreSessionGone
+	);
 }
 
 export async function resizeNativeTerminal(
