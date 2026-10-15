@@ -78,6 +78,17 @@ const IGNORED: &[&str] = &[
     "frame-link",
     "system:away_summary",
     "system:bridge_status",
+    // Each API request's system prompt, tools and parameters (CLI 2.1.300+);
+    // only `api-request`'s cache lifetime is read (`written_cache_ttl`).
+    "api-request",
+    "api-request-blob",
+    "api-request-shape",
+    // Session bookkeeping the chat doesn't show.
+    "agent-name",
+    "relocated",
+    "worktree-state",
+    "pr-link",
+    "cost-state",
     // Comment-watch bookkeeping keyed by artifact id; the links come from
     // the Artifact tool's results.
     "artifact-comment-monitor",

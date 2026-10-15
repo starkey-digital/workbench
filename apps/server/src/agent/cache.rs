@@ -28,6 +28,10 @@ pub(super) const TICK: Duration = Duration::from_secs(15);
 /// How long before expiry upkeep acts: a check can land a tick late, and the
 /// turn still has to reach the API.
 const LEAD_MS: u64 = 120_000;
+/// A keep-alive's lead on a 1h cache: Claude Code (2.1.299+) compacts a 200K+
+/// conversation left idle about 54 minutes, so a keep-warm session would be
+/// compacted under it. A compact keeps the short lead: it waits for the cache.
+const HOUR_KEEPALIVE_LEAD_MS: u64 = 600_000;
 /// Below this a compact saves too little to be worth a turn.
 const MIN_COMPACT_TOKENS: u64 = 30_000;
 
@@ -46,13 +50,21 @@ pub(super) fn due(
     now: u64,
 ) -> Option<Upkeep> {
     let expires = meta.cache_expires_at?;
-    if !idle || now >= expires || expires - now > LEAD_MS {
+    if !idle || now >= expires {
         return None;
     }
+    let left = expires - now;
     if policy.keep_warm_until.is_some_and(|until| now < until) {
-        return Some(Upkeep::KeepAlive);
+        let lead = if meta.cache_ttl_secs.is_some_and(|ttl| ttl >= 3600) {
+            HOUR_KEEPALIVE_LEAD_MS
+        } else {
+            LEAD_MS
+        };
+        return (left <= lead).then_some(Upkeep::KeepAlive);
     }
-    (policy.compact_on_expiry && meta.context_tokens.unwrap_or(0) >= MIN_COMPACT_TOKENS)
+    (left <= LEAD_MS
+        && policy.compact_on_expiry
+        && meta.context_tokens.unwrap_or(0) >= MIN_COMPACT_TOKENS)
         .then_some(Upkeep::Compact)
 }
 
@@ -123,6 +135,39 @@ mod tests {
         assert_eq!(due(&warm, &meta(60_000, 0), false, NOW), None);
         // Already cold: a keep-alive would only write it all again.
         assert_eq!(due(&warm, &meta(-1, 0), true, NOW), None);
+    }
+
+    #[test]
+    fn acts_on_an_hour_cache_before_claude_codes_idle_compaction() {
+        let warm = CachePolicy {
+            keep_warm_until: Some(NOW + 1),
+            compact_on_expiry: false,
+        };
+        let hour = |expires_in| TranscriptMeta {
+            cache_ttl_secs: Some(3600),
+            ..meta(expires_in, 0)
+        };
+        assert_eq!(
+            due(&warm, &hour(420_000), true, NOW),
+            Some(Upkeep::KeepAlive)
+        );
+        assert_eq!(due(&warm, &hour(660_000), true, NOW), None);
+        assert_eq!(due(&warm, &meta(420_000, 0), true, NOW), None);
+
+        // A compact still waits for the cache's last minutes.
+        let compact = CachePolicy {
+            keep_warm_until: None,
+            compact_on_expiry: true,
+        };
+        let big = |expires_in| TranscriptMeta {
+            cache_ttl_secs: Some(3600),
+            ..meta(expires_in, 80_000)
+        };
+        assert_eq!(due(&compact, &big(420_000), true, NOW), None);
+        assert_eq!(
+            due(&compact, &big(60_000), true, NOW),
+            Some(Upkeep::Compact)
+        );
     }
 
     #[test]

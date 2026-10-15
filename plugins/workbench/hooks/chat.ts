@@ -643,10 +643,11 @@ export const register: Register = (on) => {
 		return next(e);
 	});
 
-	// A subagent's run raises none: this is always the main thread's turn.
-	// Commands come and go (a plugin or skill loaded), so the chat's list is
-	// re-read here.
+	// Subagents' and teammates' turns raise it too (CLI 2.1.299+), with an
+	// `agentId`: only the main thread's turn is the chat's. Commands come and go
+	// (a plugin or skill loaded), so the chat's list is re-read here.
 	on('turn.start', async ($, e, next) => {
+		if (e.agentId) return next(e);
 		runningTurn = e.turnId;
 		owedResult = false;
 		// A prompt-type command's turn ends with its own `result`.
