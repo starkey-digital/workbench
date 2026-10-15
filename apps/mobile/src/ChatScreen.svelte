@@ -29,6 +29,7 @@
 		fontPrefs,
 		metaUsageChips,
 		setChatPlatform,
+		setRunCommand,
 		useAccountPlanUsage
 	} from '@workbench/chat-ui';
 	import { cn } from '@workbench/ui';
@@ -54,6 +55,8 @@
 		report,
 		...(supportsDictation() ? { dictate } : {})
 	});
+	// A command Claude hands over runs on the host, in a new terminal opened here.
+	setRunCommand((command) => void client.runCommand(entry.workspace.id, command));
 
 	// svelte-ignore state_referenced_locally
 	const drafts = client.drafts;

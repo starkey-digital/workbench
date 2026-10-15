@@ -7,6 +7,7 @@ import type {
 import * as server from './link';
 import { PendingAsks } from './asks';
 import { notifiedJob, startJob, stoppedJobs } from './jobs';
+import { RUN_TOOL_SPEC, runInput, runResult } from './run';
 import { Titles, TITLE_SYSTEM } from './titles';
 import {
 	askLine,
@@ -92,6 +93,9 @@ const taskAgents = new Map<string, string>();
 // Background agents: their Agent call returned at launch, so their own
 // `turn.complete` ends the task.
 const asyncAgents = new Set<string>();
+// Teammates (a named Agent call) idle after each turn until a message wakes
+// them: each turn's end ends the task, and the next turn's start resumes it.
+const teammates = new Set<string>();
 // Background agents the chat's Stop asked to end. No call stops one, so each ends
 // at its next model request or tool call (`endedByStop`), and then its "finished"
 // notification starts no turn. One that answered first keeps its notification.
@@ -145,6 +149,8 @@ const printed = new Set<string>();
 // since 2.1.292 a plugin's `allow` doesn't dismiss the dialog of a tool that
 // requires the person. A plan is approved in the terminal (PermissionRequest).
 const ASKED_IN_CALL = 'AskUserQuestion';
+// `mcp__<plugin>__run_in_terminal`, once registered (`run.ts`).
+let runTool: string | undefined;
 const pendingAsks = new PendingAsks();
 // Approvals the terminal's own dialog asks (no chat was open): tool call id →
 // request id, and whether the main thread asked it (a background agent's
@@ -289,6 +295,7 @@ function unlinkTask(task: string) {
 	if (agent) {
 		agentTasks.delete(agent);
 		asyncAgents.delete(agent);
+		teammates.delete(agent);
 	}
 }
 
@@ -361,6 +368,7 @@ export const register: Register = (on) => {
 			);
 		}
 		server.open({ url, token, sessionId, process });
+		runTool = (await $.tool.register(RUN_TOOL_SPEC).catch(() => undefined))?.tool;
 		const fetch = (u: string, i: Parameters<typeof $.http.fetch>[1]) => $.http.fetch(u, i);
 		const after: server.After = (ms, fn) => $.clock.after(ms, fn);
 		// Bounded: `claude` waits on this hook before its first prompt. A failed
@@ -647,7 +655,18 @@ export const register: Register = (on) => {
 	// `agentId`: only the main thread's turn is the chat's. Commands come and go
 	// (a plugin or skill loaded), so the chat's list is re-read here.
 	on('turn.start', async ($, e, next) => {
-		if (e.agentId) return next(e);
+		if (e.agentId) {
+			const task = teammates.has(e.agentId) ? agentTasks.get(e.agentId) : undefined;
+			if (task && server.current())
+				emit({
+					type: 'system',
+					subtype: 'task_updated',
+					task_id: task,
+					patch: { status: 'running' },
+					uuid: `wbmod-task-wake-${load}-${++askSeq}`
+				});
+			return next(e);
+		}
 		runningTurn = e.turnId;
 		owedResult = false;
 		// A prompt-type command's turn ends with its own `result`.
@@ -853,7 +872,8 @@ export const register: Register = (on) => {
 		const task = e.agentId && asyncAgents.has(e.agentId) ? agentTasks.get(e.agentId) : undefined;
 		if (e.agentId) stoppedAgents.delete(e.agentId);
 		if (linked && task && e.agentId) {
-			unlinkTask(task);
+			const teammate = teammates.has(e.agentId);
+			if (!teammate) unlinkTask(task);
 			emit({
 				type: 'system',
 				subtype: 'task_notification',
@@ -864,7 +884,7 @@ export const register: Register = (on) => {
 						: e.reason === 'answer'
 							? 'completed'
 							: 'failed',
-				uuid: `wbmod-done-${task}`
+				uuid: teammate ? `wbmod-done-${task}-${load}-${++askSeq}` : `wbmod-done-${task}`
 			});
 		}
 		// A call denied in the terminal's dialog never reaches `tool.call`.
@@ -1107,8 +1127,24 @@ export const register: Register = (on) => {
 	// Structured results (an Artifact's link) and subagents for the tasks panel.
 	on('tool.call', async ($, e, next) => {
 		if (e.agentId && stoppedAgents.has(e.agentId)) return { deny: 'Stopped in Workbench chat' };
-		if (!server.current()) return next(e);
 		const id = e.tool_use_id;
+		// A command for the person: the chat's card answers it (Run, then Done or Skip).
+		if (runTool && e.tool === runTool) {
+			const run = runInput(e);
+			if (typeof run === 'string') return { deny: run };
+			if (!server.current() || !id) return { result: runResult(run.command, null) };
+			const requestId = `wbmod-ask-${load}-${++askSeq}`;
+			const answer = await server.askInChat(
+				(u, i) => $.http.fetch(u, i),
+				(ms, fn) => $.clock.after(ms, fn),
+				requestId,
+				askLine(requestId, e.tool, run, id),
+				next.signal,
+				chatTurn
+			);
+			return { result: runResult(run.command, answer, next.signal.aborted) };
+		}
+		if (!server.current()) return next(e);
 		// Approved in the terminal's dialog: it no longer waits, however long the call runs.
 		// The call goes ahead: whatever settled it, it no longer waits on a dialog.
 		if (id) pendingAsks.drop(id);
@@ -1230,8 +1266,10 @@ export const register: Register = (on) => {
 			}
 			runningSkills.delete(id);
 		}
-		if (isAgent && id && launched?.status === 'async_launched' && launched.agentId) {
+		const teammate = launched?.status === 'teammate_spawned';
+		if (isAgent && id && (launched?.status === 'async_launched' || teammate) && launched.agentId) {
 			asyncAgents.add(launched.agentId);
+			if (teammate) teammates.add(launched.agentId);
 			linkAgent(launched.agentId, id);
 		} else if (isAgent && id) {
 			unlinkTask(id);
@@ -1292,6 +1330,9 @@ export const register: Register = (on) => {
 
 	on('tool.check', async ($, e, next) => {
 		const verdict = await next(e);
+		// It runs nothing: the person's Run in the chat is the consent.
+		if (runTool && e.tool === runTool && verdict.decision === 'ask')
+			return { ...verdict, decision: 'allow' as const };
 		if (
 			verdict.decision === 'ask' &&
 			server.current() &&

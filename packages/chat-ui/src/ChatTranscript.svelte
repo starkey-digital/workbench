@@ -242,7 +242,7 @@
 			</div>
 		{:else if block.item.kind === 'text'}
 			<div class="flex min-w-0 flex-col gap-2">
-				<ChatMarkdown text={block.item.text} />
+				<ChatMarkdown text={block.item.text} runnable />
 				{#if chat.now.kind === 'writing' && block.item.id === lastId}
 					<span class="caret" aria-hidden="true"></span>
 				{/if}

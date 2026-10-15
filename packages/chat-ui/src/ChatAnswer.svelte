@@ -1,11 +1,12 @@
 <script lang="ts">
 	import SquareTerminalIcon from '@lucide/svelte/icons/square-terminal';
 	import type { AgentChat } from './agent-chat.svelte';
-	import { type ApprovalItem, terminalAnswer } from './chat-format';
+	import { type ApprovalItem, runCommandRequest, terminalAnswer } from './chat-format';
 	import type { ElicitationItem } from './elicitation-form';
 	import ChatApproval from './ChatApproval.svelte';
 	import ChatElicitation from './ChatElicitation.svelte';
 	import ChatQuestion from './ChatQuestion.svelte';
+	import ChatRunCommand from './ChatRunCommand.svelte';
 
 	let {
 		item,
@@ -20,6 +21,7 @@
 	} = $props();
 
 	const inTerminal = $derived(item.kind === 'approval' ? terminalAnswer(item) : null);
+	const toRun = $derived(item.kind === 'approval' ? runCommandRequest(item) : null);
 </script>
 
 {#if inTerminal}
@@ -41,6 +43,14 @@
 		elicitation={item}
 		agent={chat.agent}
 		onAnswer={(action, content) => chat.elicit(item.id, action, content)}
+	/>
+{:else if toRun}
+	<ChatRunCommand
+		approval={item}
+		command={toRun.command}
+		reason={toRun.reason}
+		agent={chat.agent}
+		onDecide={(decision) => chat.approve(item.id, decision)}
 	/>
 {:else if item.tool === 'AskUserQuestion'}
 	<ChatQuestion

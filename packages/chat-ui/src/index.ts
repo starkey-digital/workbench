@@ -22,6 +22,7 @@ export {
 export { agentClient, type AgentApi, type AgentClient } from './agent-api.ts';
 export { useAccountPlanUsage } from './plan-usage.svelte.ts';
 export { setChatPlatform, type ChatPlatform } from './platform.ts';
+export { commandTabLabel, setRunCommand, type RunCommand } from './run-command.ts';
 export {
 	throttled,
 	type ChatDiagnostic,

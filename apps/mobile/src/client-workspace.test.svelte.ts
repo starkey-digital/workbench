@@ -145,6 +145,21 @@ describe('MobileClient on a host with the workspace API', () => {
 		]);
 	});
 
+	it("runs a command the chat hands over in a new terminal of the pane's workspace", async () => {
+		const { c } = await connected();
+		await c.runCommand('w1', 'stripe login');
+		expect(commands).toEqual([
+			{
+				type: 'newSession',
+				workspaceId: 'w1',
+				kind: 'shell',
+				label: 'stripe login',
+				command: 'stripe login'
+			}
+		]);
+		expect(c.screens.openPaneId).toBe('p1');
+	});
+
 	it('the history sheet resumes through NewSession, keeping the account', async () => {
 		const { c } = await connected();
 		await c.resume('claude', { projectPath: '/repo' }, 'old-session', 'work');

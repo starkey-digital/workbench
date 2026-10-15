@@ -58,6 +58,9 @@ describe('waiting on you', () => {
 		expect(waitingLabel(approval('Edit'))).toBe('Wants to edit a file');
 		expect(waitingLabel(approval('AskUserQuestion'))).toBe('Has a question');
 		expect(waitingLabel(approval('WebFetch'))).toBe('Wants to use WebFetch');
+		expect(waitingLabel(approval('mcp__workbench__run_in_terminal'))).toBe(
+			'Has a command for you to run'
+		);
 	});
 
 	it('sends questions and plans to the full view', () => {
@@ -65,6 +68,7 @@ describe('waiting on you', () => {
 		expect(answerableFromHome(approval('AskUserQuestion'))).toBe(false);
 		expect(answerableFromHome(approval('ExitPlanMode'))).toBe(false);
 		expect(answerableFromHome(approval('Elicitation'))).toBe(false);
+		expect(answerableFromHome(approval('mcp__workbench__run_in_terminal'))).toBe(false);
 		expect(waitingLabel(approval('Elicitation'))).toBe('Needs your input');
 	});
 
