@@ -22,7 +22,14 @@
 	 * never `{@html}`: replies can quote untrusted repo content and this webview
 	 * can call into the app. Raw HTML in the text is shown as text.
 	 */
-	let { text }: { text: string } = $props();
+	let {
+		text,
+		runnable = false
+	}: {
+		text: string;
+		/** Claude's own reply: a `! <command>` in it gets Run. Tool output and subagents' text never do. */
+		runnable?: boolean;
+	} = $props();
 
 	const tokens = $derived(marked.lexer(text, { gfm: true }));
 
@@ -39,7 +46,8 @@
 	}
 
 	const platform = getChatPlatform();
-	const run = getRunCommand();
+	const runCommand = getRunCommand();
+	const run = $derived(runnable ? runCommand : undefined);
 
 	function openLink(event: MouseEvent, href: string) {
 		event.preventDefault();

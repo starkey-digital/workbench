@@ -68,6 +68,7 @@ describe('waiting on you', () => {
 		expect(answerableFromHome(approval('AskUserQuestion'))).toBe(false);
 		expect(answerableFromHome(approval('ExitPlanMode'))).toBe(false);
 		expect(answerableFromHome(approval('Elicitation'))).toBe(false);
+		expect(answerableFromHome(approval('mcp__workbench__run_in_terminal'))).toBe(false);
 		expect(waitingLabel(approval('Elicitation'))).toBe('Needs your input');
 	});
 

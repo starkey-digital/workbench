@@ -438,13 +438,21 @@ export function terminalAnswer(item: ApprovalItem): 'waiting' | 'answered' | nul
  * `!` then a space. `!==` or `!important` aren't commands.
  */
 export function bangCommand(code: string): string | null {
-	const match = /^!\s+(\S.*)$/.exec(code.trim());
-	return match && !/[\r\n]/.test(match[1]) ? match[1].trim() : null;
+	return /^![ \t]+(\S[^\r\n]*)$/.exec(code.trim())?.[1].trim() ?? null;
+}
+
+/**
+ * The Workbench plugin's own tool (`plugins/workbench/hooks/run.ts`), by its
+ * full name only: another MCP server's `run_in_terminal` really runs commands,
+ * and must keep its permission card.
+ */
+export function isRunCommandTool(tool: string): boolean {
+	return tool === 'mcp__workbench__run_in_terminal';
 }
 
 /** The Workbench plugin's `run_in_terminal` call: a command for the person to run. */
 export function runCommandRequest(item: ApprovalItem): { command: string; reason?: string } | null {
-	if (!item.tool.endsWith('__run_in_terminal')) return null;
+	if (!isRunCommandTool(item.tool)) return null;
 	const { command, reason } = item.input ?? {};
 	if (typeof command !== 'string' || !command.trim()) return null;
 	return { command, ...(typeof reason === 'string' && reason ? { reason } : {}) };

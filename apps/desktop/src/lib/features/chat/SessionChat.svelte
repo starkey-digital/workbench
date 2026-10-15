@@ -103,7 +103,8 @@
 			: workspaceStore.getByProjectPath(project.path)
 	);
 	const branch = $derived(workspace && workspaceStore.resolvedBranch(workspace));
-	// A command Claude hands over opens beside the chat, in its own terminal tab.
+	// A command Claude hands over opens in a new terminal tab, focused: it's
+	// interactive. The chat's card waits for Done or Skip meanwhile.
 	setRunCommand((command) => {
 		if (workspace)
 			void workspaceStore.runTaskInWorkspace(workspace.id, {

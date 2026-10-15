@@ -1,3 +1,4 @@
+import { isRunCommandTool } from '@workbench/chat-ui';
 import { baseName, type AgentSummary, type RunningTasks } from '@workbench/types';
 
 type Waiting = NonNullable<AgentSummary['waiting']>;
@@ -42,7 +43,7 @@ export function waitingLabel(item: Waiting): string {
 }
 
 function toolLabel(tool: string): string {
-	if (tool.endsWith('__run_in_terminal')) return 'Has a command for you to run';
+	if (isRunCommandTool(tool)) return 'Has a command for you to run';
 	switch (tool) {
 		case 'AskUserQuestion':
 			return 'Has a question';
@@ -67,8 +68,11 @@ function toolLabel(tool: string): string {
  * answered from home. One the terminal's own dialog asks can only be answered there.
  */
 export function answerableFromHome(item: Waiting): boolean {
+	// A command to run needs its card's Run: an Allow here would report it run.
 	return (
-		!item.inTerminal && !['AskUserQuestion', 'ExitPlanMode', 'Elicitation'].includes(item.tool)
+		!item.inTerminal &&
+		!isRunCommandTool(item.tool) &&
+		!['AskUserQuestion', 'ExitPlanMode', 'Elicitation'].includes(item.tool)
 	);
 }
 

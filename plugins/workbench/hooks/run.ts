@@ -21,7 +21,10 @@ export const RUN_TOOL_SPEC = {
 		},
 		required: ['command'],
 		additionalProperties: false
-	}
+	},
+	// In the prompt's tool list, not behind ToolSearch: Claude must know of it
+	// before it reaches for `! <command>`.
+	isDeferred: false
 };
 
 export type RunInput = { command: string; reason?: string };
@@ -38,11 +41,19 @@ export function runInput(input: unknown): RunInput | string {
 	};
 }
 
-/** What Claude reads: the chat's answer, or that no chat showed it. */
-export function runResult(command: string, answer: { behavior?: string } | null): string {
+/**
+ * What Claude reads: the chat's answer; else (no chat showed it, or the chat
+ * couldn't be reached) a request for the old way, unless the call was stopped.
+ */
+export function runResult(
+	command: string,
+	answer: { behavior?: string } | null,
+	stopped = false
+): string {
+	if (stopped) return `Stopped before the person answered; \`${command}\` was not run.`;
 	if (!answer)
 		return (
-			'No Workbench chat is showing this session, so nothing was shown. ' +
+			"No Workbench chat could show this request (none is open, or it couldn't be reached). " +
 			`Ask the person to run it themselves: \`! ${command}\``
 		);
 	return answer.behavior === 'allow'

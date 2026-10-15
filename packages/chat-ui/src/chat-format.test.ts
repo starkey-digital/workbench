@@ -55,6 +55,7 @@ describe('bangCommand', () => {
 		expect(bangCommand('stripe login')).toBeNull();
 		expect(bangCommand('! ')).toBeNull();
 		expect(bangCommand('! cd x\nrm y')).toBeNull();
+		expect(bangCommand('!\nrm -rf ~/.cache')).toBeNull();
 	});
 });
 
@@ -81,6 +82,8 @@ describe('runCommandRequest', () => {
 
 	it('is null for other tools and an empty command', () => {
 		expect(runCommandRequest(ask('Bash', { command: 'ls' }))).toBeNull();
+		// Another server's tool of the same name runs commands: it keeps its permission card.
+		expect(runCommandRequest(ask('mcp__ide__run_in_terminal', { command: 'ls' }))).toBeNull();
 		expect(runCommandRequest(ask('mcp__workbench__run_in_terminal', { command: ' ' }))).toBeNull();
 		expect(runCommandRequest(ask('mcp__workbench__run_in_terminal', null))).toBeNull();
 	});

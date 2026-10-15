@@ -1126,7 +1126,7 @@ export const register: Register = (on) => {
 				next.signal,
 				chatTurn
 			);
-			return { result: runResult(run.command, answer) };
+			return { result: runResult(run.command, answer, next.signal.aborted) };
 		}
 		if (!server.current()) return next(e);
 		// Approved in the terminal's dialog: it no longer waits, however long the call runs.

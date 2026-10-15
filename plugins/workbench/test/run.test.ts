@@ -20,4 +20,5 @@ test('Claude reads what the person did, or that no chat showed it', () => {
 	expect(runResult('stripe login', { behavior: 'allow' })).toMatch(/ran `stripe login`.*done/);
 	expect(runResult('stripe login', { behavior: 'deny' })).toMatch(/chose not to run/);
 	expect(runResult('stripe login', null)).toMatch(/`! stripe login`/);
+	expect(runResult('stripe login', null, true)).toMatch(/Stopped.*was not run/);
 });
