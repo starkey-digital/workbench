@@ -96,7 +96,7 @@
 			</div>
 		{:else if updaterStore.status === 'up-to-date'}
 			<div class="flex flex-col items-center gap-3 py-6">
-				<CheckCircleIcon class="size-8 text-green-500" />
+				<CheckCircleIcon class="size-8 text-wb-ok" />
 				<p class="text-sm text-muted-foreground">You're up to date.</p>
 			</div>
 

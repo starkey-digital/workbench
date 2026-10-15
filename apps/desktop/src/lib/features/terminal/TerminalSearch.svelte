@@ -2,6 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import type { SearchAddon } from '@xterm/addon-search';
 	import { searchDecorations } from '$lib/terminal-config';
+	import { themePrefs } from '@workbench/chat-ui';
 	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import XIcon from '@lucide/svelte/icons/x';
@@ -23,7 +24,7 @@
 			wholeWord,
 			caseSensitive,
 			incremental,
-			decorations: searchDecorations
+			decorations: searchDecorations(themePrefs.theme)
 		};
 	}
 

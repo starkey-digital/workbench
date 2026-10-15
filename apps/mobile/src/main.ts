@@ -1,10 +1,11 @@
 import './app.css';
 import { mount } from 'svelte';
+import { themePrefs } from '@workbench/chat-ui';
 import App from './App.svelte';
 import { initSentry } from './sentry';
 
-// Dark mode forced on, same as desktop.
-document.documentElement.classList.add('dark');
+// Before mount, so the first paint is already in the chosen theme.
+themePrefs.follow();
 
 async function boot() {
 	initSentry();

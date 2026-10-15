@@ -5,7 +5,10 @@
 		fontPrefs,
 		TERMINAL_FONT_SIZES,
 		TERMINAL_FONTS,
-		type FontChoice
+		THEME_CHOICES,
+		themePrefs,
+		type FontChoice,
+		type ThemeChoice
 	} from '@workbench/chat-ui';
 	import SettingsSection from './SettingsSection.svelte';
 	import SettingsSelect from './SettingsSelect.svelte';
@@ -15,6 +18,16 @@
 	const sizeOptions = (sizes: readonly number[]) =>
 		sizes.map((s) => ({ value: String(s), label: `${s}px` }));
 </script>
+
+<SettingsSection title="Theme">
+	<SettingsSelect
+		label="Theme"
+		description="System follows the light or dark setting of the OS."
+		options={THEME_CHOICES.map((c) => ({ value: c.id, label: c.label }))}
+		value={themePrefs.choice}
+		onValueChange={(v) => themePrefs.set(v as ThemeChoice)}
+	/>
+</SettingsSection>
 
 <SettingsSection title="Terminal">
 	<SettingsSelect

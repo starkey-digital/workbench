@@ -3,6 +3,8 @@
  * sizes than a desktop). The faces are bundled by `@workbench/theme`.
  */
 
+import { onPrefChange, readPref, writePref } from './stored-pref.ts';
+
 export interface FontChoice {
 	id: string;
 	label: string;
@@ -90,36 +92,20 @@ function familyOf(choices: readonly FontChoice[], id: string): string {
 	return choices.find((c) => c.id === id)?.family ?? choices[0].family;
 }
 
-function read(): string | null {
-	try {
-		return localStorage.getItem(STORAGE_KEY);
-	} catch {
-		return null;
-	}
-}
-
 export class FontPrefs {
-	value = $state.raw<FontPrefsValue>(parseFontPrefs(read()));
+	value = $state.raw<FontPrefsValue>(parseFontPrefs(readPref(STORAGE_KEY)));
 
 	terminalFamily = $derived(familyOf(TERMINAL_FONTS, this.value.terminalFont));
 	/** Undefined for the app's own font, so a `style:` directive leaves it alone. */
 	chatFamily = $derived(familyOf(CHAT_FONTS, this.value.chatFont) || undefined);
 
 	constructor() {
-		// Another window (the desktop's settings) changed them.
-		if (typeof window !== 'undefined')
-			window.addEventListener('storage', (e) => {
-				if (e.key === STORAGE_KEY) this.value = parseFontPrefs(e.newValue);
-			});
+		onPrefChange(STORAGE_KEY, (raw) => (this.value = parseFontPrefs(raw)));
 	}
 
 	set(patch: Partial<FontPrefsValue>) {
 		this.value = { ...this.value, ...patch };
-		try {
-			localStorage.setItem(STORAGE_KEY, JSON.stringify(this.value));
-		} catch {
-			/* applies to this session only */
-		}
+		writePref(STORAGE_KEY, JSON.stringify(this.value));
 	}
 }
 

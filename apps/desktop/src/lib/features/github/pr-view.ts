@@ -36,7 +36,8 @@ export function checksTone(overall: GitHubChecksStatus['overall']): Exclude<Tone
 }
 
 export function prStateLabel(pr: GitHubPR): { label: string; class: string } {
-	if (pr.state === 'MERGED') return { label: 'Merged', class: 'bg-purple-400/15 text-purple-400' };
+	if (pr.state === 'MERGED')
+		return { label: 'Merged', class: 'bg-violet-500/15 text-violet-700 dark:text-violet-400' };
 	if (pr.state === 'CLOSED') return { label: 'Closed', class: 'bg-wb-err/10 text-wb-err' };
 	if (pr.isDraft) return { label: 'Draft', class: 'bg-wb-panel2 text-wb-ink-mute' };
 	return { label: 'Open', class: 'bg-wb-ok/15 text-wb-ok' };

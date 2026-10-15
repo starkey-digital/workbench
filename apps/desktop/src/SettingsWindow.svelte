@@ -73,6 +73,6 @@
 	});
 </script>
 
-<div class="dark flex h-screen w-screen flex-col overflow-hidden">
+<div class="flex h-screen w-screen flex-col overflow-hidden">
 	<SettingsContent {projectPath} />
 </div>

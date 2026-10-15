@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
 	<head>
 		<meta charset="UTF-8" />
 		<meta
@@ -7,6 +7,17 @@
 			content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover"
 		/>
 		<title>Workbench Mobile</title>
+		<script>
+			// First frame in the theme `themePrefs` will apply (`workbench.theme`, default dark).
+			try {
+				var t = localStorage.getItem('workbench.theme');
+				var light =
+					t === 'light' || (t === 'system' && matchMedia('(prefers-color-scheme: light)').matches);
+				document.documentElement.classList.toggle('dark', !light);
+			} catch (e) {
+				document.documentElement.classList.add('dark');
+			}
+		</script>
 	</head>
 	<body>
 		<div id="app"></div>

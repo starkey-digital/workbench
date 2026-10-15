@@ -1,12 +1,19 @@
 import './app.css';
 import { mount } from 'svelte';
 import { initSentry } from '$lib/sentry';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { themePrefs } from '@workbench/chat-ui';
 
 // Error tracking — no-op in dev, reports only in production builds.
 initSentry();
 
-// Force dark mode
-document.documentElement.classList.add('dark');
+// Before mount, so the first paint is already in the chosen theme.
+// The native titlebar follows too; `null` hands it back to the OS.
+themePrefs.follow((theme, choice) => {
+	getCurrentWindow()
+		.setTheme(choice === 'system' ? null : theme)
+		.catch(() => {});
+});
 
 const target = document.getElementById('app')!;
 

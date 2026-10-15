@@ -194,7 +194,7 @@ Control-plane stores call `invoke`/`listen` imported from **`$lib/transport`** (
 
 ### Styling
 
-Tailwind CSS v4 via `@tailwindcss/vite`. shadcn-svelte components (`components.json`, base color: slate). Dark mode forced on.
+Tailwind CSS v4 via `@tailwindcss/vite`. shadcn-svelte components (`components.json`, base color: slate). Light, dark or system theme, per device: `themePrefs` (`@workbench/chat-ui` `theme-prefs.svelte.ts`, localStorage `workbench.theme`, default dark) puts `.dark` and `color-scheme` on the root: an inline script in each `index.html` for the first frame, then `themePrefs.follow()` in each `main.ts` (desktop also sets the native titlebar with `setTheme`). Desktop: Settings → Appearance; phone: its Settings sheet. Every `--wb-*` token and accent preset has a light value (`:root`, `:root:not(.dark)[data-accent]`), so new chrome must use tokens, never `white/black` utilities. Terminals take `TERMINAL_PALETTES[theme]`: xterm via `options.theme`, native SwiftTerm panes via a palette string (`nativeColors`) given to `swift_term_create` and `swift_term_set_colors` on change.
 
 - Pro chrome tokens: `--wb-*` CSS vars in `packages/theme/theme.css` (`bg`/`panel`/`panel2`/`rail`/`ink`/`hair` + session colors `claude`/`codex`/`shell`/`ok`/`warn`/`err`), exposed as Tailwind utilities (`bg-wb-panel`, `text-wb-claude`). Use these for new chrome instead of shadcn surface tokens (keeps dialogs/inputs unbroken).
 - Accent is theme-selectable: `:root[data-accent='violet|tideline|ember|moss|iris']` presets in `theme.css` drive `--wb-accent` + shadcn `--primary`; the attribute is set from `workbenchSettingsStore.accentColor`. Add new presets in `theme.css` AND the swatch list in `SettingsGeneral.svelte`.

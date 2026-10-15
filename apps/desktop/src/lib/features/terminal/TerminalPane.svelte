@@ -9,7 +9,7 @@
 	import { SearchAddon } from '@xterm/addon-search';
 	import { openUrl } from '$lib/utils/open-url';
 	import '@xterm/xterm/css/xterm.css';
-	import { terminalOptions, TERMINAL_BG } from '$lib/terminal-config';
+	import { terminalOptions } from '$lib/terminal-config';
 	import { TerminalConnection, type TerminalExitInfo } from './terminal-connection';
 	import TerminalSearch from './TerminalSearch.svelte';
 	import { registerShellIntegration, type ShellIntegrationState } from './shell-integration';
@@ -18,7 +18,7 @@
 	import { isLayoutDisabled } from './layout-guard';
 	import { WebglRenderer } from './webgl-atlas';
 	import { getClaudeSessionStore, getWorkbenchSettingsStore } from '$stores/context';
-	import { fontPrefs, terminalFont } from '@workbench/chat-ui';
+	import { fontPrefs, TERMINAL_PALETTES, terminalFont, themePrefs } from '@workbench/chat-ui';
 
 	let {
 		paneId,
@@ -301,6 +301,16 @@
 		}
 	);
 
+	const palette = $derived(TERMINAL_PALETTES[themePrefs.theme]);
+
+	watch(
+		() => palette,
+		(theme) => {
+			if (terminal) terminal.options.theme = theme;
+		},
+		{ lazy: true }
+	);
+
 	watch(
 		() => [fontPrefs.terminalFamily, fontPrefs.value.terminalSize] as const,
 		() =>
@@ -324,6 +334,7 @@
 			terminal = new Terminal({
 				...terminalOptions,
 				...font,
+				theme: palette,
 				scrollback: inPerformanceMode() ? SCROLLBACK_PERFORMANCE : SCROLLBACK_NORMAL,
 				// Set unconditionally — unlike WebLinksAddon, OSC 8 links are handled by
 				// xterm core, so they need this even in performance mode. Only http(s)
@@ -621,14 +632,14 @@
 	});
 </script>
 
-<div class="terminal-wrapper" style:background={TERMINAL_BG}>
+<div class="terminal-wrapper" style:background={palette.background}>
 	<div class="terminal-shell" bind:this={container}></div>
 	{#if terminalError}
-		<div class="terminal-error" style:background={TERMINAL_BG}>
+		<div class="terminal-error" style:background={palette.background}>
 			<div class="text-center">
 				<p>{terminalError}</p>
 				<button
-					class="mt-2 rounded bg-white/10 px-3 py-1 text-xs hover:bg-white/20"
+					class="mt-2 rounded bg-wb-ink/10 px-3 py-1 text-xs hover:bg-wb-ink/20"
 					type="button"
 					onclick={() => (terminalError = '')}
 				>
@@ -642,7 +653,7 @@
 			<div class="text-center">
 				<p>{detached === 'dropped' ? 'Connection lost' : 'Opened on another device'}</p>
 				<button
-					class="mt-2 rounded bg-white/10 px-3 py-1 text-xs hover:bg-white/20"
+					class="mt-2 rounded bg-wb-ink/10 px-3 py-1 text-xs hover:bg-wb-ink/20"
 					type="button"
 					onclick={takeControl}
 				>

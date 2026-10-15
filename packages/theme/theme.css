@@ -49,6 +49,28 @@
 	--input: oklch(0.88 0 0);
 	--ring: oklch(0.52 0.18 280);
 	--radius: 0.5rem;
+
+	/* ---- Workbench Pro chrome — light: dark ink on pale slate, every ink ≥ 4.5:1 ---- */
+	--wb-bg: #f6f7f9;
+	--wb-panel: #ffffff;
+	--wb-panel2: #eef0f3;
+	--wb-rail: #e8ebef;
+	--wb-ink: #1a1d23;
+	--wb-ink-mute: #4b5260;
+	--wb-ink-soft: #636a78;
+	--wb-hair: #d5d9e0;
+	--wb-hair-soft: #e3e6eb;
+
+	--wb-claude: #b0532d;
+	--wb-codex: #2a63d4;
+	--wb-shell: #5b6372;
+	--wb-ok: #1d7d46;
+	--wb-warn: #946000;
+	--wb-err: #c22f2f;
+
+	--wb-accent: oklch(0.52 0.18 280);
+	--wb-accent-soft: oklch(0.52 0.18 280 / 0.14);
+	--wb-accent-ink: #ffffff;
 }
 
 .dark {
@@ -128,6 +150,40 @@
 	--wb-accent-ink: #0a0c10;
 }
 
+/* Light: the same hues darkened until white text on them and they on white read. */
+:root:not(.dark)[data-accent='tideline'] {
+	--primary: oklch(0.5 0.17 262);
+	--primary-foreground: oklch(0.98 0.005 262);
+	--ring: oklch(0.5 0.17 262);
+	--wb-accent: #2a63d4;
+	--wb-accent-soft: #2a63d424;
+	--wb-accent-ink: #ffffff;
+}
+:root:not(.dark)[data-accent='ember'] {
+	--primary: oklch(0.52 0.13 45);
+	--primary-foreground: oklch(0.98 0.005 45);
+	--ring: oklch(0.52 0.13 45);
+	--wb-accent: #b0532d;
+	--wb-accent-soft: #b0532d24;
+	--wb-accent-ink: #ffffff;
+}
+:root:not(.dark)[data-accent='moss'] {
+	--primary: oklch(0.5 0.12 155);
+	--primary-foreground: oklch(0.98 0.005 155);
+	--ring: oklch(0.5 0.12 155);
+	--wb-accent: #1d7d46;
+	--wb-accent-soft: #1d7d4624;
+	--wb-accent-ink: #ffffff;
+}
+:root:not(.dark)[data-accent='iris'] {
+	--primary: oklch(0.5 0.17 300);
+	--primary-foreground: oklch(0.98 0.005 300);
+	--ring: oklch(0.5 0.17 300);
+	--wb-accent: #8a4fc8;
+	--wb-accent-soft: #8a4fc824;
+	--wb-accent-ink: #ffffff;
+}
+
 @theme inline {
 	--color-background: var(--background);
 	--color-foreground: var(--foreground);
@@ -194,6 +250,6 @@
 	/* Thin scrollbars for tab strips */
 	.scrollbar-thin {
 		scrollbar-width: thin;
-		scrollbar-color: oklch(0.35 0 0) transparent;
+		scrollbar-color: var(--wb-ink-soft) transparent;
 	}
 }

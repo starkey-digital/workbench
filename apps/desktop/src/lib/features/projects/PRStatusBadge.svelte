@@ -25,10 +25,10 @@
 	});
 
 	let prColor = $derived.by(() => {
-		if (pr.state === 'MERGED') return 'text-purple-400';
-		if (pr.state === 'CLOSED') return 'text-red-400';
+		if (pr.state === 'MERGED') return 'text-violet-700 dark:text-violet-400';
+		if (pr.state === 'CLOSED') return 'text-wb-err';
 		if (pr.isDraft) return 'text-muted-foreground';
-		return 'text-green-400';
+		return 'text-wb-ok';
 	});
 
 	let ChecksIcon = $derived.by(() => {
@@ -39,9 +39,9 @@
 	});
 
 	let checksColor = $derived.by(() => {
-		if (pr.checksStatus.overall === 'success') return 'text-green-400';
-		if (pr.checksStatus.overall === 'failure') return 'text-red-400';
-		if (pr.checksStatus.overall === 'pending') return 'text-amber-400';
+		if (pr.checksStatus.overall === 'success') return 'text-wb-ok';
+		if (pr.checksStatus.overall === 'failure') return 'text-wb-err';
+		if (pr.checksStatus.overall === 'pending') return 'text-wb-warn';
 		return '';
 	});
 
