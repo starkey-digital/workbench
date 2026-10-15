@@ -86,14 +86,36 @@ fn written_ttl_secs(usage: &Value) -> Option<u64> {
 }
 
 /// The lifetime the newest call near the end of a session JSONL wrote its
-/// cache with.
+/// cache with, or (CLI 2.1.300+) asked for, before its reply is written.
 pub fn written_cache_ttl(path: &Path) -> Option<u64> {
-    find_in_tail(path, |obj| {
-        if str_at(&obj, "type") != Some("assistant") {
-            return None;
-        }
-        written_ttl_secs(obj.pointer("/message/usage")?)
+    find_in_tail(path, |obj| match str_at(&obj, "type") {
+        Some("assistant") => written_ttl_secs(obj.pointer("/message/usage")?),
+        Some("api-request") => requested_ttl_secs(&obj),
+        _ => None,
     })
+}
+
+/// The lifetime a main-thread request asked for at its conversation's cache
+/// breakpoint: Claude Code 2.1.300+ writes an `api-request` row before each
+/// call, so this is known before the reply's usage.
+fn requested_ttl_secs(obj: &Value) -> Option<u64> {
+    // An output style suffixes the source: `repl_main_thread:outputStyle:…`.
+    let main = |s: &str| s == "repl_main_thread" || s.starts_with("repl_main_thread:");
+    if str_at(obj, "querySource").is_some_and(|s| !main(s)) {
+        return None;
+    }
+    // The system prompt's marks (`scope: global`) say nothing of the conversation's.
+    let mark = obj
+        .get("cacheControl")?
+        .as_array()?
+        .iter()
+        .rev()
+        .find(|m| m.pointer("/path/0").and_then(Value::as_str) == Some("messages"))?;
+    match mark.pointer("/value/ttl").and_then(Value::as_str) {
+        Some("1h") => Some(3600),
+        Some("5m") | None => Some(300),
+        Some(_) => None,
+    }
 }
 
 /// When a line was written: its `timestamp` (JSONL history), else now (a live event).
@@ -182,6 +204,38 @@ mod tests {
         std::fs::write(&path, text.join("\n")).unwrap();
         assert_eq!(written_cache_ttl(&path), Some(3600));
         assert_eq!(written_cache_ttl(&dir.path().join("missing.jsonl")), None);
+    }
+
+    #[test]
+    fn a_request_row_names_the_ttl_before_its_reply() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.jsonl");
+        let mark =
+            |at: &str, ttl: &str| json!({"path":[at,1],"value":{"type":"ephemeral","ttl":ttl}});
+        let lines = [
+            call(
+                "2026-10-01T21:07:10Z",
+                json!({"cache_read_input_tokens":500}),
+            ),
+            json!({"type":"api-request","querySource":"repl_main_thread",
+                "cacheControl":[mark("system","1h"), mark("messages","1h")]}),
+            // A side request (a title, a compaction) doesn't speak for the chat.
+            json!({"type":"api-request","querySource":"generate_session_title",
+                "cacheControl":[mark("messages","5m")]}),
+            // Nor does a request whose only marks are the system prompt's.
+            json!({"type":"api-request","querySource":"repl_main_thread",
+                "cacheControl":[mark("system","5m")]}),
+        ];
+        let text: Vec<String> = lines.iter().map(Value::to_string).collect();
+        std::fs::write(&path, text.join("\n")).unwrap();
+        assert_eq!(written_cache_ttl(&path), Some(3600));
+
+        // An output style suffixes the main thread's source.
+        let styled = json!({"type":"api-request",
+            "querySource":"repl_main_thread:outputStyle:Concise",
+            "cacheControl":[mark("messages","5m")]});
+        std::fs::write(&path, format!("{}\n{styled}", text.join("\n"))).unwrap();
+        assert_eq!(written_cache_ttl(&path), Some(300));
     }
 
     #[test]

@@ -111,10 +111,7 @@ impl GitHubPoller {
                                 s.spawn(move || github::project_status(path))
                             })
                             .collect();
-                        handles
-                            .into_iter()
-                            .map(|h| h.join().ok())
-                            .collect()
+                        handles.into_iter().map(|h| h.join().ok()).collect()
                     });
 
                     // Process results sequentially (transition detection, event emission, state updates)

@@ -13,7 +13,9 @@ use serde_json::Value;
 
 use super::parse::str_at;
 
-/// Every line of a session JSONL that parses.
+/// Every line of a session JSONL that parses, but the request records
+/// (CLI 2.1.300+: system prompts and tool schemas, up to hundreds of KB each)
+/// history never reads.
 pub(super) fn read_entries(path: &Path) -> Vec<Value> {
     let Ok(file) = fs::File::open(path) else {
         return Vec::new();
@@ -21,6 +23,7 @@ pub(super) fn read_entries(path: &Path) -> Vec<Value> {
     std::io::BufReader::new(file)
         .lines()
         .map_while(Result::ok)
+        .filter(|line| !line.starts_with(r#"{"type":"api-request"#))
         .filter_map(|line| serde_json::from_str(&line).ok())
         .collect()
 }
