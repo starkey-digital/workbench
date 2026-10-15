@@ -42,6 +42,7 @@ export function waitingLabel(item: Waiting): string {
 }
 
 function toolLabel(tool: string): string {
+	if (tool.endsWith('__run_in_terminal')) return 'Has a command for you to run';
 	switch (tool) {
 		case 'AskUserQuestion':
 			return 'Has a question';

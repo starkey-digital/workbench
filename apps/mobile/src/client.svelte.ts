@@ -1,4 +1,4 @@
-import { agentClient, agentName } from '@workbench/chat-ui';
+import { agentClient, agentName, commandTabLabel } from '@workbench/chat-ui';
 import { ControlPlaneStore } from '@workbench/control-plane-ui';
 import { setExtendedDiagnostics } from '@workbench/telemetry';
 import { createHttpTransport, type OpenEventSource } from '@workbench/transport';
@@ -366,6 +366,17 @@ export class MobileClient {
 	/** Continue a past conversation (the history sheet). A pane already running it is reused. */
 	resume(kind: AgentKind, folder: Folder, sessionId: string, accountId?: string): Promise<void> {
 		return this.newSession(kind, folder, { resume: sessionId, accountId });
+	}
+
+	/** A command the chat hands over: a new terminal in the pane's workspace, opened here. */
+	async runCommand(workspaceId: string, command: string): Promise<void> {
+		if (!this.remote || !this.screens.begin('shell')) return;
+		const screens = this.screens;
+		const result = await this.send(
+			{ type: 'newSession', workspaceId, kind: 'shell', label: commandTabLabel(command), command },
+			"Couldn't open a terminal"
+		);
+		screens.started(result?.paneId);
 	}
 
 	private async newSession(

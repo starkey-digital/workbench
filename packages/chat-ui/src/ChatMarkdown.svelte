@@ -11,8 +11,11 @@
 	import { marked } from 'marked';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import CopyIcon from '@lucide/svelte/icons/copy';
+	import SquareTerminalIcon from '@lucide/svelte/icons/square-terminal';
 	import { cn } from '@workbench/ui';
+	import { bangCommand } from './chat-format';
 	import { getChatPlatform } from './platform';
+	import { getRunCommand } from './run-command';
 
 	/**
 	 * Claude's Markdown, rendered from `marked`'s tokens as Svelte elements —
@@ -36,6 +39,7 @@
 	}
 
 	const platform = getChatPlatform();
+	const run = getRunCommand();
 
 	function openLink(event: MouseEvent, href: string) {
 		event.preventDefault();
@@ -56,6 +60,19 @@
 	];
 </script>
 
+<!-- Claude's "type `! <command>`": Run opens it in a new terminal instead. -->
+{#snippet runButton(command: string)}
+	<button
+		type="button"
+		class="ml-1 inline-flex items-center gap-1 rounded px-1 align-baseline text-[11px] text-wb-accent hover:underline focus-visible:ring-1 focus-visible:ring-wb-accent focus-visible:outline-none"
+		title={`Run ${command} in a new terminal`}
+		aria-label={`Run ${command} in a new terminal`}
+		onclick={() => run?.(command)}
+	>
+		<SquareTerminalIcon class="size-3" /> Run
+	</button>
+{/snippet}
+
 {#snippet inline(list: Token[] | undefined)}
 	{#each list ?? [] as token, i (i)}
 		{#if token.type === 'strong'}
@@ -67,9 +84,11 @@
 		{:else if token.type === 'del'}
 			<del class="text-wb-ink-mute">{@render inline((token as Tokens.Del).tokens)}</del>
 		{:else if token.type === 'codespan'}
+			{@const code = (token as Tokens.Codespan).text}
+			{@const command = run && bangCommand(code)}
 			<code class="rounded bg-wb-panel2 px-1 py-px font-mono text-[0.86em] break-words text-wb-ink"
-				>{(token as Tokens.Codespan).text}</code
-			>
+				>{code}</code
+			>{#if command}{@render runButton(command)}{/if}
 		{:else if token.type === 'link'}
 			{@const link = token as Tokens.Link}
 			{@const href = safeHref(link.href)}
@@ -127,9 +146,11 @@
 			<p>{@render inline((token as Tokens.Text).tokens ?? [token])}</p>
 		{:else if token.type === 'code'}
 			{@const code = token as Tokens.Code}
+			{@const command = run && bangCommand(code.text)}
 			<div class="group/code relative overflow-hidden rounded-md border border-wb-hair bg-wb-panel">
-				<div class="flex items-center justify-between border-b border-wb-hair px-3 py-1">
-					<span class="font-mono text-[10px] text-wb-ink-soft">{code.lang || 'text'}</span>
+				<div class="flex items-center gap-2 border-b border-wb-hair px-3 py-1">
+					<span class="mr-auto font-mono text-[10px] text-wb-ink-soft">{code.lang || 'text'}</span>
+					{#if command}{@render runButton(command)}{/if}
 					<button
 						type="button"
 						class="flex items-center gap-1 rounded px-1 text-[11px] text-wb-ink-soft hover:text-wb-ink focus-visible:ring-1 focus-visible:ring-wb-accent focus-visible:outline-none"

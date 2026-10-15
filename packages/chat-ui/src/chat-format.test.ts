@@ -37,8 +37,54 @@ import {
 	patchStats,
 	shortPath,
 	terminalAnswer,
-	toolDetail
+	toolDetail,
+	bangCommand,
+	runCommandRequest,
+	type ApprovalItem
 } from './chat-format';
+
+describe('bangCommand', () => {
+	it("reads Claude Code's `! command` convention", () => {
+		expect(bangCommand('! stripe login')).toBe('stripe login');
+		expect(bangCommand('  !  gh auth login --web ')).toBe('gh auth login --web');
+	});
+
+	it('leaves code that only starts with ! alone', () => {
+		expect(bangCommand('!==')).toBeNull();
+		expect(bangCommand('!important')).toBeNull();
+		expect(bangCommand('stripe login')).toBeNull();
+		expect(bangCommand('! ')).toBeNull();
+		expect(bangCommand('! cd x\nrm y')).toBeNull();
+	});
+});
+
+describe('runCommandRequest', () => {
+	const ask = (tool: string, input: Record<string, unknown> | null): ApprovalItem => ({
+		kind: 'approval',
+		id: 'r',
+		tool,
+		input,
+		canAlwaysAllow: false,
+		expired: false
+	});
+
+	it("reads the plugin's run_in_terminal call", () => {
+		expect(
+			runCommandRequest(
+				ask('mcp__workbench__run_in_terminal', { command: 'stripe login', reason: 'Deploys' })
+			)
+		).toEqual({ command: 'stripe login', reason: 'Deploys' });
+		expect(
+			runCommandRequest(ask('mcp__workbench__run_in_terminal', { command: 'gh auth login' }))
+		).toEqual({ command: 'gh auth login' });
+	});
+
+	it('is null for other tools and an empty command', () => {
+		expect(runCommandRequest(ask('Bash', { command: 'ls' }))).toBeNull();
+		expect(runCommandRequest(ask('mcp__workbench__run_in_terminal', { command: ' ' }))).toBeNull();
+		expect(runCommandRequest(ask('mcp__workbench__run_in_terminal', null))).toBeNull();
+	});
+});
 
 const meta: TranscriptMeta = {
 	title: null,

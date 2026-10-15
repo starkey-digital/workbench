@@ -7,6 +7,7 @@ import type {
 import * as server from './link';
 import { PendingAsks } from './asks';
 import { notifiedJob, startJob, stoppedJobs } from './jobs';
+import { RUN_TOOL_SPEC, runInput, runResult } from './run';
 import { Titles, TITLE_SYSTEM } from './titles';
 import {
 	askLine,
@@ -145,6 +146,8 @@ const printed = new Set<string>();
 // since 2.1.292 a plugin's `allow` doesn't dismiss the dialog of a tool that
 // requires the person. A plan is approved in the terminal (PermissionRequest).
 const ASKED_IN_CALL = 'AskUserQuestion';
+// `mcp__<plugin>__run_in_terminal`, once registered (`run.ts`).
+let runTool: string | undefined;
 const pendingAsks = new PendingAsks();
 // Approvals the terminal's own dialog asks (no chat was open): tool call id →
 // request id, and whether the main thread asked it (a background agent's
@@ -361,6 +364,7 @@ export const register: Register = (on) => {
 			);
 		}
 		server.open({ url, token, sessionId, process });
+		runTool = (await $.tool.register(RUN_TOOL_SPEC).catch(() => undefined))?.tool;
 		const fetch = (u: string, i: Parameters<typeof $.http.fetch>[1]) => $.http.fetch(u, i);
 		const after: server.After = (ms, fn) => $.clock.after(ms, fn);
 		// Bounded: `claude` waits on this hook before its first prompt. A failed
@@ -1107,8 +1111,24 @@ export const register: Register = (on) => {
 	// Structured results (an Artifact's link) and subagents for the tasks panel.
 	on('tool.call', async ($, e, next) => {
 		if (e.agentId && stoppedAgents.has(e.agentId)) return { deny: 'Stopped in Workbench chat' };
-		if (!server.current()) return next(e);
 		const id = e.tool_use_id;
+		// A command for the person: the chat's card answers it (Run, then Done or Skip).
+		if (runTool && e.tool === runTool) {
+			const run = runInput(e);
+			if (typeof run === 'string') return { deny: run };
+			if (!server.current() || !id) return { result: runResult(run.command, null) };
+			const requestId = `wbmod-ask-${load}-${++askSeq}`;
+			const answer = await server.askInChat(
+				(u, i) => $.http.fetch(u, i),
+				(ms, fn) => $.clock.after(ms, fn),
+				requestId,
+				askLine(requestId, e.tool, run, id),
+				next.signal,
+				chatTurn
+			);
+			return { result: runResult(run.command, answer) };
+		}
+		if (!server.current()) return next(e);
 		// Approved in the terminal's dialog: it no longer waits, however long the call runs.
 		// The call goes ahead: whatever settled it, it no longer waits on a dialog.
 		if (id) pendingAsks.drop(id);
@@ -1292,6 +1312,9 @@ export const register: Register = (on) => {
 
 	on('tool.check', async ($, e, next) => {
 		const verdict = await next(e);
+		// It runs nothing: the person's Run in the chat is the consent.
+		if (runTool && e.tool === runTool && verdict.decision === 'ask')
+			return { ...verdict, decision: 'allow' as const };
 		if (
 			verdict.decision === 'ask' &&
 			server.current() &&

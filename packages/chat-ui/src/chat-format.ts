@@ -433,6 +433,23 @@ export function terminalAnswer(item: ApprovalItem): 'waiting' | 'answered' | nul
 		: null;
 }
 
+/**
+ * The command in Claude Code's "type `! <command>`" convention: one line,
+ * `!` then a space. `!==` or `!important` aren't commands.
+ */
+export function bangCommand(code: string): string | null {
+	const match = /^!\s+(\S.*)$/.exec(code.trim());
+	return match && !/[\r\n]/.test(match[1]) ? match[1].trim() : null;
+}
+
+/** The Workbench plugin's `run_in_terminal` call: a command for the person to run. */
+export function runCommandRequest(item: ApprovalItem): { command: string; reason?: string } | null {
+	if (!item.tool.endsWith('__run_in_terminal')) return null;
+	const { command, reason } = item.input ?? {};
+	if (typeof command !== 'string' || !command.trim()) return null;
+	return { command, ...(typeof reason === 'string' && reason ? { reason } : {}) };
+}
+
 export function activity(items: TranscriptItem[], meta: TranscriptMeta | null): Activity {
 	for (let i = items.length - 1; i >= 0; i--) {
 		const item = items[i];

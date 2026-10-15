@@ -20,10 +20,12 @@
 		ChatTasks,
 		ChatTranscript,
 		ChatUsage,
+		commandTabLabel,
 		followLatest,
 		fontPrefs,
 		metaUsageChips,
 		setChatPlatform,
+		setRunCommand,
 		useAccountPlanUsage
 	} from '@workbench/chat-ui';
 	import { cn } from '@workbench/ui';
@@ -101,6 +103,14 @@
 			: workspaceStore.getByProjectPath(project.path)
 	);
 	const branch = $derived(workspace && workspaceStore.resolvedBranch(workspace));
+	// A command Claude hands over opens beside the chat, in its own terminal tab.
+	setRunCommand((command) => {
+		if (workspace)
+			void workspaceStore.runTaskInWorkspace(workspace.id, {
+				name: commandTabLabel(command),
+				command
+			});
+	});
 	const pr = $derived(branch ? githubStore.getBranchStatus(project.path, branch)?.pr : null);
 
 	// The chat's Restart is the pane's: the server restarts it, then the chat re-attaches.
