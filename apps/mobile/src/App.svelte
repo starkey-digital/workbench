@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { watch } from 'runed';
-	import { applyTheme, themePrefs } from '@workbench/chat-ui';
 	import { Button } from '@workbench/ui/button';
 	import { Input } from '@workbench/ui/input';
 	import Home from './Home.svelte';
@@ -15,11 +14,6 @@
 
 	const c = new MobileClient();
 	const updater = new AppUpdater();
-
-	watch(
-		() => themePrefs.theme,
-		(theme) => applyTheme(theme)
-	);
 
 	watch(
 		() => [c.notifications.enabled, c.connection, c.machineId, c.machine?.name],

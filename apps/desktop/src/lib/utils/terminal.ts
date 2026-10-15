@@ -83,11 +83,13 @@ export async function attachNativeTerminal(request: {
 	await invoke('attach_native_terminal', { ...rest, colors: nativeColors(palette) });
 }
 
-/** `swift_term_set_colors`' format: foreground, background, then the 16 ANSI colours. */
+/** SwiftTerm's palette format: foreground, background, cursor, selection, then the 16 ANSI colours. */
 export function nativeColors(p: TerminalPalette): string {
 	return [
 		p.foreground,
 		p.background,
+		p.cursor,
+		p.selectionBackground,
 		p.black,
 		p.red,
 		p.green,

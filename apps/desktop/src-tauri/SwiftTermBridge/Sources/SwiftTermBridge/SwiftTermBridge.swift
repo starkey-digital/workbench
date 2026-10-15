@@ -96,28 +96,64 @@ private class BridgeDelegate: NSObject, TerminalViewDelegate {
 
 // MARK: - Theme Configuration
 
-/// Parses a hex color string (e.g. "#1a1a1e") into its 8-bit RGB components.
-private func rgbFromHex(_ hex: String) -> (UInt64, UInt64, UInt64)? {
+/// Parses "#rrggbb" or "#rrggbbaa" into 8-bit RGBA components.
+private func rgbaFromHex(_ hex: String) -> (UInt64, UInt64, UInt64, UInt64)? {
     var hexSanitized = hex.trimmingCharacters(in: .whitespacesAndNewlines)
     if hexSanitized.hasPrefix("#") {
         hexSanitized.removeFirst()
     }
-    guard hexSanitized.count == 6 else { return nil }
-    var rgbValue: UInt64 = 0
-    guard Scanner(string: hexSanitized).scanHexInt64(&rgbValue) else { return nil }
-    return ((rgbValue & 0xFF0000) >> 16, (rgbValue & 0x00FF00) >> 8, rgbValue & 0x0000FF)
+    if hexSanitized.count == 6 { hexSanitized += "ff" }
+    guard hexSanitized.count == 8 else { return nil }
+    var v: UInt64 = 0
+    guard Scanner(string: hexSanitized).scanHexInt64(&v) else { return nil }
+    return ((v >> 24) & 0xFF, (v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF)
 }
 
 private func nsColorFromHex(_ hex: String) -> NSColor? {
-    guard let (r, g, b) = rgbFromHex(hex) else { return nil }
+    guard let (r, g, b, a) = rgbaFromHex(hex) else { return nil }
     return NSColor(
-        srgbRed: CGFloat(r) / 255.0, green: CGFloat(g) / 255.0, blue: CGFloat(b) / 255.0, alpha: 1.0)
+        srgbRed: CGFloat(r) / 255.0, green: CGFloat(g) / 255.0, blue: CGFloat(b) / 255.0,
+        alpha: CGFloat(a) / 255.0)
 }
 
 private func termColorFromHex(_ hex: String) -> SwiftTerm.Color? {
-    guard let (r, g, b) = rgbFromHex(hex) else { return nil }
+    guard let (r, g, b, _) = rgbaFromHex(hex) else { return nil }
     // 0...255 to SwiftTerm's 0...65535.
     return SwiftTerm.Color(red: UInt16(r * 257), green: UInt16(g * 257), blue: UInt16(b * 257))
+}
+
+/// A palette of the xterm.js panes (`TERMINAL_PALETTES` in @workbench/chat-ui),
+/// parsed from comma-separated hex: foreground, background, cursor, selection,
+/// then the 16 ANSI colors. Nil for anything else.
+private struct Palette {
+    let foreground: NSColor
+    let background: NSColor
+    let cursor: NSColor
+    let selection: NSColor
+    let ansi: [SwiftTerm.Color]
+
+    init?(_ colors: String) {
+        let hex = colors.split(separator: ",").map(String.init)
+        guard hex.count == 20,
+            let foreground = nsColorFromHex(hex[0]),
+            let background = nsColorFromHex(hex[1]),
+            let cursor = nsColorFromHex(hex[2]),
+            let selection = nsColorFromHex(hex[3])
+        else { return nil }
+        let ansi = hex[4...].compactMap(termColorFromHex)
+        guard ansi.count == 16 else { return nil }
+        (self.foreground, self.background, self.cursor, self.selection, self.ansi) =
+            (foreground, background, cursor, selection, ansi)
+    }
+
+    /// Main thread only.
+    func apply(to view: TerminalView) {
+        view.nativeForegroundColor = foreground
+        view.nativeBackgroundColor = background
+        view.caretColor = cursor
+        view.selectedTextBackgroundColor = selection
+        view.installColors(ansi)
+    }
 }
 
 // MARK: - FFI Functions
@@ -130,6 +166,7 @@ private func termColorFromHex(_ hex: String) -> SwiftTerm.Color? {
 ///   - x, y, width, height: Frame rectangle in the parent's coordinate system.
 ///   - font_size: Font size in points.
 ///   - font_family: C string font family name, or NULL for the system monospaced font.
+///   - colors: The palette, in `Palette`'s format; applied before the view is shown.
 ///   - input_callback: Called when the user types; receives raw bytes.
 ///   - activity_callback: Called on terminal activity state changes.
 ///   - callback_context: Opaque pointer passed back to both callbacks.
@@ -141,11 +178,13 @@ public func swift_term_create(
     _ x: Double, _ y: Double, _ width: Double, _ height: Double,
     _ font_size: Double,
     _ font_family: UnsafePointer<CChar>?,
+    _ colors: UnsafePointer<CChar>,
     _ input_callback: SwiftTermInputCallback,
     _ activity_callback: SwiftTermActivityCallback,
     _ callback_context: UnsafeMutableRawPointer?
 ) -> Bool {
     let sessionId = String(cString: session_id)
+    guard let palette = Palette(String(cString: colors)) else { return false }
 
     // Resolve font: use the specified family if provided, otherwise system monospaced
     let font: NSFont
@@ -168,6 +207,7 @@ public func swift_term_create(
         let terminalView = TerminalView(frame: frame)
         terminalView.font = font
         terminalView.autoresizingMask = []  // We control frame manually
+        palette.apply(to: terminalView)
 
         let delegate = BridgeDelegate(
             inputCallback: input_callback,
@@ -301,28 +341,19 @@ public func swift_term_set_visible(
     }
 }
 
-/// Applies the light or dark palette of the xterm.js panes (`TERMINAL_PALETTES`
-/// in @workbench/chat-ui). `colors` is comma-separated hex: foreground,
-/// background, then the 16 ANSI colors. Anything else is ignored.
+/// Repaints a view in another palette (`Palette`'s format). Returns false,
+/// changing nothing, for a malformed one.
 @_cdecl("swift_term_set_colors")
 public func swift_term_set_colors(
     _ session_id: UnsafePointer<CChar>,
     _ colors: UnsafePointer<CChar>
-) {
+) -> Bool {
     let sessionId = String(cString: session_id)
-    let hex = String(cString: colors).split(separator: ",").map(String.init)
-    guard hex.count == 18,
-        let foreground = nsColorFromHex(hex[0]),
-        let background = nsColorFromHex(hex[1])
-    else { return }
-    let ansi = hex[2...].compactMap(termColorFromHex)
-    guard ansi.count == 16 else { return }
+    guard let palette = Palette(String(cString: colors)) else { return false }
 
     let work = {
         guard let session = getSession(sessionId) else { return }
-        session.view.nativeForegroundColor = foreground
-        session.view.nativeBackgroundColor = background
-        session.view.installColors(ansi)
+        palette.apply(to: session.view)
     }
 
     if Thread.isMainThread {
@@ -330,6 +361,7 @@ public func swift_term_set_colors(
     } else {
         DispatchQueue.main.async { work() }
     }
+    return true
 }
 
 /// Writes text to the terminal as if the user typed it.

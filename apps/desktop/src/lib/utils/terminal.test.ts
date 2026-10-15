@@ -41,7 +41,9 @@ describe('native terminal IPC wrappers', () => {
 
 		expect(invokeSpy).toHaveBeenCalledWith('attach_native_terminal', {
 			...request,
-			colors: expect.stringMatching(/^#1f2328,#fbfbfc,(#[0-9a-f]{6},){15}#[0-9a-f]{6}$/)
+			colors: expect.stringMatching(
+				/^#1f2328,#fbfbfc,#6d28d9,#6d28d933,(#[0-9a-f]{6},){15}#[0-9a-f]{6}$/
+			)
 		});
 	});
 
@@ -55,7 +57,7 @@ describe('native terminal IPC wrappers', () => {
 			sessionId: 'ses-1',
 			colors: nativeColors(TERMINAL_PALETTES.dark)
 		});
-		expect(nativeColors(TERMINAL_PALETTES.dark).split(',')).toHaveLength(18);
+		expect(nativeColors(TERMINAL_PALETTES.dark).split(',')).toHaveLength(20);
 	});
 
 	it('resizeNativeTerminal invokes resize_native_terminal', async () => {

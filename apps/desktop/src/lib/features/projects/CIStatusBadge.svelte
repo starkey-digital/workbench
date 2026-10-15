@@ -21,9 +21,9 @@
 	});
 
 	let statusColor = $derived.by(() => {
-		if (status.overall === 'success') return 'text-green-400';
-		if (status.overall === 'failure') return 'text-red-400';
-		if (status.overall === 'pending') return 'text-amber-400';
+		if (status.overall === 'success') return 'text-wb-ok';
+		if (status.overall === 'failure') return 'text-wb-err';
+		if (status.overall === 'pending') return 'text-wb-warn';
 		return '';
 	});
 

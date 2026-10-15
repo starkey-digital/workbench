@@ -45,6 +45,7 @@ extern "C" {
         height: f64,
         font_size: f64,
         font_family: *const c_char,
+        colors: *const c_char,
         input_callback: SwiftTermInputCallback,
         activity_callback: SwiftTermActivityCallback,
         callback_context: *mut c_void,
@@ -58,7 +59,7 @@ extern "C" {
 
     fn swift_term_set_visible(session_id: *const c_char, visible: bool);
 
-    fn swift_term_set_colors(session_id: *const c_char, colors: *const c_char);
+    fn swift_term_set_colors(session_id: *const c_char, colors: *const c_char) -> bool;
 
     fn swift_term_write(session_id: *const c_char, text: *const c_char);
 
@@ -78,7 +79,9 @@ struct CallbackContext {
 /// Hand a palette to SwiftTerm, which applies it on the main thread.
 fn set_colors(session_cstr: &CString, colors: &str) -> Result<()> {
     let colors = CString::new(colors).context("Invalid colors for CString")?;
-    unsafe { swift_term_set_colors(session_cstr.as_ptr(), colors.as_ptr()) };
+    if !unsafe { swift_term_set_colors(session_cstr.as_ptr(), colors.as_ptr()) } {
+        return Err(anyhow!("malformed terminal palette"));
+    }
     Ok(())
 }
 
@@ -278,6 +281,8 @@ impl NativeTerminalManager {
         ns_view_ptr: *mut c_void,
         app_handle: AppHandle,
     ) -> Result<()> {
+        // Checked before anything is created, so a bad one leaks nothing.
+        let colors = CString::new(colors).context("Invalid colors for CString")?;
         let tap = terminals
             .tap(&terminal_id)
             .ok_or_else(|| anyhow!("terminal {terminal_id} is gone"))?;
@@ -303,6 +308,7 @@ impl NativeTerminalManager {
                 height,
                 font_size,
                 font_family_cstr.as_ptr(),
+                colors.as_ptr(),
                 input_callback,
                 activity_callback,
                 ctx_ptr,
@@ -312,8 +318,6 @@ impl NativeTerminalManager {
             let _ = unsafe { Box::from_raw(ctx_ptr as *mut CallbackContext) };
             return Err(anyhow!("swift_term_create failed for session {session_id}"));
         }
-        // Before any output, so the scrollback never paints in the other theme.
-        set_colors(&session_cstr, colors)?;
 
         // The PTY takes SwiftTerm's actual grid size.
         let (mut cols, mut rows) = (80u16, 24u16);

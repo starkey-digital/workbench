@@ -2,7 +2,9 @@
  * Light or dark, kept per device like the fonts: a phone outdoors wants light
  * while the desktop stays dark. `system` follows the OS.
  */
+import { watch } from 'runed';
 import { MediaQuery } from 'svelte/reactivity';
+import { onPrefChange, readPref, writePref } from './stored-pref.ts';
 
 export type ThemeChoice = 'dark' | 'light' | 'system';
 export type Theme = 'dark' | 'light';
@@ -13,22 +15,15 @@ export const THEME_CHOICES: readonly { id: ThemeChoice; label: string }[] = [
 	{ id: 'system', label: 'System' }
 ];
 
+/** Also read by each app's index.html, so the first frame paints in the chosen theme. */
 const STORAGE_KEY = 'workbench.theme';
 
 export function parseThemeChoice(raw: string | null): ThemeChoice {
 	return THEME_CHOICES.some((c) => c.id === raw) ? (raw as ThemeChoice) : 'dark';
 }
 
-function read(): string | null {
-	try {
-		return localStorage.getItem(STORAGE_KEY);
-	} catch {
-		return null;
-	}
-}
-
 export class ThemePrefs {
-	choice = $state<ThemeChoice>(parseThemeChoice(read()));
+	choice = $state<ThemeChoice>(parseThemeChoice(readPref(STORAGE_KEY)));
 
 	// jsdom has no matchMedia.
 	#systemDark =
@@ -41,20 +36,29 @@ export class ThemePrefs {
 	);
 
 	constructor() {
-		// Another window (the desktop's settings) changed it.
-		if (typeof window !== 'undefined')
-			window.addEventListener('storage', (e) => {
-				if (e.key === STORAGE_KEY) this.choice = parseThemeChoice(e.newValue);
-			});
+		onPrefChange(STORAGE_KEY, (raw) => (this.choice = parseThemeChoice(raw)));
 	}
 
 	set(choice: ThemeChoice) {
 		this.choice = choice;
-		try {
-			localStorage.setItem(STORAGE_KEY, choice);
-		} catch {
-			/* applies to this session only */
-		}
+		writePref(STORAGE_KEY, choice);
+	}
+
+	/**
+	 * Keeps this window's document in the chosen theme from now on; call once,
+	 * before mount. `onChange` gets every change too, e.g. for native chrome.
+	 */
+	follow(onChange?: (theme: Theme, choice: ThemeChoice) => void) {
+		$effect.root(() =>
+			watch(
+				() => [this.theme, this.choice] as const,
+				([theme, choice]) => {
+					applyTheme(theme);
+					onChange?.(theme, choice);
+				}
+			)
+		);
+		applyTheme(this.theme);
 	}
 }
 

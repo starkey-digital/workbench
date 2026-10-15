@@ -1,11 +1,11 @@
 import './app.css';
 import { mount } from 'svelte';
-import { applyTheme, themePrefs } from '@workbench/chat-ui';
+import { themePrefs } from '@workbench/chat-ui';
 import App from './App.svelte';
 import { initSentry } from './sentry';
 
 // Before mount, so the first paint is already in the chosen theme.
-applyTheme(themePrefs.theme);
+themePrefs.follow();
 
 async function boot() {
 	initSentry();

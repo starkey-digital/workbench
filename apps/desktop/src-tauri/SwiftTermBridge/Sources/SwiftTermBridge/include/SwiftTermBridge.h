@@ -19,6 +19,7 @@ bool swift_term_create(
     double x, double y, double width, double height,
     double font_size,
     const char *font_family,  // NULL for default
+    const char *colors,       // the palette, as for swift_term_set_colors
     SwiftTermInputCallback input_callback,
     SwiftTermActivityCallback activity_callback,
     void *callback_context
@@ -36,8 +37,9 @@ void swift_term_get_size(const char *session_id, uint16_t *out_cols, uint16_t *o
 // Show or hide the terminal view
 void swift_term_set_visible(const char *session_id, bool visible);
 
-// Apply a palette: comma-separated hex, foreground, background, then the 16 ANSI colors
-void swift_term_set_colors(const char *session_id, const char *colors);
+// Apply a palette: comma-separated hex, foreground, background, cursor, selection, then
+// the 16 ANSI colors. Returns false, changing nothing, for a malformed one.
+bool swift_term_set_colors(const char *session_id, const char *colors);
 
 // Write data to the terminal (for startup commands injected from Rust side)
 void swift_term_write(const char *session_id, const char *text);

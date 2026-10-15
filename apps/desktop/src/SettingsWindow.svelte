@@ -11,7 +11,6 @@
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { onMount } from 'svelte';
 	import { watch } from 'runed';
-	import { applyTheme, themePrefs } from '@workbench/chat-ui';
 
 	// Active project is passed from the main window via the query string so
 	// Claude project-scope settings and Trello project config resolve correctly.
@@ -27,10 +26,6 @@
 	watch(
 		() => workbenchSettingsStore.accentColor,
 		(accent) => document.documentElement.setAttribute('data-accent', accent)
-	);
-	watch(
-		() => themePrefs.theme,
-		(theme) => applyTheme(theme)
 	);
 
 	function debounce<T extends unknown[]>(fn: (...args: T) => void, ms: number) {
