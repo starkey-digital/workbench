@@ -363,7 +363,8 @@ export const register: Register = (on) => {
 		if (!process) {
 			const minted = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 			process = await $.env.set('WORKBENCH_MOD_PROCESS', minted).then(
-				() => minted,
+				// Since 2.1.301 a refused write resolves `{ deny }` instead of rejecting.
+				(r) => (r?.deny ? undefined : minted),
 				() => undefined
 			);
 		}
