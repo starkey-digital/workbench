@@ -1,4 +1,5 @@
 <script lang="ts">
+	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
 	import SquareTerminalIcon from '@lucide/svelte/icons/square-terminal';
 	import { AgentIcon } from '@workbench/ui/agent-icon';
 	import Columns2Icon from '@lucide/svelte/icons/columns-2';
@@ -77,16 +78,20 @@
 						'group relative inline-flex items-stretch border-r border-wb-hair transition-colors',
 						isActive
 							? 'bg-wb-bg'
-							: inSplit
-								? 'bg-wb-bg/50'
-								: 'bg-transparent hover:bg-wb-panel2/60',
+							: isAwaiting
+								? 'bg-wb-err/10 hover:bg-wb-err/15'
+								: inSplit
+									? 'bg-wb-bg/50'
+									: 'bg-transparent hover:bg-wb-panel2/60',
 						reorder.dragging === tab.id && 'opacity-50'
 					]}
 					role="presentation"
 					{...reorder.handlers(tab.id)}
 				>
-					<!-- Top accent border (2px) for active tab -->
-					{#if isActive}
+					<!-- Top accent border (2px) for the active tab, or any tab waiting on you -->
+					{#if isAwaiting}
+						<span class="absolute inset-x-0 top-0 h-0.5 bg-wb-err"></span>
+					{:else if isActive}
 						<span class={['absolute inset-x-0 top-0 h-0.5', activeTopBorderClass(tab)]}></span>
 					{/if}
 					{#if dropSide}
@@ -122,7 +127,8 @@
 						{#if isLive}
 							<span class="wb-pulse size-1.5 shrink-0 rounded-full bg-wb-ok"></span>
 						{:else if isAwaiting}
-							<span class="text-[9.5px] font-bold text-wb-warn">?</span>
+							<CircleAlertIcon class="wb-pulse size-3.5 shrink-0 text-wb-err" />
+							<span class="sr-only">(needs your answer)</span>
 						{/if}
 					</button>
 					<button
