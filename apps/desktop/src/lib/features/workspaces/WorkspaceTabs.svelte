@@ -1,4 +1,5 @@
 <script lang="ts">
+	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
 	import CodeIcon from '@lucide/svelte/icons/code';
 	import GithubIcon from '@lucide/svelte/icons/git-pull-request';
 	import GitBranchIcon from '@lucide/svelte/icons/git-branch';
@@ -21,6 +22,7 @@
 	const claudeSessionStore = getClaudeSessionStore();
 
 	let activeWorkspace = $derived(workspaceStore.activeWorkspace);
+	let waitingCount = $derived(claudeSessionStore.panesAwaitingInput.size);
 
 	const reorder = new TabReorder(
 		() => workspaceStore.workspaces.map((w) => w.id),
@@ -75,14 +77,18 @@
 				<div
 					class={[
 						'group relative inline-flex items-stretch border-r border-wb-hair transition-colors',
-						isActive ? 'bg-wb-panel' : 'bg-transparent hover:bg-wb-panel/50',
+						isActive
+							? 'bg-wb-panel'
+							: attention === 'input'
+								? 'bg-wb-err/10 hover:bg-wb-err/15'
+								: 'bg-transparent hover:bg-wb-panel/50',
 						reorder.dragging === workspace.id && 'opacity-50'
 					]}
 					role="presentation"
 					{...reorder.handlers(workspace.id)}
 				>
-					<!-- Accent underline at top -->
-					{#if isActive}
+					<!-- Accent underline at top; a background tab shows it only while a session waits on you -->
+					{#if isActive || attention === 'input'}
 						<span class={['absolute inset-x-0 top-0 h-0.5', accentBarClass(attention)]}></span>
 					{/if}
 					{#if dropSide}
@@ -111,6 +117,10 @@
 						{workspace.projectName}{#if branch}<span
 								class={['ml-0.5', attention ? 'opacity-60' : 'text-wb-ink-soft']}>/{branch}</span
 							>{/if}
+						{#if attention === 'input'}
+							<CircleAlertIcon class="wb-pulse size-3.5 shrink-0 text-wb-err" />
+							<span class="sr-only">(needs your answer)</span>
+						{/if}
 					</button>
 					<button
 						class="mr-1 flex size-5 shrink-0 items-center justify-center self-center rounded text-wb-ink-soft opacity-0 transition-opacity group-hover:opacity-100 hover:bg-wb-panel2 hover:text-wb-ink"
@@ -126,6 +136,26 @@
 	</div>
 
 	<div class="flex shrink-0 items-center gap-0.5 border-l border-wb-hair px-1">
+		{#if waitingCount > 0}
+			<Tooltip.Root>
+				<Tooltip.Trigger>
+					{#snippet child({ props })}
+						<Button
+							{...props}
+							variant="ghost"
+							size="sm"
+							class="mr-1 h-6 gap-1 bg-wb-err/15 px-2 font-mono text-[11px] text-wb-err hover:bg-wb-err/25 hover:text-wb-err"
+							type="button"
+							onclick={() => claudeSessionStore.focusNextWaiting()}
+						>
+							<CircleAlertIcon class="wb-pulse size-3.5" />
+							{waitingCount} waiting on you
+						</Button>
+					{/snippet}
+				</Tooltip.Trigger>
+				<Tooltip.Content>Go to the next session with a question or approval</Tooltip.Content>
+			</Tooltip.Root>
+		{/if}
 		<Tooltip.Root>
 			<Tooltip.Trigger>
 				{#snippet child({ props })}

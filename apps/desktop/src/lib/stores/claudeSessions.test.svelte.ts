@@ -20,6 +20,7 @@ function createMockWorkspaceStore(workspaces: unknown[] = []) {
 		addAIByProject: vi.fn(async () => null),
 		renameTab: vi.fn(async () => null),
 		findAIPaneContext: vi.fn(),
+		focusPane: vi.fn(() => true),
 		pane: vi.fn((): { id: string } | undefined => undefined),
 		paneForSession: vi.fn((): { id: string } | undefined => undefined)
 	} as unknown as WorkspaceStore;
@@ -254,6 +255,31 @@ describe('ClaudeSessionStore', () => {
 			expect(store.activeSessionsByProject['/test']).toEqual([
 				expect.objectContaining({ tabId: 'tab-1', needsAttention: true, awaitingInput: false })
 			]);
+		});
+
+		it('goes to the waiting pane after the one on screen', () => {
+			const waiting = { busy: true, waiting: { id: 'r1', tool: 'Bash', preview: 'ls' } };
+			const ws = tabWith(waiting);
+			ws.terminalTabs[1] = {
+				id: 'tab-3',
+				label: 'Claude 2',
+				split: 'horizontal',
+				type: 'claude',
+				panes: [{ id: 'pane-2', type: 'claude', ...waiting }]
+			};
+			const mock = mockWorkspaceStore as { workspaces: unknown[]; activeWorkspace?: unknown };
+			mock.workspaces = [ws];
+
+			store.focusNextWaiting();
+			expect(mockWorkspaceStore.focusPane).toHaveBeenLastCalledWith('pane-1');
+
+			mock.activeWorkspace = ws;
+			store.focusNextWaiting();
+			expect(mockWorkspaceStore.focusPane).toHaveBeenLastCalledWith('pane-2');
+
+			mock.activeWorkspace = { ...ws, activeTerminalTabId: 'tab-3' };
+			store.focusNextWaiting();
+			expect(mockWorkspaceStore.focusPane).toHaveBeenLastCalledWith('pane-1');
 		});
 	});
 

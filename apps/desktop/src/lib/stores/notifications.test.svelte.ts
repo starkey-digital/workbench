@@ -21,14 +21,20 @@ vi.mock('@tauri-apps/plugin-notification', () => ({
 
 const isFocused = vi.fn(async () => false);
 const setFocus = vi.fn();
+const requestUserAttention = vi.fn(async () => {});
 vi.mock('@tauri-apps/api/window', () => ({
+	UserAttentionType: { Critical: 1, Informational: 2 },
 	getCurrentWindow: () => ({
 		isFocused: () => isFocused(),
 		unminimize: vi.fn(),
 		show: vi.fn(),
-		setFocus: () => setFocus()
+		setFocus: () => setFocus(),
+		requestUserAttention: (...a: unknown[]) => requestUserAttention(...(a as []))
 	})
 }));
+
+const toast = vi.hoisted(() => ({ warning: vi.fn(), info: vi.fn(), dismiss: vi.fn() }));
+vi.mock('svelte-sonner', () => ({ toast }));
 
 import { NotificationStore } from './notifications.svelte';
 import type { AttentionTarget, ClaudeSessionStore } from './claudeSessions.svelte';
@@ -83,6 +89,10 @@ describe('NotificationStore', () => {
 		onAction.mockClear();
 		isFocused.mockReset().mockResolvedValue(false);
 		setFocus.mockClear();
+		requestUserAttention.mockClear();
+		toast.warning.mockClear();
+		toast.info.mockClear();
+		toast.dismiss.mockClear();
 	});
 
 	afterEach(() => {
@@ -327,7 +337,7 @@ describe('NotificationStore', () => {
 			expect(invokeSpy).not.toHaveBeenCalledWith('send_native_notification', expect.anything());
 		});
 
-		it('still notifies for a background pane while the window is focused', async () => {
+		it('shows a background pane in an in-app toast while the window is focused', async () => {
 			isFocused.mockResolvedValue(true);
 			const workspaces = mockWorkspaces();
 			// Active tab holds a different pane, so PANE is not what the user is watching.
@@ -344,7 +354,76 @@ describe('NotificationStore', () => {
 			holder.fire?.({ paneId: PANE, sessionId: 'sess-pane' });
 			await settle();
 
+			expect(invokeSpy).not.toHaveBeenCalledWith('send_native_notification', expect.anything());
+			expect(requestUserAttention).not.toHaveBeenCalled();
+			expect(toast.warning).toHaveBeenCalledWith(
+				'Workbench — Claude 1',
+				expect.objectContaining({ id: 'attention:sess-pane', duration: Infinity })
+			);
+
+			// Its Show button goes to the pane.
+			const [, options] = toast.warning.mock.calls[0] as unknown as [
+				string,
+				{ action: { onClick: () => void } }
+			];
+			options.action.onClick();
+			await settle();
+			expect(workspaces.focusPane).toHaveBeenCalledWith(PANE);
+
+			holder.fire?.({ paneId: PANE, sessionId: 'sess-pane' }, 'resolved');
+			await settle();
+			expect(toast.dismiss).toHaveBeenCalledWith('attention:sess-pane');
+			expect(requestUserAttention).toHaveBeenCalledWith(null);
+		});
+
+		it('still posts a finished turn natively for a background pane', async () => {
+			isFocused.mockResolvedValue(true);
+			const workspaces = mockWorkspaces();
+			(workspaces as { activeWorkspace: unknown }).activeWorkspace = {
+				...workspaces.workspaces[0],
+				terminalTabs: [{ id: 'tab-2', label: 'Other', panes: [{ id: 'pane-2', type: 'claude' }] }],
+				activeTerminalTabId: 'tab-2'
+			};
+
+			const { sessions, holder } = mockSessions();
+			new NotificationStore(workspaces, sessions);
+			await settle();
+
+			holder.fire?.({ paneId: PANE, sessionId: 'sess-pane' }, 'turnEnded');
+			await settle();
+
 			expect(invokeSpy).toHaveBeenCalledWith('send_native_notification', expect.anything());
+			expect(toast.warning).not.toHaveBeenCalled();
+		});
+
+		it('gives a session no pane shows a toast without a Show button', async () => {
+			isFocused.mockResolvedValue(true);
+			const { sessions, holder } = mockSessions();
+			new NotificationStore(mockWorkspaces(), sessions);
+			await settle();
+
+			holder.fire?.({ id: 'sess-phone', projectPath: '/test/app', label: 'Phone chat' });
+			await settle();
+
+			expect(toast.warning).toHaveBeenCalledWith(
+				'app — Phone chat',
+				expect.objectContaining({ id: 'attention:sess-phone', action: undefined })
+			);
+		});
+
+		it('asks for the dock when a question arrives in the background', async () => {
+			const { sessions, holder } = mockSessions();
+			new NotificationStore(mockWorkspaces(), sessions);
+			await settle();
+
+			holder.fire?.({ paneId: PANE, sessionId: 'sess-pane' }, 'turnEnded');
+			await settle();
+			expect(requestUserAttention).not.toHaveBeenCalled();
+
+			holder.fire?.({ paneId: PANE, sessionId: 'sess-pane' });
+			await settle();
+			expect(requestUserAttention).toHaveBeenCalledTimes(1);
+			expect(toast.warning).not.toHaveBeenCalled();
 		});
 	});
 });

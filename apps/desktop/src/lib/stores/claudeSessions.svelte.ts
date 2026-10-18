@@ -86,7 +86,7 @@ export class ClaudeSessionStore {
 						label: t.label,
 						sessionType,
 						needsAttention: aiPaneId ? !this.panesInProgress.has(aiPaneId) : true,
-						awaitingInput: aiPaneId ? this.panesAwaitingInput.has(aiPaneId) : false,
+						awaitingInput: t.panes.some((p) => this.panesAwaitingInput.has(p.id)),
 						worktreePath: ws.worktreePath
 					};
 				});
@@ -254,6 +254,16 @@ export class ClaudeSessionStore {
 			return;
 		}
 		this.emitAttention({ paneId, sessionId: event.sessionId }, event.kind);
+	}
+
+	/** Go to the waiting pane after the one on screen, so each call shows another. */
+	focusNextWaiting(): void {
+		const waiting = [...this.panesAwaitingInput];
+		if (waiting.length === 0) return;
+		const ws = this.workspaces.activeWorkspace;
+		const shown = ws?.terminalTabs.find((t) => t.id === ws.activeTerminalTabId)?.panes ?? [];
+		const current = waiting.findIndex((id) => shown.some((p) => p.id === id));
+		this.workspaces.focusPane(waiting[(current + 1) % waiting.length]);
 	}
 
 	/** Register a callback for a session that needs someone, or no longer does (`resolved`). */

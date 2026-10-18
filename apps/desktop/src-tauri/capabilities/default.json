@@ -13,6 +13,7 @@
 		"store:allow-set",
 		"store:allow-save",
 		"store:allow-load",
+		"core:window:allow-request-user-attention",
 		"core:window:allow-set-badge-count",
 		"core:window:allow-set-focus",
 		"core:window:allow-set-theme",
