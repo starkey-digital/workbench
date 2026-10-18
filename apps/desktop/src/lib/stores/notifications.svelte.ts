@@ -4,7 +4,8 @@ import {
 	sendNotification,
 	onAction
 } from '@tauri-apps/plugin-notification';
-import { getCurrentWindow } from '@tauri-apps/api/window';
+import { getCurrentWindow, UserAttentionType } from '@tauri-apps/api/window';
+import { toast } from 'svelte-sonner';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { SvelteMap } from 'svelte/reactivity';
@@ -21,6 +22,9 @@ export const ATTENTION_TEXT = {
 } as const;
 
 const targetId = (target: AttentionTarget) => ('paneId' in target ? target.paneId : target.id);
+/** Keyed by session: the pane may be gone by the time its question resolves. */
+const toastId = (target: AttentionTarget) =>
+	`attention:${'paneId' in target ? target.sessionId : target.id}`;
 
 export class NotificationStore {
 	/**
@@ -47,7 +51,7 @@ export class NotificationStore {
 
 		sessions.onAttention((target, kind) => {
 			if (kind === 'resolved') this.enqueue(() => this.withdraw(target));
-			else this.enqueue(() => this.notify(target, ATTENTION_TEXT[kind]));
+			else this.enqueue(() => this.notify(target, kind));
 		});
 	}
 
@@ -135,9 +139,13 @@ export class NotificationStore {
 	 * BSDs, and only notifications shown while an `onAction` listener exists.
 	 */
 	private async withdraw(target: AttentionTarget): Promise<void> {
-		if (!this.native) return;
 		// Posted under the pane, or under the session while no pane showed it.
 		const ids = 'paneId' in target ? [target.paneId, target.sessionId] : [target.id];
+		toast.dismiss(toastId(target));
+		getCurrentWindow()
+			.requestUserAttention(null)
+			.catch(() => {});
+		if (!this.native) return;
 		for (const identifier of ids) {
 			try {
 				await invoke('remove_native_notification', { identifier });
@@ -147,13 +155,14 @@ export class NotificationStore {
 		}
 	}
 
-	private async notify(target: AttentionTarget, message: string): Promise<void> {
+	private async notify(target: AttentionTarget, kind: keyof typeof ATTENTION_TEXT): Promise<void> {
 		// A session no pane shows here (started on the phone) is routed by its id;
 		// a click on it just brings the window forward.
 		const paneId = targetId(target);
+		const focused = await this.isWindowFocused();
 		// Suppress only when the user is actively looking at THIS pane —
 		// other panes still get notified even when the window is focused.
-		if ((await this.isWindowFocused()) && this.isPaneActive(paneId)) return;
+		if (focused && this.isPaneActive(paneId)) return;
 		const ctx =
 			'paneId' in target
 				? this.findContext(paneId)
@@ -161,7 +170,27 @@ export class NotificationStore {
 		if (!ctx) return;
 
 		const title = `${ctx.projectName} — ${ctx.tabLabel}`;
-		const body = message;
+		const body = ATTENTION_TEXT[kind];
+
+		// A question in the app already: an OS banner is easy to miss there, a toast
+		// isn't. It stays up until it's answered (`withdraw`) or dismissed.
+		if (focused && kind === 'waiting') {
+			toast.warning(title, {
+				id: toastId(target),
+				description: body,
+				duration: Infinity,
+				action:
+					'paneId' in target
+						? { label: 'Show', onClick: () => void this.focusPane(paneId) }
+						: undefined
+			});
+			return;
+		}
+		if (!focused && kind === 'waiting') {
+			getCurrentWindow()
+				.requestUserAttention(UserAttentionType.Informational)
+				.catch(() => {});
+		}
 
 		if (this.native) {
 			try {
