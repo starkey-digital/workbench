@@ -20,6 +20,10 @@
 //!   [`crate::usage::UsageCache`].
 //! - `GET /agent/files?projectPath=[&worktreePath=]` lists a chat cwd's files
 //!   (git-tracked and untracked, not ignored) for the composer's `@` mentions.
+//! - `GET /agent/plugins?projectPath=[&worktreePath=][&claudeAccountId=][&query=]`
+//!   lists the account's Claude Code plugins for that cwd plus catalogue
+//!   matches; `POST /agent/plugins` installs, enables, disables, updates or
+//!   uninstalls one ([`workbench_core::claude_plugins`]).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -33,6 +37,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::{broadcast, watch};
 use workbench_core::claude_accounts::{self, UsageLimit};
+use workbench_core::claude_plugins::{self, PluginAction, PluginList};
 use workbench_core::claude_transcript::{ApprovalDecision, ElicitationAction};
 
 use crate::agent::{
@@ -622,6 +627,62 @@ pub async fn agent_files(Query(q): Query<FilesQuery>) -> ApiResult<Json<Vec<Stri
     })
     .await
     .map(Json)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginsQuery {
+    claude_account_id: Option<String>,
+    project_path: String,
+    worktree_path: Option<String>,
+    #[serde(default)]
+    query: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginChange {
+    claude_account_id: Option<String>,
+    project_path: String,
+    worktree_path: Option<String>,
+    action: PluginAction,
+    id: String,
+    scope: String,
+}
+
+/// The chat's cwd (the files allowlist) for an account the host knows: an
+/// unknown id is refused, never run under the default login.
+async fn plugin_target(
+    account_id: Option<String>,
+    project_path: String,
+    worktree_path: Option<String>,
+) -> ApiResult<(Option<String>, std::path::PathBuf)> {
+    let settings = crate::routes::blocking(workbench_core::config::load_workbench_settings).await?;
+    claude_accounts::resolve(&settings, account_id.as_deref())
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let cwd = crate::routes::blocking(move || resolve_cwd(&project_path, worktree_path.as_deref()))
+        .await?;
+    Ok((account_id, cwd.into()))
+}
+
+pub async fn agent_plugins(Query(q): Query<PluginsQuery>) -> ApiResult<Json<PluginList>> {
+    let (account, cwd) =
+        plugin_target(q.claude_account_id, q.project_path, q.worktree_path).await?;
+    crate::routes::blocking(move || claude_plugins::list(account.as_deref(), &cwd, &q.query))
+        .await
+        .map(Json)
+}
+
+/// Installs, switches, updates or removes one; the session sees it once its
+/// `claude` restarts.
+pub async fn agent_plugin_change(Json(c): Json<PluginChange>) -> ApiResult<StatusCode> {
+    let (account, cwd) =
+        plugin_target(c.claude_account_id, c.project_path, c.worktree_path).await?;
+    crate::routes::blocking(move || {
+        claude_plugins::change(account.as_deref(), &cwd, c.action, &c.id, &c.scope)
+    })
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[cfg(test)]

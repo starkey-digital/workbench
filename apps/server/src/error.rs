@@ -31,6 +31,11 @@ where
             .is_some()
         {
             StatusCode::FORBIDDEN
+        } else if err
+            .downcast_ref::<workbench_core::claude_plugins::Refused>()
+            .is_some()
+        {
+            StatusCode::BAD_REQUEST
         } else {
             StatusCode::INTERNAL_SERVER_ERROR
         };
@@ -72,6 +77,14 @@ mod tests {
         let err = ApiError::bad_request("nope");
         assert_eq!(err.status, StatusCode::BAD_REQUEST);
         assert_eq!(err.message, "nope");
+    }
+
+    #[test]
+    fn a_refused_plugin_change_maps_to_400() {
+        let refused = workbench_core::claude_plugins::Refused("already disabled".into());
+        let err: ApiError = anyhow::Error::new(refused).into();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+        assert_eq!(err.message, "already disabled");
     }
 
     #[test]

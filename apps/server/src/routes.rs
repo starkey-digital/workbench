@@ -65,6 +65,10 @@ pub fn router(state: AppState) -> Router {
         .route("/agent/usage", get(crate::agent_routes::agent_usage))
         .route("/agent/files", get(crate::agent_routes::agent_files))
         .route(
+            "/agent/plugins",
+            get(crate::agent_routes::agent_plugins).post(crate::agent_routes::agent_plugin_change),
+        )
+        .route(
             "/agent/claude/:id/message",
             post(crate::agent_routes::agent_message),
         )

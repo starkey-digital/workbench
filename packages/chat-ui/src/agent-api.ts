@@ -1,5 +1,23 @@
 import { agentWsUrl, DEFAULT_TIMEOUT_MS, SLOW_TIMEOUT_MS, withTimeout } from '@workbench/transport';
-import type { AgentClientMsg, ChatTarget, TaskTranscript, UsageLimit } from '@workbench/types';
+import type {
+	AgentClientMsg,
+	ChatTarget,
+	PluginAction,
+	PluginList,
+	TaskTranscript,
+	UsageLimit
+} from '@workbench/types';
+
+/** The chat's folder and account, which decide the plugins it sees. */
+export interface PluginTarget extends Pick<ChatTarget, 'projectPath' | 'worktreePath'> {
+	claudeAccountId?: string;
+}
+
+export interface PluginChange {
+	action: PluginAction;
+	id: string;
+	scope: string;
+}
 
 /** What an {@link AgentChat} needs from the server; injectable for tests. */
 export interface AgentApi {
@@ -7,6 +25,9 @@ export interface AgentApi {
 	socketUrl(sessionId: string): Promise<string>;
 	/** The chat cwd's files for `@` mentions; absent leaves the menu out. */
 	files?(where: Pick<ChatTarget, 'projectPath' | 'worktreePath'>): Promise<string[]>;
+	/** Claude Code plugins for `/plugin`; absent leaves the sheet out. */
+	plugins?(target: PluginTarget, query: string): Promise<PluginList>;
+	changePlugin?(target: PluginTarget, change: PluginChange): Promise<void>;
 	/** A subagent's own conversation; null until the CLI writes it. */
 	taskTranscript?(sessionId: string, taskId: string): Promise<TaskTranscript | null>;
 }
@@ -15,6 +36,8 @@ export interface AgentApi {
 const USAGE_TIMEOUT_MS = 60_000;
 /** Listing a big repo's files for the `@` menu. */
 const FILES_TIMEOUT_MS = 20_000;
+/** An install or update may clone a repository; the server allows it 120s. */
+const PLUGIN_CHANGE_TIMEOUT_MS = 130_000;
 
 export interface AgentServer {
 	baseUrl: string;
@@ -91,6 +114,26 @@ export function agentClient(server: () => AgentServer | Promise<AgentServer>) {
 			}).toString();
 			const route = `/agent/usage${query ? `?${query}` : ''}`;
 			return (await call<UsageLimit[]>('GET', route, undefined, USAGE_TIMEOUT_MS)) ?? [];
+		},
+		async plugins(
+			{ projectPath, worktreePath, claudeAccountId }: PluginTarget,
+			query: string
+		): Promise<PluginList> {
+			const params = new URLSearchParams({
+				projectPath,
+				...(worktreePath ? { worktreePath } : {}),
+				...(claudeAccountId ? { claudeAccountId } : {}),
+				...(query.trim() ? { query: query.trim() } : {})
+			}).toString();
+			return (
+				(await call<PluginList>('GET', `/agent/plugins?${params}`, undefined, SLOW_TIMEOUT_MS)) ?? {
+					installed: [],
+					available: []
+				}
+			);
+		},
+		async changePlugin(target: PluginTarget, change: PluginChange): Promise<void> {
+			await call('POST', '/agent/plugins', { ...target, ...change }, PLUGIN_CHANGE_TIMEOUT_MS);
 		},
 		/** One message without a socket, e.g. answering an approval from a list. */
 		async send(sessionId: string, msg: AgentClientMsg): Promise<void> {

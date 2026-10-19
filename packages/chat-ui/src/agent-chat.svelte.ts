@@ -38,6 +38,7 @@ import { chatArtifacts } from './artifacts';
 import { ChatDraft } from './chat-draft.svelte';
 import { codexTaskOutput } from './codex-helpers';
 import { settlePending, type PendingPrompt } from './pending';
+import { PluginManager } from './plugin-manager.svelte';
 import {
 	ChatMonitor,
 	chatShape,
@@ -198,6 +199,7 @@ export class AgentChat {
 	private outputWaiters: Record<string, (text: string | null) => void> = {};
 	private taskWaiters: Record<string, (out: TaskOutput | null) => void> = {};
 	private fileList: { at: number; files: Promise<string[]> } | null = null;
+	private pluginManager: { accountId: string | undefined; manager: PluginManager } | null = null;
 	private rewindWaiters: Record<string, (reply: RewindReply | null) => void> = {};
 	/** Prompts sent from here; the transcript scrolls back to the newest on each. */
 	sends = $state(0);
@@ -669,6 +671,34 @@ export class AgentChat {
 		return this.fileList.files;
 	}
 
+	/**
+	 * The `/plugin` sheet's state for this chat's folder and account (a new one
+	 * when the chat moves to another account, whose plugins are its own); null
+	 * for Codex or a server without the plugin routes.
+	 */
+	plugins(): PluginManager | null {
+		const { plugins, changePlugin } = this.api;
+		if (this.agent !== 'claude' || !plugins || !changePlugin) return null;
+		const accountId = this.accountId;
+		let entry = this.pluginManager;
+		if (!entry || entry.accountId !== accountId) {
+			entry?.manager.dispose();
+			entry = {
+				accountId,
+				manager: new PluginManager(
+					{ plugins: plugins.bind(this.api), changePlugin: changePlugin.bind(this.api) },
+					() => ({
+						projectPath: this.body.projectPath,
+						worktreePath: this.body.worktreePath,
+						claudeAccountId: accountId
+					})
+				)
+			};
+			this.pluginManager = entry;
+		}
+		return entry.manager;
+	}
+
 	approve(requestId: string, decision: ApprovalDecision, answers?: Record<string, string>): void {
 		this.send({ t: 'approve', requestId, decision, ...(answers ? { answers } : {}) });
 	}
@@ -694,9 +724,12 @@ export class AgentChat {
 		this.send({ t: 'interrupt' });
 	}
 
-	/** Restart the session's `claude`, a stuck turn included; the server's `replaced` re-attaches. */
-	restart(): void {
-		this.send({ t: 'restart' });
+	/**
+	 * Restart the session's `claude`, a stuck turn included; the server's
+	 * `replaced` re-attaches. False when it couldn't be sent (not connected).
+	 */
+	restart(): boolean {
+		return this.send({ t: 'restart' });
 	}
 
 	setMode(mode: PermissionMode | CodexMode): void {
@@ -1006,6 +1039,7 @@ export class AgentChat {
 		this.rejectControls('Chat closed');
 		this.disposed = true;
 		this.monitor.dispose();
+		this.pluginManager?.manager.dispose();
 		this.clearOwedResync();
 		if (this.reconnectOnWake) document.removeEventListener('visibilitychange', this.onVisibility);
 		if (this.retryTimer) clearTimeout(this.retryTimer);
