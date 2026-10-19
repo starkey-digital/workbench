@@ -1790,3 +1790,106 @@ async fn stopping_a_listener_revokes_its_pending_attention_request() {
         .is_success());
     other.stop().await;
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn agent_plugins_lists_and_changes_only_installed_plugins() {
+    let env = env_guard();
+    let tmp = tempfile::tempdir().unwrap();
+    git_init(tmp.path());
+    let _cfg = register_project(&env, tmp.path());
+    // The fake `claude` answers `plugin list` and records every other call.
+    let calls = tmp.path().join("calls");
+    let fake = tmp.path().join("fake-claude");
+    std::fs::write(
+        &fake,
+        format!(
+            r#"#!/bin/sh
+if [ "$2" = list ]; then
+  echo '{{"installed":[{{"id":"lint@m","scope":"user","enabled":true}},{{"id":"workbench@inline","scope":"session","enabled":true}}],"available":[{{"pluginId":"fmt@m","name":"fmt","description":"Formats","marketplaceName":"m"}}]}}'
+else
+  echo "$*" >> '{}'
+  echo '{{"outcome":"ok"}}'
+fi
+"#,
+            calls.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    env.set("WORKBENCH_CLAUDE_BIN", &fake);
+    let project = tmp.path().to_str().unwrap();
+
+    let (handle, base) = start().await;
+    let url = format!("{base}/agent/plugins");
+    let res = reqwest::Client::new()
+        .get(&url)
+        .query(&[("projectPath", project)])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 401, "listing plugins needs the token");
+
+    let list: Value = client()
+        .get(&url)
+        .query(&[("projectPath", project)])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let installed = list["installed"].as_array().unwrap();
+    assert_eq!(installed.len(), 1, "session-scoped plugins are left out");
+    assert_eq!(installed[0]["id"], "lint@m");
+    assert_eq!(list["available"][0]["id"], "fmt@m");
+
+    let change = |id: &str, scope: &str| json!({ "projectPath": project, "action": "disable", "id": id, "scope": scope });
+    let res = client()
+        .post(&url)
+        .json(&change("lint@m", "user"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 204);
+    for (id, scope) in [("nope@nowhere", "user"), ("workbench@inline", "session")] {
+        let res = client()
+            .post(&url)
+            .json(&change(id, scope))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 400, "{id} is not this account's to change");
+    }
+    assert_eq!(
+        std::fs::read_to_string(&calls).unwrap(),
+        "plugin disable lint@m --json --scope user\n",
+        "only the installed plugin reached the CLI"
+    );
+
+    let other = tempfile::tempdir().unwrap();
+    let res = client()
+        .get(&url)
+        .query(&[("projectPath", other.path().to_str().unwrap())])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        403,
+        "an unregistered directory must be refused"
+    );
+    let res = client()
+        .get(&url)
+        .query(&[("projectPath", project), ("claudeAccountId", "nobody")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        400,
+        "an unknown account is refused, not run as the default"
+    );
+
+    handle.stop().await;
+}

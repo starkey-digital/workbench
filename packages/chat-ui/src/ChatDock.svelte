@@ -11,6 +11,8 @@
 	import ChatGoal from './ChatGoal.svelte';
 	import ChatOptions from './ChatOptions.svelte';
 	import ChatPlan from './ChatPlan.svelte';
+	import ChatPlugins from './ChatPlugins.svelte';
+	import type { PluginManager } from './plugin-manager.svelte';
 	import ChatSuggestions from './ChatSuggestions.svelte';
 	import CodexControls from './CodexControls.svelte';
 
@@ -50,6 +52,22 @@
 		name: 'resume',
 		description: 'Continue an earlier conversation from this folder'
 	};
+	/** `/plugin` is a terminal panel in the CLI; chat shows its own sheet. */
+	const PLUGIN: SlashCommand = {
+		name: 'plugin',
+		description: 'Install, switch on or off, update and remove plugins'
+	};
+	const PLUGIN_NAMES = ['plugin', 'plugins'];
+
+	const plugins = $derived(chat.plugins());
+	/** The sheet is open for one account's plugins; moving to another closes it. */
+	let openFor = $state.raw<PluginManager | null>(null);
+
+	function openPlugins() {
+		if (!plugins) return;
+		openFor = plugins;
+		void plugins.load();
+	}
 
 	const name = $derived(agentName(chat.agent));
 	const shownNotice = $derived(notice ?? chat.notice);
@@ -64,7 +82,13 @@
 			? accountChoices(accounts, defaultAccountName).filter((c) => c.id !== chat.accountId)
 			: []
 	);
-	const commands = $derived([RESUME, ...chat.commands.filter((c) => c.name !== 'resume')]);
+	const commands = $derived([
+		RESUME,
+		...(plugins ? [PLUGIN] : []),
+		...chat.commands.filter(
+			(c) => c.name !== 'resume' && !(plugins && PLUGIN_NAMES.includes(c.name))
+		)
+	]);
 	const disabledReason = $derived.by(() => {
 		switch (chat.status) {
 			case 'starting':
@@ -80,6 +104,10 @@
 	});
 
 	function onCommand(command: string): boolean {
+		if (plugins && PLUGIN_NAMES.includes(command)) {
+			openPlugins();
+			return true;
+		}
 		if (command !== 'resume') return false;
 		onResume();
 		return true;
@@ -123,6 +151,14 @@
 	{/if}
 	{#if chat.meta?.goal && chat.live}
 		<ChatGoal goal={chat.meta.goal} />
+	{/if}
+	{#if plugins && openFor === plugins}
+		<ChatPlugins
+			manager={plugins}
+			busyTurn={Boolean(chat.meta?.busy) && chat.live}
+			onRestart={() => chat.restart()}
+			onClose={() => (openFor = null)}
+		/>
 	{/if}
 	<ChatSuggestions {suggestions} onPick={(text) => (chat.draft.text = text)} />
 	<ChatComposer

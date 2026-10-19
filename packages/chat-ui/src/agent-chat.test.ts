@@ -355,6 +355,37 @@ describe('AgentChat', () => {
 		}
 	);
 
+	it("lists the chat account's plugins, afresh after an account switch", async () => {
+		const plugins = vi.fn<NonNullable<AgentApi['plugins']>>(async () => ({
+			installed: [],
+			available: []
+		}));
+		const changePlugin = vi.fn<NonNullable<AgentApi['changePlugin']>>(async () => {});
+		const api = { ...fakeApi(), plugins, changePlugin };
+		expect(new AgentChat({ ...body, agent: 'codex' }, api).plugins()).toBeNull();
+		const onDefault = new AgentChat(body, api);
+		expect(onDefault.plugins()).not.toBeNull();
+		expect(onDefault.plugins()).toBe(onDefault.plugins());
+		onDefault.dispose();
+		const chat = new AgentChat({ ...body, claudeAccountId: 'work' }, api);
+		const first = chat.plugins();
+		expect(chat.plugins()).toBe(first);
+		await first?.load();
+		expect(plugins).toHaveBeenCalledWith(
+			{ projectPath: '/repo', worktreePath: undefined, claudeAccountId: 'work' },
+			''
+		);
+		chat.accountId = undefined;
+		const second = chat.plugins();
+		expect(second).not.toBe(first);
+		await second?.load();
+		expect(plugins).toHaveBeenLastCalledWith(
+			{ projectPath: '/repo', worktreePath: undefined, claudeAccountId: undefined },
+			''
+		);
+		chat.dispose();
+	});
+
 	it('lists the cwd for @ mentions, reusing the list for a while', async () => {
 		const files = vi.fn<NonNullable<AgentApi['files']>>(async () => ['src/main.rs']);
 		const chat = new AgentChat({ ...body, worktreePath: '/repo-wt' }, { ...fakeApi(), files });

@@ -486,6 +486,34 @@ export interface UsageLimit {
 	resetsAt?: number;
 }
 
+/** A Claude Code plugin an account has, from `claude plugin list --json` (core `claude_plugins`). */
+export interface InstalledPlugin {
+	/** `name@marketplace`. */
+	id: string;
+	version?: string;
+	/** `user`, or `project`/`local` for the chat's folder. */
+	scope: 'user' | 'project' | 'local';
+	enabled: boolean;
+	description?: string;
+}
+
+/** A marketplace plugin not installed here. */
+export interface AvailablePlugin {
+	id: string;
+	name: string;
+	description: string;
+	marketplace: string;
+	installCount?: number;
+}
+
+/** `GET /agent/plugins`: what's installed, and up to 50 catalogue matches for the search. */
+export interface PluginList {
+	installed: InstalledPlugin[];
+	available: AvailablePlugin[];
+}
+
+export type PluginAction = 'install' | 'enable' | 'disable' | 'update' | 'uninstall';
+
 /** Persisted position + size of the draggable settings window. */
 export interface SettingsWindowBounds {
 	x: number;

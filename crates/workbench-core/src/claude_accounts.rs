@@ -181,7 +181,7 @@ pub fn claude_binary() -> PathBuf {
 }
 
 /// `claude` with `account_id`'s config dir exported.
-fn claude_command(account_id: Option<&str>) -> Result<std::process::Command> {
+pub(crate) fn claude_command(account_id: Option<&str>) -> Result<std::process::Command> {
     let mut cmd = crate::shell::tool(claude_binary());
     // A probe is no pane's: its `claude` must not attach to a chat or report hooks.
     crate::shell::without_parent_env(&mut cmd);
