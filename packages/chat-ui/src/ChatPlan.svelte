@@ -17,8 +17,8 @@
 		<span class="shrink-0 text-wb-ink-mute tabular-nums">Plan {done}/{steps.length}</span>
 		<span class="h-1 w-16 shrink-0 overflow-hidden rounded-full bg-wb-panel2">
 			<span
-				class="block h-full rounded-full bg-wb-ok transition-[width] duration-500"
-				style:width="{(done / steps.length) * 100}%"
+				class="block h-full w-full rounded-full bg-wb-ok transition-transform duration-300 ease-wb-out motion-reduce:transition-none"
+				style:transform="translateX({(done / steps.length) * 100 - 100}%)"
 			></span>
 		</span>
 		<span class="min-w-0 truncate text-wb-ink">{label}</span>

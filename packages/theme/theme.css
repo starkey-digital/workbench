@@ -30,6 +30,10 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+	/* Motion: strong ease-out for things entering or leaving; the drawer curve for sheets. */
+	--wb-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+	--wb-ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+
 	--background: oklch(0.97 0 0);
 	--foreground: oklch(0.18 0.005 0);
 	--card: oklch(1 0 0);
@@ -227,6 +231,7 @@
 	--color-wb-accent: var(--wb-accent);
 	--color-wb-accent-soft: var(--wb-accent-soft);
 	--color-wb-accent-ink: var(--wb-accent-ink);
+	--ease-wb-out: var(--wb-ease-out);
 }
 
 @layer base {
@@ -245,6 +250,20 @@
 
 	#app {
 		height: 100%;
+	}
+
+	/* Reduced motion: tw-animate entrances and exits (menus, tooltips, dialogs) fade without moving.
+	   !important in this lower layer outranks the utilities that set these. */
+	@media (prefers-reduced-motion: reduce) {
+		[class*='animate-in'],
+		[class*='animate-out'] {
+			--tw-enter-translate-x: 0 !important;
+			--tw-enter-translate-y: 0 !important;
+			--tw-enter-scale: 1 !important;
+			--tw-exit-translate-x: 0 !important;
+			--tw-exit-translate-y: 0 !important;
+			--tw-exit-scale: 1 !important;
+		}
 	}
 
 	/* Thin scrollbars for tab strips */

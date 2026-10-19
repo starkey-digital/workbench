@@ -73,8 +73,8 @@
 				<div class="h-2 w-full overflow-hidden rounded-full bg-secondary">
 					{#if progressPercent !== null}
 						<div
-							class="h-full rounded-full bg-primary transition-all duration-300"
-							style="width: {progressPercent}%"
+							class="h-full w-full rounded-full bg-primary transition-transform duration-300 ease-wb-out motion-reduce:transition-none"
+							style="transform: translateX({progressPercent - 100}%)"
 						></div>
 					{:else}
 						<div class="h-full w-1/3 animate-pulse rounded-full bg-primary"></div>
