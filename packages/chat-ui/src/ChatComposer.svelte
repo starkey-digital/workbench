@@ -157,6 +157,7 @@
 	/**
 	 * A command that is the whole draft can be handled here or sent at once;
 	 * one typed mid-line is inserted where it stands, for Claude to expand.
+	 * Where Enter is a newline (the phone), a click or tap only inserts it, so arguments can follow.
 	 */
 	async function pick(command: SlashCommand, sendNow: boolean) {
 		if (!slash) return;
@@ -297,7 +298,7 @@
 			items={matches}
 			key={(command) => command.name}
 			{active}
-			onPick={(command) => void pick(command, true)}
+			onPick={(command) => void pick(command, enterSends)}
 			onHover={(i) => (menuIndex = i)}
 		>
 			{#snippet row(command)}
@@ -478,7 +479,7 @@
 
 <style>
 	.thumb {
-		animation: pop 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+		animation: pop 180ms var(--wb-ease-out);
 	}
 	@keyframes pop {
 		from {

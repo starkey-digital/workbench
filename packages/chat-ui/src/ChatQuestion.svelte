@@ -230,7 +230,7 @@
 
 <style>
 	.question {
-		animation: arrive 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+		animation: arrive 260ms var(--wb-ease-out);
 		box-shadow: 0 0 0 3px color-mix(in oklab, var(--wb-accent) 10%, transparent);
 	}
 	@keyframes arrive {

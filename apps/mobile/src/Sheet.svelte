@@ -45,7 +45,7 @@
 		animation: fade 160ms ease-out;
 	}
 	.panel {
-		animation: rise 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+		animation: rise 260ms var(--wb-ease-drawer);
 	}
 	@keyframes fade {
 		from {
