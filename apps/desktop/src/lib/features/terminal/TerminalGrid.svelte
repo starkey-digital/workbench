@@ -53,7 +53,7 @@
 	}
 </script>
 
-<div class={`flex min-h-0 flex-1 ${split === 'vertical' ? 'flex-col' : 'flex-row'}`}>
+<div class={`flex min-h-0 min-w-0 flex-1 ${split === 'vertical' ? 'flex-col' : 'flex-row'}`}>
 	{#each panes as pane, i (pane.id)}
 		{@const agent = isAISessionType(pane.type) ? pane.type : null}
 		{@const chatSessionId = agent ? pane.claudeSessionId || undefined : undefined}
