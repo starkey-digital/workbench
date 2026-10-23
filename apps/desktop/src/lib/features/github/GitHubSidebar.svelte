@@ -44,7 +44,7 @@
 	async function openPrAsWorktree() {
 		if (!projectPath || !pr) return;
 		await invoke('github_fetch_pr_branch', { projectPath, branch: pr.headRefName });
-		worktreeManager.add(projectPath, { suggestedBranch: pr.headRefName });
+		worktreeManager.add(projectPath, { suggestedBranch: pr.headRefName, existingBranch: true });
 	}
 
 	// Trigger data fetch when sidebar target changes (external side effect -- network requests)

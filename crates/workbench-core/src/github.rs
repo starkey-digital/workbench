@@ -174,7 +174,7 @@ type PrsWithChecks = (Vec<GitHubPR>, HashMap<u64, Vec<GitHubCheckDetail>>);
 /// `gh pr list --json` for the fields every PR parser here reads; the API path
 /// (`github_api::fetch_pr_json`) produces this exact shape.
 pub(crate) fn fetch_pr_json(path: &str) -> Result<Vec<serde_json::Value>> {
-    let fields = "number,title,state,url,isDraft,headRefName,reviewDecision,statusCheckRollup,mergeStateStatus";
+    let fields = "number,title,state,url,isDraft,headRefName,headRefOid,reviewDecision,statusCheckRollup,mergeStateStatus";
     let result = gh_output(
         &[
             "pr", "list", "--state", "all", "--limit", "100", "--json", fields,
@@ -495,6 +495,7 @@ fn parse_pr_json(v: &serde_json::Value) -> Result<GitHubPR> {
         url: v["url"].as_str().unwrap_or("").to_string(),
         is_draft,
         head_ref_name: v["headRefName"].as_str().unwrap_or("").to_string(),
+        head_ref_oid: v["headRefOid"].as_str().unwrap_or("").to_string(),
         review_decision: v["reviewDecision"].as_str().map(String::from),
         checks_status: checks,
         merge_state_status,

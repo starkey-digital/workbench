@@ -5,7 +5,13 @@
 	import { Checkbox } from '@workbench/ui/checkbox';
 	import { Separator } from '@workbench/ui/separator';
 	import { getTrelloStore } from '$stores/context';
-	import type { BoardConfig, MergeAction, TrelloLabel, TrelloList } from '$types/trello';
+	import type {
+		BoardConfig,
+		MergeAction,
+		TrelloLabel,
+		TrelloList,
+		TrelloProjectConfig
+	} from '$types/trello';
 	import { trelloLabelColor } from '$features/trello/label-colors';
 	import LoaderIcon from '@lucide/svelte/icons/loader';
 	import PlusIcon from '@lucide/svelte/icons/plus';
@@ -42,27 +48,30 @@
 		loadingPicker = false;
 	}
 
-	async function handleAddBoard(boardId: string, boardName: string) {
-		const config = trelloStore.configByProject[projectPath] ?? { boards: [], taskLinks: [] };
-		if (config.boards.some((b) => b.boardId === boardId)) return;
+	/** Every edit goes to the config on disk, so links the main window saved survive. */
+	function update(change: (config: TrelloProjectConfig) => TrelloProjectConfig) {
+		return trelloStore
+			.updateProjectConfig(projectPath, change)
+			.catch((e) => log.warn('SettingsBoardConfig', 'Failed to save board config:', e));
+	}
 
+	async function handleAddBoard(boardId: string, boardName: string) {
 		const newBoard: BoardConfig = { boardId, boardName, hiddenColumns: [] };
-		await trelloStore.saveProjectConfig(projectPath, {
-			...config,
-			boards: [...config.boards, newBoard]
-		});
+		await update((config) =>
+			config.boards.some((b) => b.boardId === boardId)
+				? config
+				: { ...config, boards: [...config.boards, newBoard] }
+		);
 		showPicker = false;
 		loadColumnsAndLabels(boardId);
 	}
 
 	async function handleRemoveBoard(boardId: string) {
-		const config = trelloStore.configByProject[projectPath];
-		if (!config) return;
-		await trelloStore.saveProjectConfig(projectPath, {
+		await update((config) => ({
 			...config,
 			boards: config.boards.filter((b) => b.boardId !== boardId),
 			taskLinks: config.taskLinks.filter((t) => t.boardId !== boardId)
-		});
+		}));
 	}
 
 	async function loadColumnsAndLabels(boardId: string) {
@@ -79,22 +88,14 @@
 	}
 
 	function toggleColumn(boardId: string, columnId: string) {
-		const config = trelloStore.configByProject[projectPath];
-		if (!config) return;
-		const board = config.boards.find((b) => b.boardId === boardId);
-		if (!board) return;
-
-		const hidden = board.hiddenColumns.includes(columnId)
-			? board.hiddenColumns.filter((c) => c !== columnId)
-			: [...board.hiddenColumns, columnId];
-
-		const updated = {
+		const toggled = (hidden: string[]) =>
+			hidden.includes(columnId) ? hidden.filter((c) => c !== columnId) : [...hidden, columnId];
+		update((config) => ({
 			...config,
 			boards: config.boards.map((b) =>
-				b.boardId === boardId ? { ...b, hiddenColumns: hidden } : b
+				b.boardId === boardId ? { ...b, hiddenColumns: toggled(b.hiddenColumns) } : b
 			)
-		};
-		trelloStore.saveProjectConfig(projectPath, updated);
+		}));
 	}
 
 	function updateBoardAction(
@@ -102,13 +103,10 @@
 		field: 'linkAction' | 'mergeAction',
 		action: MergeAction | undefined
 	) {
-		const config = trelloStore.configByProject[projectPath];
-		if (!config) return;
-		const updated = {
+		update((config) => ({
 			...config,
 			boards: config.boards.map((b) => (b.boardId === boardId ? { ...b, [field]: action } : b))
-		};
-		trelloStore.saveProjectConfig(projectPath, updated);
+		}));
 	}
 
 	function defaultAction(): MergeAction {

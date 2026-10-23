@@ -21,6 +21,7 @@ import type {
 	WorkspacePane
 } from '@workbench/types';
 import { QUEUED_NUDGE } from '@workbench/types';
+import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import type { AgentApi } from './agent-api';
 import {
 	activity,
@@ -137,10 +138,12 @@ export class AgentChat {
 	seenAt = $state.raw<Record<string, number>>({});
 	delivery = $state<'steer' | 'queue'>('steer');
 	historyItems = $state.raw<TranscriptItem[]>([]);
+	/** Serialized size of `historyItems`, counted as pages arrive. */
+	private historyBytes = 0;
 	private historyCursor = $state<string | null | undefined>(undefined);
 	private loadingHistory = false;
 	onCodexEvent: ((method: string, params: Record<string, unknown>) => void) | null = null;
-	private controls = new Map<
+	private controls = new SvelteMap<
 		string,
 		{
 			resolve: (v: unknown) => void;
@@ -148,7 +151,7 @@ export class AgentChat {
 			timer: ReturnType<typeof setTimeout>;
 		}
 	>();
-	private artifactWaiters = new Map<string, (v: ChatArtifact[]) => void>();
+	private artifactWaiters = new SvelteMap<string, (v: ChatArtifact[]) => void>();
 	/** The open "Rewind to here" panel, if any. */
 	rewind = $state.raw<RewindState | null>(null);
 	/** What the server does as the prompt cache nears expiry (Claude only). */
@@ -190,7 +193,7 @@ export class AgentChat {
 	 * then the chat re-attaches once the pane runs again.
 	 */
 	onRestart: (() => void) | null = null;
-	private echoedUsers = new Set<string>();
+	private echoedUsers = new SvelteSet<string>();
 	/** The Claude login the chat runs under (`undefined`: the default); follows the server's. */
 	accountId = $state<string | undefined>(undefined);
 	/** The chat moved to another Claude account (from here or another device). */
@@ -424,6 +427,7 @@ export class AgentChat {
 				// queued after it echo only in the new one.
 				if (msg.sessionId !== this.sessionId) {
 					this.historyItems = [];
+					this.historyBytes = 0;
 					this.historyCursor = undefined;
 					this.echoedUsers.clear();
 					const clear = this.pending.findIndex((p) => /^\/clear(\s|$)/.test(p.text));
@@ -779,10 +783,7 @@ export class AgentChat {
 	}
 	async loadOlder(): Promise<void> {
 		if (this.loadingHistory) return;
-		if (
-			this.historyItems.length >= 2000 ||
-			JSON.stringify(this.historyItems).length >= 16 * 1024 * 1024
-		) {
+		if (this.historyItems.length >= 2000 || this.historyBytes >= 16 * 1024 * 1024) {
 			throw new Error(
 				'Earlier history display limit reached. Open this thread in the Codex terminal to read more.'
 			);
@@ -796,6 +797,7 @@ export class AgentChat {
 			)) as { items: TranscriptItem[]; nextCursor: string | null };
 			if (sessionId !== this.sessionId) return;
 			this.historyItems = [...result.items, ...this.historyItems];
+			this.historyBytes += JSON.stringify(result.items).length;
 			this.historyCursor = result.nextCursor ?? null;
 		} finally {
 			this.loadingHistory = false;
@@ -804,19 +806,17 @@ export class AgentChat {
 
 	artifacts(id: string): Promise<ChatArtifact[]> {
 		return new Promise((resolve) => {
+			if (!this.send({ t: 'artifacts', id })) return resolve([]);
 			const timer = setTimeout(() => {
-				this.artifactWaiters.delete(id);
+				// A later call for the same id chained onto this one and still waits.
+				if (this.artifactWaiters.get(id) === waiter) this.artifactWaiters.delete(id);
 				resolve([]);
 			}, 30000);
-			this.artifactWaiters.set(id, (v) => {
+			const waiter = chain(this.artifactWaiters.get(id), (v: ChatArtifact[]) => {
 				clearTimeout(timer);
 				resolve(v);
 			});
-			if (!this.send({ t: 'artifacts', id })) {
-				clearTimeout(timer);
-				this.artifactWaiters.delete(id);
-				resolve([]);
-			}
+			this.artifactWaiters.set(id, waiter);
 		});
 	}
 	private rejectControls(message: string): void {

@@ -241,7 +241,12 @@ export async function poll(fetch: Fetch): Promise<Line[]> {
 	);
 	if (res?.status === 404) hello.needed = true;
 	if (!res?.ok) return [];
-	const lines = JSON.parse(res.text || '[]') as Line[];
+	let lines: Line[];
+	try {
+		lines = JSON.parse(res.text || '[]');
+	} catch {
+		return [];
+	}
 	// An older server numbers nothing.
 	return lines.filter((line) => typeof line.wbSeq !== 'number' || line.wbSeq > inSeq);
 }

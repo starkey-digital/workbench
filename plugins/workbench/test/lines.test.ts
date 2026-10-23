@@ -1,5 +1,10 @@
 import { expect, test } from 'bun:test';
-import { commandRowOutput } from '../hooks/lines';
+import { askAnswer, commandRowOutput } from '../hooks/lines';
+
+test("a reply that isn't JSON hands the ask to the terminal's dialog", () => {
+	expect(askAnswer('<html>502</html>')).toBeNull();
+	expect(askAnswer('')).toBeNull();
+});
 
 test("a command's output row gives what it printed", () => {
 	expect(

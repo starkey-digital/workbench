@@ -138,6 +138,7 @@ export class GitHubStore {
 
 	// Not reactive — internal bookkeeping only
 	private trackedProjectsFingerprint = '';
+	private trackedSync: Promise<void> = Promise.resolve();
 	lastRefreshedAt: Record<string, number> = {};
 	private lastHookRefreshAt: Record<string, number> = {};
 	private pendingHookRefresh: Record<string, ReturnType<typeof setTimeout>> = {};
@@ -268,15 +269,21 @@ export class GitHubStore {
 		this.checksByPr = nextChecksByPr;
 	}
 
-	async syncTrackedProjects(): Promise<void> {
+	/** One send at a time, each of the set as it is then, so the newest set lands last. */
+	syncTrackedProjects(): Promise<void> {
+		this.trackedSync = this.trackedSync.then(() => this.sendTrackedProjects());
+		return this.trackedSync;
+	}
+
+	private async sendTrackedProjects(): Promise<void> {
 		if (this.ghAvailable !== true) return;
 		const projectPaths = this.trackedProjectPaths.slice().sort();
 		const fingerprint = projectPaths.join('\n');
 		if (fingerprint === this.trackedProjectsFingerprint) return;
-		this.trackedProjectsFingerprint = fingerprint;
-
 		try {
 			await invoke('github_set_tracked_projects', { projectPaths });
+			// Only once it took, so a failed send is retried by the next sync.
+			this.trackedProjectsFingerprint = fingerprint;
 		} catch (e) {
 			log.warn('GitHubStore', 'Failed to sync tracked projects:', e);
 		}

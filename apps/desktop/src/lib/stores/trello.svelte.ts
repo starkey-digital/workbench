@@ -12,6 +12,7 @@ import type { TrelloMergeActionAppliedEvent } from '$types/workbench';
 import type { WorkspaceStore } from './workspaces.svelte';
 import { getWorkspaceStore } from './context';
 import { invoke } from '@tauri-apps/api/core';
+import { toast } from 'svelte-sonner';
 import { listen } from '@tauri-apps/api/event';
 import { log } from '$lib/log';
 
@@ -127,6 +128,22 @@ export class TrelloStore {
 		this.configByProject = { ...this.configByProject, [projectPath]: config };
 	}
 
+	/**
+	 * Apply `change` to the config on disk, not this window's copy: the settings
+	 * window holds its own, so editing a cached copy drops the other's writes.
+	 */
+	async updateProjectConfig(
+		projectPath: string,
+		change: (config: TrelloProjectConfig) => TrelloProjectConfig
+	): Promise<TrelloProjectConfig> {
+		const current = await invoke<TrelloProjectConfig>('trello_load_project_config', {
+			projectPath
+		});
+		const updated = change(current);
+		await this.saveProjectConfig(projectPath, updated);
+		return updated;
+	}
+
 	async fetchAvailableBoards(): Promise<void> {
 		if (!this.credentials) return;
 		this.loading = true;
@@ -184,38 +201,43 @@ export class TrelloStore {
 		await invoke('trello_remove_label', { cardId, labelId });
 	}
 
-	linkTaskToBranch(
+	async linkTaskToBranch(
 		projectPath: string,
 		cardId: string,
 		boardId: string,
 		branch: string,
 		worktreePath?: string
-	): void {
-		const config = this.configByProject[projectPath] ?? { boards: [], taskLinks: [] };
-		const existing = config.taskLinks.findIndex((t) => t.cardId === cardId);
+	): Promise<void> {
 		const link: TaskLink = { cardId, boardId, branch, worktreePath, projectPath };
-		const taskLinks =
-			existing >= 0
-				? config.taskLinks.map((t, i) => (i === existing ? link : t))
-				: [...config.taskLinks, link];
-		const updated = { ...config, taskLinks };
-		this.saveProjectConfig(projectPath, updated);
+		let config: TrelloProjectConfig;
+		try {
+			config = await this.updateProjectConfig(projectPath, (config) => {
+				const existing = config.taskLinks.findIndex((t) => t.cardId === cardId);
+				const taskLinks =
+					existing >= 0
+						? config.taskLinks.map((t, i) => (i === existing ? link : t))
+						: [...config.taskLinks, link];
+				return { ...config, taskLinks };
+			});
+		} catch (e) {
+			log.warn('TrelloStore', 'Failed to link task:', e);
+			toast.error(`Couldn't link the Trello card: ${String(e)}`);
+			return;
+		}
 
 		// Execute link action if configured
 		const board = config.boards.find((b) => b.boardId === boardId);
 		if (board?.linkAction) {
-			this.executeBoardAction(cardId, board.linkAction, projectPath);
+			await this.executeBoardAction(cardId, board.linkAction, projectPath);
 		}
 	}
 
-	unlinkTask(projectPath: string, cardId: string): void {
-		const config = this.configByProject[projectPath];
-		if (!config) return;
-		const updated = {
+	async unlinkTask(projectPath: string, cardId: string): Promise<void> {
+		if (!this.configByProject[projectPath]) return;
+		await this.updateProjectConfig(projectPath, (config) => ({
 			...config,
 			taskLinks: config.taskLinks.filter((t) => t.cardId !== cardId)
-		};
-		this.saveProjectConfig(projectPath, updated);
+		})).catch((e) => log.warn('TrelloStore', 'Failed to unlink task:', e));
 	}
 
 	private async executeBoardAction(

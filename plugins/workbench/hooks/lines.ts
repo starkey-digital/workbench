@@ -134,10 +134,16 @@ export function midTurn(text: string, files?: readonly string[]): string {
  * chat open), or `undefined` to keep waiting.
  */
 export function askAnswer(text: string): Answer | null | undefined {
-	const reply = JSON.parse(text) as {
+	let reply: {
 		answer?: { response?: { subtype?: string; response?: Answer; error?: string } };
 		fallback?: boolean;
 	};
+	try {
+		reply = JSON.parse(text);
+	} catch {
+		// Not the server's answer (a proxy's page): the terminal's dialog asks instead.
+		return null;
+	}
 	if (reply.fallback) return null;
 	const response = reply.answer?.response;
 	if (!response) return undefined;

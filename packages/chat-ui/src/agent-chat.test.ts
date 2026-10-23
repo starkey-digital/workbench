@@ -851,6 +851,17 @@ describe('AgentChat', () => {
 		chat.dispose();
 	});
 
+	it('a second artifacts request shares the reply, and no stale timeout wipes it', async () => {
+		const { chat, ws } = await connected();
+		const first = chat.artifacts('toolu_1');
+		const second = chat.artifacts('toolu_1');
+		const content = [{ type: 'image' }] as never;
+		ws.emit({ t: 'artifacts', id: 'toolu_1', content });
+		await expect(first).resolves.toEqual(content);
+		await expect(second).resolves.toEqual(content);
+		chat.dispose();
+	});
+
 	it("fetches a background task's live output", async () => {
 		const { chat, ws } = await connected();
 		const out = chat.taskOutput('b1');

@@ -59,6 +59,17 @@ describe('WorktreeManagerStore', () => {
 	});
 
 	describe('add', () => {
+		it('starts a fresh dialog session per add, in existing mode for a fetched branch', async () => {
+			mockInvoke('list_branches', () => []);
+			const before = manager.dialogSession;
+
+			await manager.add('/projects/test', { suggestedBranch: 'pr-head', existingBranch: true });
+
+			expect(manager.dialogSession).toBe(before + 1);
+			expect(manager._suggestedMode).toBe('existing');
+			expect(manager._suggestedBranch).toBe('pr-head');
+		});
+
 		it('opens dialog and fetches branches via invoke', async () => {
 			const branches: BranchInfo[] = [
 				{ name: 'main', sha: 'abc123', isCurrent: true, isRemote: false },
@@ -319,6 +330,36 @@ describe('WorktreeManagerStore', () => {
 				force: false,
 				deleteBranch: true
 			});
+			expect(invokeSpy).not.toHaveBeenCalledWith('delete_branch', expect.anything());
+			expect(toast.warning).toHaveBeenCalledWith('Kept branch feature', expect.anything());
+		});
+
+		it('force-deletes a squash-merged branch only while it is the merged PR head', async () => {
+			vi.mocked(mocks.workspaceStore.getByWorktreePath).mockReturnValue(undefined);
+			vi.mocked(mocks.gitStore.refreshGitState).mockResolvedValue();
+			const head = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+			mocks.githubStore.prsByProject = {
+				'/projects/repo': [{ headRefName: 'feature', state: 'MERGED', headRefOid: head }]
+			} as never;
+			mockInvoke('remove_worktree', () => ({ branchDeleted: false }));
+			mockInvoke('delete_branch', () => undefined);
+			let tip = 'a1b2c3d';
+			mockInvoke('list_branches', () => [
+				{ name: 'feature', sha: tip, isCurrent: false, isRemote: false }
+			]);
+
+			manager.remove('/projects/repo', '/projects/repo-wt', 'feature');
+			await manager.confirmRemove();
+			expect(invokeSpy).toHaveBeenCalledWith('delete_branch', {
+				repoPath: '/projects/repo',
+				branch: 'feature',
+				force: true
+			});
+
+			invokeSpy.mockClear();
+			tip = 'ffff000';
+			manager.remove('/projects/repo', '/projects/repo-wt', 'feature');
+			await manager.confirmRemove();
 			expect(invokeSpy).not.toHaveBeenCalledWith('delete_branch', expect.anything());
 			expect(toast.warning).toHaveBeenCalledWith('Kept branch feature', expect.anything());
 		});

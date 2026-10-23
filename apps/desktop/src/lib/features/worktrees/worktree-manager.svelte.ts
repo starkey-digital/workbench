@@ -14,6 +14,8 @@ interface WorktreeRemoval {
 	worktreePath: string;
 	branch: string;
 	branchHasMergedPr: boolean;
+	/** Head commit of the branch's merged PR, when GitHub gave one. */
+	mergedHead?: string;
 }
 
 export class WorktreeManagerStore {
@@ -27,6 +29,9 @@ export class WorktreeManagerStore {
 
 	_pendingTaskLink: { cardId: string; boardId: string } | null = $state(null);
 	_suggestedBranch = $state('');
+	_suggestedMode = $state<'new' | 'existing'>('new');
+	/** Bumped by each `add()`, so the dialog starts fresh from the suggestions. */
+	dialogSession = $state(0);
 
 	private projectStore: ProjectStore;
 	private workspaceStore: WorkspaceStore;
@@ -59,7 +64,13 @@ export class WorktreeManagerStore {
 
 	async add(
 		projectPath: string,
-		options?: { suggestedBranch?: string; cardId?: string; boardId?: string }
+		options?: {
+			suggestedBranch?: string;
+			/** The suggestion is a branch that already exists, e.g. a fetched PR head. */
+			existingBranch?: boolean;
+			cardId?: string;
+			boardId?: string;
+		}
 	) {
 		if (this.creating) return;
 		this.dialogProjectPath = projectPath;
@@ -70,6 +81,8 @@ export class WorktreeManagerStore {
 				? { cardId: options.cardId, boardId: options.boardId }
 				: null;
 		this._suggestedBranch = options?.suggestedBranch ?? '';
+		this._suggestedMode = options?.existingBranch ? 'existing' : 'new';
+		this.dialogSession++;
 		this.dialogOpen = true;
 
 		try {
@@ -124,14 +137,33 @@ export class WorktreeManagerStore {
 	remove(projectPath: string, worktreePath: string, branch: string) {
 		if (this.removal.busy) return;
 		const prs = this.githubStore.prsByProject[projectPath] ?? [];
-		const branchHasMergedPr = prs.some((p) => p.headRefName === branch && p.state === 'MERGED');
+		const merged = prs.find((p) => p.headRefName === branch && p.state === 'MERGED');
+		const branchHasMergedPr = !!merged;
 		this.deleteBranchOnRemove = branchHasMergedPr;
-		this.removal.request({ projectPath, worktreePath, branch, branchHasMergedPr });
+		this.removal.request({
+			projectPath,
+			worktreePath,
+			branch,
+			branchHasMergedPr,
+			mergedHead: merged?.headRefOid || undefined
+		});
+	}
+
+	/** Whether `branch` points at the full commit `sha`. */
+	private async tipIs(projectPath: string, branch: string, sha: string | undefined) {
+		if (!sha) return false;
+		const branches = await invoke<BranchInfo[]>('list_branches', { path: projectPath }).catch(
+			() => []
+		);
+		// Listings carry git's unique short form of each tip.
+		return branches.some(
+			(b) => !b.isRemote && b.name === branch && !!b.sha && sha.startsWith(b.sha)
+		);
 	}
 
 	async confirmRemove(force = false) {
 		const deleteBranch = this.deleteBranchOnRemove;
-		await this.removal.confirm(async ({ projectPath, worktreePath, branch }) => {
+		await this.removal.confirm(async ({ projectPath, worktreePath, branch, mergedHead }) => {
 			const removeBranch = deleteBranch && !!branch;
 			const removed = await invoke<{ branchDeleted?: boolean } | null>('remove_worktree', {
 				repoPath: projectPath,
@@ -143,20 +175,23 @@ export class WorktreeManagerStore {
 			if (ws) this.workspaceStore.close(ws.id);
 			if (removeBranch) {
 				// A host that predates `deleteBranch` leaves the branch to us.
-				const branchDeleted =
-					removed?.branchDeleted ??
-					(await invoke('delete_branch', { repoPath: projectPath, branch, force: false }).then(
+				const deleteBranch = (force: boolean) =>
+					invoke('delete_branch', { repoPath: projectPath, branch, force }).then(
 						() => true,
 						(e) => {
 							log.warn('WorktreeManager', 'Failed to delete branch:', e);
 							return false;
 						}
-					));
+					);
+				// `git branch -d` refuses a squash-merged branch; force it only when the
+				// branch is exactly the commit the merged PR ended on, so nothing unmerged goes.
+				const branchDeleted =
+					(removed?.branchDeleted ?? (await deleteBranch(false))) ||
+					((await this.tipIs(projectPath, branch, mergedHead)) && (await deleteBranch(true)));
 				if (!branchDeleted) {
-					// `git branch -d` also refuses a squash-merged branch once its remote is gone.
 					toast.warning(`Kept branch ${branch}`, {
 						description:
-							'git branch -d refused it: it is checked out elsewhere, or has commits git sees as unmerged (as a squash-merged PR does).'
+							'git branch -d refused it: it is checked out elsewhere, or has commits that are not merged.'
 					});
 				}
 			}
