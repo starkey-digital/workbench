@@ -139,6 +139,10 @@ const PROJECT_DENY_WRITE: &[&str] = &[
     ".codex",
 ];
 
+/// Where linked worktrees live under a project root: Workbench's "inside"
+/// layout and Claude Code's own.
+const WORKTREE_DIRS: &[&str] = &[".worktrees", ".claude/worktrees"];
+
 /// Credential stores a sandboxed session must not read.
 ///
 /// `~/.claude/.credentials.json` is deliberately absent: Claude needs its own
@@ -322,6 +326,27 @@ pub fn build_config(
                 .map(|p| resolved(&deny_target(root, p))),
         );
     }
+    // The lists above are fixed at launch; a worktree made mid-session would
+    // have none of them. srt matches globs (new files included) only on macOS,
+    // so there a sandboxed session can't register a worktree or touch one's
+    // escape hatches: the cost is that it can't create worktrees at all.
+    if cfg!(target_os = "macos") {
+        for project in projects {
+            let root = Path::new(&project.path);
+            let registry = resolved(&root.join(".git/worktrees"));
+            deny_write.extend(
+                ["gitdir", "commondir", "config.worktree"].map(|f| format!("{registry}/*/{f}")),
+            );
+            for dir in WORKTREE_DIRS {
+                if !root.join(dir).is_dir() {
+                    deny_write.push(resolved(&deny_target(root, dir)));
+                    continue;
+                }
+                let dir = resolved(&root.join(dir));
+                deny_write.extend(PROJECT_DENY_WRITE.iter().map(|rel| format!("{dir}/**/{rel}")));
+            }
+        }
+    }
     dedupe(&mut deny_write);
 
     let mut deny_read: Vec<String> = HOME_DENY_READ
@@ -454,8 +479,7 @@ fn linked_worktrees(root: &Path) -> Vec<PathBuf> {
             }
         }
     }
-    // Workbench's "inside" layout, and Claude Code's own worktrees.
-    for dir in [".worktrees", ".claude/worktrees"] {
+    for dir in WORKTREE_DIRS {
         find_checkouts(&root.join(dir), 4, &mut found);
     }
     found
@@ -775,6 +799,25 @@ mod tests {
                 &format!("{root}/{rel}"),
                 "denyWrite",
             );
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn worktrees_made_mid_session_are_covered_by_globs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = resolved(dir.path());
+        std::fs::create_dir_all(Path::new(&root).join(".worktrees")).unwrap();
+        std::fs::create_dir_all(Path::new(&root).join(".claude")).unwrap();
+        let cfg = build(&[], &[project(&root)], None);
+        for expected in [
+            format!("{root}/.worktrees/**/.git/config"),
+            format!("{root}/.worktrees/**/.claude/settings.json"),
+            format!("{root}/.git/worktrees/*/gitdir"),
+            // Missing, so it can't be created.
+            format!("{root}/.claude/worktrees"),
+        ] {
+            assert_contains(&cfg.filesystem.deny_write, &expected, "denyWrite");
         }
     }
 
