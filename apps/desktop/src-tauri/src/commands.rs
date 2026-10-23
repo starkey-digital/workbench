@@ -392,9 +392,13 @@ pub async fn github_checkout_pr(project_path: String, pr_number: u64) -> Result<
 }
 
 #[tauri::command]
-pub async fn github_fetch_pr_branch(project_path: String, branch: String) -> Result<(), String> {
+pub async fn github_fetch_pr_branch(
+    project_path: String,
+    pr_number: u64,
+    branch: String,
+) -> Result<(), String> {
     crate::blocking(move || {
-        github::fetch_pr_branch(&project_path, &branch).map_err(|e| e.to_string())
+        github::fetch_pr_branch(&project_path, pr_number, &branch).map_err(|e| e.to_string())
     })
     .await
 }

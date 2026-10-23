@@ -162,6 +162,40 @@ describe('TrelloStore', () => {
 		});
 	});
 
+	describe('board writes', () => {
+		const board = (hiddenColumns: string[] = []) => ({
+			boardId: 'b1',
+			boardName: 'B',
+			hiddenColumns
+		});
+
+		it('adds a single board, so an unloaded config cannot drop the others', async () => {
+			mockInvoke('trello_put_board', () => ({ boards: [board()], taskLinks: [] }));
+
+			await store.addBoard('/proj', board());
+
+			expect(invokeSpy).toHaveBeenCalledWith('trello_put_board', {
+				projectPath: '/proj',
+				board: board(),
+				keepExisting: true
+			});
+		});
+
+		it('runs quick edits one after another, each from the last saved board', async () => {
+			store.configByProject = { '/proj': { boards: [board()], taskLinks: [] } };
+			mockInvoke('trello_put_board', (args) => ({
+				boards: [(args as { board: ReturnType<typeof board> }).board],
+				taskLinks: []
+			}));
+			const hide = (col: string) =>
+				store.editBoard('/proj', 'b1', (b) => ({ ...b, hiddenColumns: [...b.hiddenColumns, col] }));
+
+			await Promise.all([hide('a'), hide('b')]);
+
+			expect(store.configByProject['/proj'].boards[0].hiddenColumns).toEqual(['a', 'b']);
+		});
+	});
+
 	describe('trello:merge-action-applied events', () => {
 		it('registers a trello merge action listener', () => {
 			expect(listenSpy).toHaveBeenCalledWith('trello:merge-action-applied', expect.any(Function));

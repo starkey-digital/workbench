@@ -249,7 +249,11 @@ export async function poll(fetch: Fetch): Promise<Line[]> {
 	}
 	if (!Array.isArray(lines)) return [];
 	// An older server numbers nothing.
-	return (lines as Line[]).filter((line) => typeof line.wbSeq !== 'number' || line.wbSeq > inSeq);
+	return (lines as unknown[]).filter((line): line is Line => {
+		if (!line || typeof line !== 'object') return false;
+		const seq = (line as Line).wbSeq;
+		return typeof seq !== 'number' || seq > inSeq;
+	});
 }
 
 /** `line` from `poll` has run (or failed): the next poll acknowledges it. */

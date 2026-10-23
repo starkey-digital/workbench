@@ -59,13 +59,29 @@ fn update_project_config(
     Ok(config)
 }
 
-/// Replace the boards, dropping links to boards no longer listed; other links stay as saved.
-pub fn save_boards(project_path: &str, boards: Vec<BoardConfig>) -> Result<TrelloProjectConfig> {
+/// Save one board: replace the saved board with its id, or add it. With
+/// `keep_existing` a saved one stays as it is (adding a board twice).
+/// Only this board is written, so a window with a stale or unloaded copy can't
+/// drop the others.
+pub fn put_board(
+    project_path: &str,
+    board: BoardConfig,
+    keep_existing: bool,
+) -> Result<TrelloProjectConfig> {
     update_project_config(project_path, |config| {
-        config
-            .task_links
-            .retain(|l| boards.iter().any(|b| b.board_id == l.board_id));
-        config.boards = boards;
+        match config.boards.iter_mut().find(|b| b.board_id == board.board_id) {
+            Some(saved) if !keep_existing => *saved = board,
+            Some(_) => {}
+            None => config.boards.push(board),
+        }
+    })
+}
+
+/// Remove a board and the card links on it.
+pub fn remove_board(project_path: &str, board_id: &str) -> Result<TrelloProjectConfig> {
+    update_project_config(project_path, |config| {
+        config.boards.retain(|b| b.board_id != board_id);
+        config.task_links.retain(|l| l.board_id != board_id);
     })
 }
 
@@ -114,19 +130,26 @@ mod tests {
     fn links_and_boards_are_written_without_dropping_each_other() {
         paths::test_config_dir();
         let project = "/trello-config-test";
-        save_boards(project, vec![board("b1"), board("b2")]).unwrap();
+        put_board(project, board("b1"), true).unwrap();
+        put_board(project, board("b2"), true).unwrap();
         set_task_link(project, "c1", Some(link("c1", "b1"))).unwrap();
         set_task_link(project, "c2", Some(link("c2", "b2"))).unwrap();
 
-        // A boards save made from a copy that predates both links keeps them.
-        let config = save_boards(project, vec![board("b1"), board("b2")]).unwrap();
-        assert_eq!(config.task_links.len(), 2);
+        // Editing one board leaves the other boards and every link alone.
+        let hidden = BoardConfig {
+            hidden_columns: vec!["col".into()],
+            ..board("b1")
+        };
+        let config = put_board(project, hidden, false).unwrap();
+        assert_eq!((config.boards.len(), config.task_links.len()), (2, 2));
+        // Adding a board that is already saved keeps its settings.
+        let config = put_board(project, board("b1"), true).unwrap();
+        assert_eq!(config.boards[0].hidden_columns, ["col"]);
 
-        // Dropping a board drops its links; unlinking removes just that card.
-        let config = save_boards(project, vec![board("b1")]).unwrap();
-        assert_eq!(config.task_links.len(), 1);
+        // Removing a board drops its links; unlinking removes just that card.
+        let config = remove_board(project, "b2").unwrap();
+        assert_eq!((config.boards.len(), config.task_links.len()), (1, 1));
         let config = set_task_link(project, "c1", None).unwrap();
         assert!(config.task_links.is_empty());
-        assert_eq!(load_project_config(project).unwrap().boards.len(), 1);
     }
 }

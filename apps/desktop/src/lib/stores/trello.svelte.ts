@@ -30,8 +30,14 @@ function tryGetWorkspaceStore(): WorkspaceStore | null {
 	}
 }
 
-/** A project's Trello config changed on disk; the payload is its path. */
+/** A window saved a project's Trello config. */
 const CONFIG_CHANGED = 'trello:config-changed';
+
+interface ConfigChange {
+	source: string;
+	projectPath: string;
+	config: TrelloProjectConfig;
+}
 
 export class TrelloStore {
 	// --- State ---
@@ -45,10 +51,13 @@ export class TrelloStore {
 	// Private refs to other stores. Null in the settings window (no WorkspaceStore
 	// in context there); the settings UI takes its project path from the query string.
 	private workspaces = tryGetWorkspaceStore();
+	private windowId = crypto.randomUUID();
 
 	constructor() {
-		listen<string>(CONFIG_CHANGED, (event) => {
-			if (this.configByProject[event.payload]) void this.loadProjectConfig(event.payload);
+		// Another window's write: its result, so no read here can race a newer save.
+		listen<ConfigChange>(CONFIG_CHANGED, ({ payload }) => {
+			if (payload.source === this.windowId) return;
+			this.configByProject = { ...this.configByProject, [payload.projectPath]: payload.config };
 		}).catch((e) => log.warn('TrelloStore', 'Failed to listen for config changes:', e));
 		listen<TrelloMergeActionAppliedEvent>('trello:merge-action-applied', (event) => {
 			void this.refreshAllBoards(event.payload.projectPath);
@@ -130,15 +139,57 @@ export class TrelloStore {
 	}
 
 	/**
-	 * Boards and links are written by the host one read-modify-write at a time,
-	 * so the settings window's board edits and this window's links can't drop
-	 * each other; every window reloads the config after a write.
+	 * The host writes one board or one link at a time, under one lock, so the
+	 * settings window's board edits and this window's links can't drop each
+	 * other; each write's result goes to every other window.
+	 *
+	 * `edit` gets the saved board (as last written) and returns its new state;
+	 * edits run one after another, each from the previous one's result.
 	 */
-	async saveBoards(projectPath: string, boards: BoardConfig[]): Promise<void> {
-		this.applySaved(
-			projectPath,
-			await invoke<TrelloProjectConfig>('trello_save_boards', { projectPath, boards })
+	editBoard(projectPath: string, boardId: string, edit: (board: BoardConfig) => BoardConfig) {
+		return this.queueBoardWrite(async () => {
+			const board = this.configByProject[projectPath]?.boards.find((b) => b.boardId === boardId);
+			if (!board) return;
+			this.applySaved(
+				projectPath,
+				await invoke<TrelloProjectConfig>('trello_put_board', {
+					projectPath,
+					board: edit(board),
+					keepExisting: false
+				})
+			);
+		});
+	}
+
+	/** Add a board; one already saved keeps its settings. */
+	addBoard(projectPath: string, board: BoardConfig) {
+		return this.queueBoardWrite(async () =>
+			this.applySaved(
+				projectPath,
+				await invoke<TrelloProjectConfig>('trello_put_board', {
+					projectPath,
+					board,
+					keepExisting: true
+				})
+			)
 		);
+	}
+
+	removeBoard(projectPath: string, boardId: string) {
+		return this.queueBoardWrite(async () =>
+			this.applySaved(
+				projectPath,
+				await invoke<TrelloProjectConfig>('trello_remove_board', { projectPath, boardId })
+			)
+		);
+	}
+
+	private boardWrites: Promise<unknown> = Promise.resolve();
+
+	private queueBoardWrite(write: () => Promise<void>): Promise<void> {
+		const next = this.boardWrites.catch(() => {}).then(write);
+		this.boardWrites = next;
+		return next;
 	}
 
 	private async setTaskLink(projectPath: string, cardId: string, link: TaskLink | null) {
@@ -153,7 +204,8 @@ export class TrelloStore {
 
 	private applySaved(projectPath: string, config: TrelloProjectConfig) {
 		this.configByProject = { ...this.configByProject, [projectPath]: config };
-		void emit(CONFIG_CHANGED, projectPath).catch(() => {});
+		const change: ConfigChange = { source: this.windowId, projectPath, config };
+		void emit(CONFIG_CHANGED, change).catch(() => {});
 	}
 
 	async fetchAvailableBoards(): Promise<void> {
@@ -238,9 +290,12 @@ export class TrelloStore {
 	}
 
 	async unlinkTask(projectPath: string, cardId: string): Promise<void> {
-		await this.setTaskLink(projectPath, cardId, null).catch((e) =>
-			log.warn('TrelloStore', 'Failed to unlink task:', e)
-		);
+		try {
+			await this.setTaskLink(projectPath, cardId, null);
+		} catch (e) {
+			log.warn('TrelloStore', 'Failed to unlink task:', e);
+			toast.error(`Couldn't unlink the Trello card: ${String(e)}`);
+		}
 	}
 
 	private async executeBoardAction(

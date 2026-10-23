@@ -126,12 +126,26 @@ pub async fn trello_load_project_config(
 }
 
 #[tauri::command]
-pub async fn trello_save_boards(
+pub async fn trello_put_board(
     project_path: String,
-    boards: Vec<BoardConfig>,
+    board: BoardConfig,
+    keep_existing: bool,
 ) -> Result<TrelloProjectConfig, String> {
-    crate::blocking(move || config::save_boards(&project_path, boards).map_err(|e| e.to_string()))
-        .await
+    crate::blocking(move || {
+        config::put_board(&project_path, board, keep_existing).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn trello_remove_board(
+    project_path: String,
+    board_id: String,
+) -> Result<TrelloProjectConfig, String> {
+    crate::blocking(move || {
+        config::remove_board(&project_path, &board_id).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]

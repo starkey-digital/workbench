@@ -138,7 +138,7 @@ export function askAnswer(text: string): Answer | null | undefined {
 		answer?: { response?: { subtype?: string; response?: Answer; error?: string } };
 		fallback?: boolean;
 	} | null;
-	if (!reply || typeof reply !== 'object') throw new Error('not an answer');
+	if (!reply || typeof reply !== 'object' || Array.isArray(reply)) throw new Error('not an answer');
 	if (reply.fallback) return null;
 	const response = reply.answer?.response;
 	if (!response) return undefined;

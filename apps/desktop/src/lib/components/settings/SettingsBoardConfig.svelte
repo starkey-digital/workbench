@@ -43,14 +43,10 @@
 		loadingPicker = false;
 	}
 
-	/**
-	 * Saves the boards only, so links the main window wrote survive. Resolves to
-	 * whether it saved; a failure is shown above the boards.
-	 */
-	async function update(change: (boards: BoardConfig[]) => BoardConfig[]) {
+	/** Resolves to whether `write` saved; a failure is shown above the boards. */
+	async function save(write: Promise<void>) {
 		try {
-			const boards = trelloStore.configByProject[projectPath]?.boards ?? [];
-			await trelloStore.saveBoards(projectPath, change(boards));
+			await write;
 			saveError = '';
 			return true;
 		} catch (e) {
@@ -62,16 +58,13 @@
 
 	async function handleAddBoard(boardId: string, boardName: string) {
 		const newBoard: BoardConfig = { boardId, boardName, hiddenColumns: [] };
-		const saved = await update((boards) =>
-			boards.some((b) => b.boardId === boardId) ? boards : [...boards, newBoard]
-		);
-		if (!saved) return;
+		if (!(await save(trelloStore.addBoard(projectPath, newBoard)))) return;
 		showPicker = false;
 		loadColumnsAndLabels(boardId);
 	}
 
 	async function handleRemoveBoard(boardId: string) {
-		await update((boards) => boards.filter((b) => b.boardId !== boardId));
+		await save(trelloStore.removeBoard(projectPath, boardId));
 	}
 
 	async function loadColumnsAndLabels(boardId: string) {
@@ -90,10 +83,11 @@
 	function toggleColumn(boardId: string, columnId: string) {
 		const toggled = (hidden: string[]) =>
 			hidden.includes(columnId) ? hidden.filter((c) => c !== columnId) : [...hidden, columnId];
-		update((boards) =>
-			boards.map((b) =>
-				b.boardId === boardId ? { ...b, hiddenColumns: toggled(b.hiddenColumns) } : b
-			)
+		save(
+			trelloStore.editBoard(projectPath, boardId, (b) => ({
+				...b,
+				hiddenColumns: toggled(b.hiddenColumns)
+			}))
 		);
 	}
 
@@ -102,7 +96,7 @@
 		field: 'linkAction' | 'mergeAction',
 		action: MergeAction | undefined
 	) {
-		update((boards) => boards.map((b) => (b.boardId === boardId ? { ...b, [field]: action } : b)));
+		save(trelloStore.editBoard(projectPath, boardId, (b) => ({ ...b, [field]: action })));
 	}
 
 	function defaultAction(): MergeAction {

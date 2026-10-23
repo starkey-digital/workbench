@@ -35,6 +35,7 @@ const EDIT_ONLY_TRIGGERS = new Set([
 /** Floor between hook/watcher-driven GitHub fetches for a given project. */
 const HOOK_REFRESH_THROTTLE_MS = 60_000;
 const TRACKED_RETRY_MS = 15_000;
+const TRACKED_RETRY_MAX_MS = 10 * 60_000;
 
 export class GitHubStore {
 	private workspaces = getWorkspaceStore();
@@ -141,6 +142,7 @@ export class GitHubStore {
 	private trackedProjectsFingerprint = '';
 	private trackedSync: Promise<void> = Promise.resolve();
 	private trackedRetry: ReturnType<typeof setTimeout> | undefined;
+	private trackedRetryMs = TRACKED_RETRY_MS;
 	lastRefreshedAt: Record<string, number> = {};
 	private lastHookRefreshAt: Record<string, number> = {};
 	private pendingHookRefresh: Record<string, ReturnType<typeof setTimeout>> = {};
@@ -273,7 +275,7 @@ export class GitHubStore {
 
 	/** One send at a time, each of the set as it is then, so the newest set lands last. */
 	syncTrackedProjects(): Promise<void> {
-		this.trackedSync = this.trackedSync.then(() => this.sendTrackedProjects());
+		this.trackedSync = this.trackedSync.catch(() => {}).then(() => this.sendTrackedProjects());
 		return this.trackedSync;
 	}
 
@@ -285,11 +287,15 @@ export class GitHubStore {
 		try {
 			await invoke('github_set_tracked_projects', { projectPaths });
 			this.trackedProjectsFingerprint = fingerprint;
+			clearTimeout(this.trackedRetry);
+			this.trackedRetryMs = TRACKED_RETRY_MS;
 		} catch (e) {
 			log.warn('GitHubStore', 'Failed to sync tracked projects:', e);
-			// The set may not change again for a long while, so try again on our own.
+			// The set may not change again for a long while, so try again on our own,
+			// backing off while it keeps failing.
 			clearTimeout(this.trackedRetry);
-			this.trackedRetry = setTimeout(() => void this.syncTrackedProjects(), TRACKED_RETRY_MS);
+			this.trackedRetry = setTimeout(() => void this.syncTrackedProjects(), this.trackedRetryMs);
+			this.trackedRetryMs = Math.min(this.trackedRetryMs * 2, TRACKED_RETRY_MAX_MS);
 		}
 	}
 

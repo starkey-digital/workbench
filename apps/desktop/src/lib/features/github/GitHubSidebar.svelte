@@ -45,9 +45,13 @@
 	async function openPrAsWorktree() {
 		if (!projectPath || !pr) return;
 		try {
-			await invoke('github_fetch_pr_branch', { projectPath, branch: pr.headRefName });
+			await invoke('github_fetch_pr_branch', {
+				projectPath,
+				prNumber: pr.number,
+				branch: pr.headRefName
+			});
 		} catch (e) {
-			// A fork's branch isn't on origin, and git won't fetch into a checked-out branch.
+			// git won't fetch into a checked-out branch, or over a local one that moved elsewhere.
 			toast.error(`Couldn't fetch ${pr.headRefName}: ${String(e)}`);
 			return;
 		}

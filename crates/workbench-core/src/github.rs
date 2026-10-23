@@ -673,9 +673,12 @@ pub fn checkout_pr(path: &str, pr_number: u64) -> Result<()> {
     Ok(())
 }
 
-pub fn fetch_pr_branch(path: &str, branch: &str) -> Result<()> {
+/// Fetch PR `number`'s head into local `branch` through GitHub's `pull/<n>/head`
+/// ref, which holds the PR's commits even when they come from a fork or origin
+/// has another branch of that name.
+pub fn fetch_pr_branch(path: &str, number: u64, branch: &str) -> Result<()> {
     crate::git::git_output(
-        &["fetch", "origin", &format!("{}:{}", branch, branch)],
+        &["fetch", "origin", &format!("pull/{number}/head:{branch}")],
         path,
     )?;
     Ok(())
