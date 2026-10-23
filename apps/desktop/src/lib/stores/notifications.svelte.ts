@@ -6,9 +6,9 @@ import {
 } from '@tauri-apps/plugin-notification';
 import { getCurrentWindow, UserAttentionType } from '@tauri-apps/api/window';
 import { toast } from 'svelte-sonner';
-import { SvelteMap } from 'svelte/reactivity';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { SvelteMap } from 'svelte/reactivity';
 import { visibleSplit } from '$features/terminal/split-view';
 import { baseName } from '$lib/utils/path';
 import type { AttentionTarget, ClaudeSessionStore } from './claudeSessions.svelte';
@@ -141,7 +141,6 @@ export class NotificationStore {
 	private async withdraw(target: AttentionTarget): Promise<void> {
 		// Posted under the pane, or under the session while no pane showed it.
 		const ids = 'paneId' in target ? [target.paneId, target.sessionId] : [target.id];
-		for (const id of ids) this.idToPane.delete(this.hashId(id));
 		toast.dismiss(toastId(target));
 		getCurrentWindow()
 			.requestUserAttention(null)

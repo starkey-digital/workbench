@@ -34,6 +34,7 @@ const EDIT_ONLY_TRIGGERS = new Set([
 
 /** Floor between hook/watcher-driven GitHub fetches for a given project. */
 const HOOK_REFRESH_THROTTLE_MS = 60_000;
+const TRACKED_RETRY_MS = 15_000;
 
 export class GitHubStore {
 	private workspaces = getWorkspaceStore();
@@ -282,10 +283,11 @@ export class GitHubStore {
 		if (fingerprint === this.trackedProjectsFingerprint) return;
 		try {
 			await invoke('github_set_tracked_projects', { projectPaths });
-			// Only once it took, so a failed send is retried by the next sync.
 			this.trackedProjectsFingerprint = fingerprint;
 		} catch (e) {
 			log.warn('GitHubStore', 'Failed to sync tracked projects:', e);
+			// The set may not change again for a long while, so try again on our own.
+			setTimeout(() => void this.syncTrackedProjects(), TRACKED_RETRY_MS);
 		}
 	}
 

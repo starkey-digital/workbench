@@ -175,8 +175,8 @@ export class WorktreeManagerStore {
 			if (ws) this.workspaceStore.close(ws.id);
 			if (removeBranch) {
 				// A host that predates `deleteBranch` leaves the branch to us.
-				const deleteBranch = (force: boolean) =>
-					invoke('delete_branch', { repoPath: projectPath, branch, force }).then(
+				const tryDeleteBranch = (forceDelete: boolean) =>
+					invoke('delete_branch', { repoPath: projectPath, branch, force: forceDelete }).then(
 						() => true,
 						(e) => {
 							log.warn('WorktreeManager', 'Failed to delete branch:', e);
@@ -186,8 +186,8 @@ export class WorktreeManagerStore {
 				// `git branch -d` refuses a squash-merged branch; force it only when the
 				// branch is exactly the commit the merged PR ended on, so nothing unmerged goes.
 				const branchDeleted =
-					(removed?.branchDeleted ?? (await deleteBranch(false))) ||
-					((await this.tipIs(projectPath, branch, mergedHead)) && (await deleteBranch(true)));
+					(removed?.branchDeleted ?? (await tryDeleteBranch(false))) ||
+					((await this.tipIs(projectPath, branch, mergedHead)) && (await tryDeleteBranch(true)));
 				if (!branchDeleted) {
 					toast.warning(`Kept branch ${branch}`, {
 						description:

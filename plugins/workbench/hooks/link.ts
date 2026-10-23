@@ -241,14 +241,15 @@ export async function poll(fetch: Fetch): Promise<Line[]> {
 	);
 	if (res?.status === 404) hello.needed = true;
 	if (!res?.ok) return [];
-	let lines: Line[];
+	let lines: unknown;
 	try {
 		lines = JSON.parse(res.text || '[]');
 	} catch {
 		return [];
 	}
+	if (!Array.isArray(lines)) return [];
 	// An older server numbers nothing.
-	return lines.filter((line) => typeof line.wbSeq !== 'number' || line.wbSeq > inSeq);
+	return (lines as Line[]).filter((line) => typeof line.wbSeq !== 'number' || line.wbSeq > inSeq);
 }
 
 /** `line` from `poll` has run (or failed): the next poll acknowledges it. */
@@ -352,7 +353,13 @@ export async function askInChat(
 		confirm(batch);
 		failed = 0;
 		first = undefined;
-		answer = askAnswer(res.text);
+		try {
+			answer = askAnswer(res.text);
+		} catch {
+			// Not the server's reply: the terminal's dialog asks, so the card goes.
+			withdraw(fetch, requestId, true);
+			return null;
+		}
 	}
 	if (signal.aborted) withdraw(fetch, requestId);
 	return answer ?? null;

@@ -123,6 +123,8 @@ export class TrelloStore {
 		}
 	}
 
+	private configUpdates: Record<string, Promise<unknown>> = {};
+
 	async saveProjectConfig(projectPath: string, config: TrelloProjectConfig): Promise<void> {
 		await invoke('trello_save_project_config', { projectPath, config });
 		this.configByProject = { ...this.configByProject, [projectPath]: config };
@@ -132,16 +134,24 @@ export class TrelloStore {
 	 * Apply `change` to the config on disk, not this window's copy: the settings
 	 * window holds its own, so editing a cached copy drops the other's writes.
 	 */
-	async updateProjectConfig(
+	updateProjectConfig(
 		projectPath: string,
 		change: (config: TrelloProjectConfig) => TrelloProjectConfig
 	): Promise<TrelloProjectConfig> {
-		const current = await invoke<TrelloProjectConfig>('trello_load_project_config', {
-			projectPath
-		});
-		const updated = change(current);
-		await this.saveProjectConfig(projectPath, updated);
-		return updated;
+		// One read-modify-write at a time per project, so two quick edits can't drop each other.
+		const previous = this.configUpdates[projectPath] ?? Promise.resolve();
+		const next = previous
+			.catch(() => {})
+			.then(async () => {
+				const current = await invoke<TrelloProjectConfig>('trello_load_project_config', {
+					projectPath
+				});
+				const updated = change(current);
+				await this.saveProjectConfig(projectPath, updated);
+				return updated;
+			});
+		this.configUpdates[projectPath] = next;
+		return next;
 	}
 
 	async fetchAvailableBoards(): Promise<void> {

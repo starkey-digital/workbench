@@ -21,7 +21,6 @@ import type {
 	WorkspacePane
 } from '@workbench/types';
 import { QUEUED_NUDGE } from '@workbench/types';
-import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import type { AgentApi } from './agent-api';
 import {
 	activity,
@@ -143,7 +142,7 @@ export class AgentChat {
 	private historyCursor = $state<string | null | undefined>(undefined);
 	private loadingHistory = false;
 	onCodexEvent: ((method: string, params: Record<string, unknown>) => void) | null = null;
-	private controls = new SvelteMap<
+	private controls = new Map<
 		string,
 		{
 			resolve: (v: unknown) => void;
@@ -151,7 +150,7 @@ export class AgentChat {
 			timer: ReturnType<typeof setTimeout>;
 		}
 	>();
-	private artifactWaiters = new SvelteMap<string, (v: ChatArtifact[]) => void>();
+	private artifactWaiters = new Map<string, (v: ChatArtifact[]) => void>();
 	/** The open "Rewind to here" panel, if any. */
 	rewind = $state.raw<RewindState | null>(null);
 	/** What the server does as the prompt cache nears expiry (Claude only). */
@@ -193,7 +192,7 @@ export class AgentChat {
 	 * then the chat re-attaches once the pane runs again.
 	 */
 	onRestart: (() => void) | null = null;
-	private echoedUsers = new SvelteSet<string>();
+	private echoedUsers = new Set<string>();
 	/** The Claude login the chat runs under (`undefined`: the default); follows the server's. */
 	accountId = $state<string | undefined>(undefined);
 	/** The chat moved to another Claude account (from here or another device). */

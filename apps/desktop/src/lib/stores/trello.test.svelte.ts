@@ -193,6 +193,24 @@ describe('TrelloStore', () => {
 			]);
 		});
 
+		it('runs overlapping config updates one after another, so neither is lost', async () => {
+			let disk = { boards: [], taskLinks: [] } as {
+				boards: never[];
+				taskLinks: { cardId: string }[];
+			};
+			mockInvoke('trello_load_project_config', () => structuredClone(disk));
+			mockInvoke('trello_save_project_config', (args) => {
+				disk = (args as { config: typeof disk }).config;
+			});
+
+			await Promise.all([
+				store.linkTaskToBranch('/proj', 'card-1', 'b', 'one'),
+				store.linkTaskToBranch('/proj', 'card-2', 'b', 'two')
+			]);
+
+			expect(disk.taskLinks.map((t) => t.cardId)).toEqual(['card-1', 'card-2']);
+		});
+
 		it('skips the link action when the link could not be saved', async () => {
 			mockInvoke('trello_load_project_config', () => ({
 				boards: [

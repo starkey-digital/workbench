@@ -31,6 +31,7 @@
 	);
 
 	let showPicker = $state(false);
+	let saveError = $state('');
 	let loadingPicker = $state(false);
 
 	// Per-board column/label data for config UI
@@ -48,20 +49,30 @@
 		loadingPicker = false;
 	}
 
-	/** Every edit goes to the config on disk, so links the main window saved survive. */
-	function update(change: (config: TrelloProjectConfig) => TrelloProjectConfig) {
-		return trelloStore
-			.updateProjectConfig(projectPath, change)
-			.catch((e) => log.warn('SettingsBoardConfig', 'Failed to save board config:', e));
+	/**
+	 * Every edit goes to the config on disk, so links the main window saved
+	 * survive. Resolves to whether it saved; a failure is shown above the boards.
+	 */
+	async function update(change: (config: TrelloProjectConfig) => TrelloProjectConfig) {
+		try {
+			await trelloStore.updateProjectConfig(projectPath, change);
+			saveError = '';
+			return true;
+		} catch (e) {
+			log.warn('SettingsBoardConfig', 'Failed to save board config:', e);
+			saveError = `Couldn't save the board settings: ${String(e)}`;
+			return false;
+		}
 	}
 
 	async function handleAddBoard(boardId: string, boardName: string) {
 		const newBoard: BoardConfig = { boardId, boardName, hiddenColumns: [] };
-		await update((config) =>
+		const saved = await update((config) =>
 			config.boards.some((b) => b.boardId === boardId)
 				? config
 				: { ...config, boards: [...config.boards, newBoard] }
 		);
+		if (!saved) return;
 		showPicker = false;
 		loadColumnsAndLabels(boardId);
 	}
@@ -313,6 +324,10 @@
 			Add board
 		</Button>
 	</div>
+
+	{#if saveError}
+		<p class="text-xs text-wb-err">{saveError}</p>
+	{/if}
 
 	<!-- Board picker -->
 	{#if showPicker}
