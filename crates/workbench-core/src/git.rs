@@ -516,6 +516,24 @@ pub fn remove_worktree(repo_path: &str, worktree_path: &str, force: bool) -> Res
     Ok(())
 }
 
+/// Delete `branch` only while it points at one of `heads` (the head commits
+/// of its merged PRs) and no worktree has it checked out. `git branch -d`
+/// refuses a squash-merged branch; this deletes it without risking a commit,
+/// since the ref goes only if it still equals the commit that was merged.
+pub fn delete_merged_branch(repo_path: &str, branch: &str, heads: &[String]) -> Result<bool> {
+    if list_worktrees(repo_path)?.iter().any(|w| w.branch == branch) {
+        return Ok(false);
+    }
+    let reference = format!("refs/heads/{branch}");
+    let tip = git_output(&["rev-parse", "--verify", &reference], repo_path)?;
+    if !heads.contains(&tip) {
+        return Ok(false);
+    }
+    // Compare-and-delete: refused if the branch moved since `rev-parse`.
+    git_output(&["update-ref", "-d", &reference, &tip], repo_path)?;
+    Ok(true)
+}
+
 pub fn delete_branch(repo_path: &str, branch: &str, force: bool) -> Result<()> {
     let flag = if force { "-D" } else { "-d" };
     git_output(&["branch", flag, branch], repo_path)?;
@@ -1040,6 +1058,27 @@ mod tests {
         ];
         full.extend_from_slice(args);
         git_output(&full, dir).unwrap();
+    }
+
+    #[test]
+    fn a_merged_branch_is_deleted_only_at_a_merged_head() {
+        let repo = tempfile::tempdir().unwrap();
+        let dir = repo.path().to_str().unwrap();
+        git(dir, &["init", "-q", "-b", "main"]);
+        git(dir, &["commit", "-q", "--allow-empty", "-m", "base"]);
+        git(dir, &["branch", "feat"]);
+        let head = git_output(&["rev-parse", "feat"], dir).unwrap();
+
+        // Checked out, or moved past the merged head: kept.
+        git(dir, &["checkout", "-q", "feat"]);
+        assert!(!delete_merged_branch(dir, "feat", std::slice::from_ref(&head)).unwrap());
+        git(dir, &["commit", "-q", "--allow-empty", "-m", "after"]);
+        git(dir, &["checkout", "-q", "main"]);
+        assert!(!delete_merged_branch(dir, "feat", std::slice::from_ref(&head)).unwrap());
+
+        git(dir, &["branch", "-f", "feat", &head]);
+        assert!(delete_merged_branch(dir, "feat", &["0".repeat(40), head]).unwrap());
+        assert!(git_output(&["rev-parse", "--verify", "refs/heads/feat"], dir).is_err());
     }
 
     #[test]

@@ -133,7 +133,6 @@ export function midTurn(text: string, files?: readonly string[]): string {
  * One `/mod/ask` reply: the answer, `null` to fall back to the terminal (no
  * chat open), or `undefined` to keep waiting.
  */
-/** Throws when `text` isn't the server's reply (a proxy's page, say). */
 export function askAnswer(text: string): Answer | null | undefined {
 	const reply = JSON.parse(text) as {
 		answer?: { response?: { subtype?: string; response?: Answer; error?: string } };

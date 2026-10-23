@@ -348,6 +348,19 @@ pub async fn delete_branch(repo_path: String, branch: String, force: bool) -> Re
     .await
 }
 
+/// See [`git::delete_merged_branch`]; answers whether the branch was deleted.
+#[tauri::command]
+pub async fn delete_merged_branch(
+    repo_path: String,
+    branch: String,
+    heads: Vec<String>,
+) -> Result<bool, String> {
+    crate::blocking(move || {
+        git::delete_merged_branch(&repo_path, &branch, &heads).map_err(|e| e.to_string())
+    })
+    .await
+}
+
 /// A webview log line for `workbench.log` (see `observability::frontend`).
 #[tauri::command]
 pub async fn log_frontend(level: String, target: String, message: String) {

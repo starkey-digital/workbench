@@ -14,8 +14,8 @@ interface WorktreeRemoval {
 	worktreePath: string;
 	branch: string;
 	branchHasMergedPr: boolean;
-	/** Head commit of the branch's merged PR, when GitHub gave one. */
-	mergedHead?: string;
+	/** Head commits of the branch's merged PRs, as GitHub gave them. */
+	mergedHeads: string[];
 }
 
 export class WorktreeManagerStore {
@@ -137,33 +137,22 @@ export class WorktreeManagerStore {
 	remove(projectPath: string, worktreePath: string, branch: string) {
 		if (this.removal.busy) return;
 		const prs = this.githubStore.prsByProject[projectPath] ?? [];
-		const merged = prs.find((p) => p.headRefName === branch && p.state === 'MERGED');
-		const branchHasMergedPr = !!merged;
+		// A reused branch name can have several merged PRs.
+		const merged = prs.filter((p) => p.headRefName === branch && p.state === 'MERGED');
+		const branchHasMergedPr = merged.length > 0;
 		this.deleteBranchOnRemove = branchHasMergedPr;
 		this.removal.request({
 			projectPath,
 			worktreePath,
 			branch,
 			branchHasMergedPr,
-			mergedHead: merged?.headRefOid || undefined
+			mergedHeads: merged.flatMap((p) => (p.headRefOid ? [p.headRefOid] : []))
 		});
-	}
-
-	/** Whether `branch` points at the full commit `sha`. */
-	private async tipIs(projectPath: string, branch: string, sha: string | undefined) {
-		if (!sha) return false;
-		const branches = await invoke<BranchInfo[]>('list_branches', { path: projectPath }).catch(
-			() => []
-		);
-		// Listings carry git's unique short form of each tip.
-		return branches.some(
-			(b) => !b.isRemote && b.name === branch && !!b.sha && sha.startsWith(b.sha)
-		);
 	}
 
 	async confirmRemove(force = false) {
 		const deleteBranch = this.deleteBranchOnRemove;
-		await this.removal.confirm(async ({ projectPath, worktreePath, branch, mergedHead }) => {
+		await this.removal.confirm(async ({ projectPath, worktreePath, branch, mergedHeads }) => {
 			const removeBranch = deleteBranch && !!branch;
 			const removed = await invoke<{ branchDeleted?: boolean } | null>('remove_worktree', {
 				repoPath: projectPath,
@@ -174,20 +163,20 @@ export class WorktreeManagerStore {
 			const ws = this.workspaceStore.getByWorktreePath(worktreePath);
 			if (ws) this.workspaceStore.close(ws.id);
 			if (removeBranch) {
-				// A host that predates `deleteBranch` leaves the branch to us.
-				const tryDeleteBranch = (forceDelete: boolean) =>
-					invoke('delete_branch', { repoPath: projectPath, branch, force: forceDelete }).then(
-						() => true,
+				const attempt = (cmd: string, args: Record<string, unknown>) =>
+					invoke<unknown>(cmd, { repoPath: projectPath, branch, ...args }).then(
+						(deleted) => deleted !== false,
 						(e) => {
 							log.warn('WorktreeManager', 'Failed to delete branch:', e);
 							return false;
 						}
 					);
-				// `git branch -d` refuses a squash-merged branch; force it only when the
-				// branch is exactly the commit the merged PR ended on, so nothing unmerged goes.
+				// A host that predates `deleteBranch` leaves the branch to us. `git branch -d`
+				// refuses a squash-merged branch, so it goes too while it still is a merged PR's head.
 				const branchDeleted =
-					(removed?.branchDeleted ?? (await tryDeleteBranch(false))) ||
-					((await this.tipIs(projectPath, branch, mergedHead)) && (await tryDeleteBranch(true)));
+					(removed?.branchDeleted ?? (await attempt('delete_branch', { force: false }))) ||
+					(mergedHeads.length > 0 &&
+						(await attempt('delete_merged_branch', { heads: mergedHeads })));
 				if (!branchDeleted) {
 					toast.warning(`Kept branch ${branch}`, {
 						description:

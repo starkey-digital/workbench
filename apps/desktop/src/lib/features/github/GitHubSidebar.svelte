@@ -9,6 +9,7 @@
 	import { openUrl } from '$lib/utils/open-url';
 	import { invoke } from '@tauri-apps/api/core';
 	import { onDestroy } from 'svelte';
+	import { toast } from 'svelte-sonner';
 	import { watch } from 'runed';
 	import ChecksList from './ChecksList.svelte';
 	import GitHubBranchBar from './GitHubBranchBar.svelte';
@@ -43,7 +44,13 @@
 
 	async function openPrAsWorktree() {
 		if (!projectPath || !pr) return;
-		await invoke('github_fetch_pr_branch', { projectPath, branch: pr.headRefName });
+		try {
+			await invoke('github_fetch_pr_branch', { projectPath, branch: pr.headRefName });
+		} catch (e) {
+			// A fork's branch isn't on origin, and git won't fetch into a checked-out branch.
+			toast.error(`Couldn't fetch ${pr.headRefName}: ${String(e)}`);
+			return;
+		}
 		worktreeManager.add(projectPath, { suggestedBranch: pr.headRefName, existingBranch: true });
 	}
 

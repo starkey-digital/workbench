@@ -140,6 +140,7 @@ export class GitHubStore {
 	// Not reactive — internal bookkeeping only
 	private trackedProjectsFingerprint = '';
 	private trackedSync: Promise<void> = Promise.resolve();
+	private trackedRetry: ReturnType<typeof setTimeout> | undefined;
 	lastRefreshedAt: Record<string, number> = {};
 	private lastHookRefreshAt: Record<string, number> = {};
 	private pendingHookRefresh: Record<string, ReturnType<typeof setTimeout>> = {};
@@ -287,7 +288,8 @@ export class GitHubStore {
 		} catch (e) {
 			log.warn('GitHubStore', 'Failed to sync tracked projects:', e);
 			// The set may not change again for a long while, so try again on our own.
-			setTimeout(() => void this.syncTrackedProjects(), TRACKED_RETRY_MS);
+			clearTimeout(this.trackedRetry);
+			this.trackedRetry = setTimeout(() => void this.syncTrackedProjects(), TRACKED_RETRY_MS);
 		}
 	}
 

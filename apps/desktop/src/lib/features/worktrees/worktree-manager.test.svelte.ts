@@ -270,7 +270,8 @@ describe('WorktreeManagerStore', () => {
 				projectPath: '/projects/repo',
 				worktreePath: '/projects/repo-wt',
 				branch: 'feature',
-				branchHasMergedPr: false
+				branchHasMergedPr: false,
+				mergedHeads: []
 			});
 		});
 
@@ -334,33 +335,31 @@ describe('WorktreeManagerStore', () => {
 			expect(toast.warning).toHaveBeenCalledWith('Kept branch feature', expect.anything());
 		});
 
-		it('force-deletes a squash-merged branch only while it is the merged PR head', async () => {
+		it('deletes a squash-merged branch through its merged PR heads', async () => {
 			vi.mocked(mocks.workspaceStore.getByWorktreePath).mockReturnValue(undefined);
 			vi.mocked(mocks.gitStore.refreshGitState).mockResolvedValue();
-			const head = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
 			mocks.githubStore.prsByProject = {
-				'/projects/repo': [{ headRefName: 'feature', state: 'MERGED', headRefOid: head }]
+				'/projects/repo': [
+					{ headRefName: 'feature', state: 'MERGED', headRefOid: 'old' },
+					{ headRefName: 'feature', state: 'MERGED', headRefOid: 'new' }
+				]
 			} as never;
 			mockInvoke('remove_worktree', () => ({ branchDeleted: false }));
-			mockInvoke('delete_branch', () => undefined);
-			let tip = 'a1b2c3d';
-			mockInvoke('list_branches', () => [
-				{ name: 'feature', sha: tip, isCurrent: false, isRemote: false }
-			]);
+			let deleted = true;
+			mockInvoke('delete_merged_branch', () => deleted);
 
 			manager.remove('/projects/repo', '/projects/repo-wt', 'feature');
 			await manager.confirmRemove();
-			expect(invokeSpy).toHaveBeenCalledWith('delete_branch', {
+			expect(invokeSpy).toHaveBeenCalledWith('delete_merged_branch', {
 				repoPath: '/projects/repo',
 				branch: 'feature',
-				force: true
+				heads: ['old', 'new']
 			});
+			expect(toast.warning).not.toHaveBeenCalled();
 
-			invokeSpy.mockClear();
-			tip = 'ffff000';
+			deleted = false;
 			manager.remove('/projects/repo', '/projects/repo-wt', 'feature');
 			await manager.confirmRemove();
-			expect(invokeSpy).not.toHaveBeenCalledWith('delete_branch', expect.anything());
 			expect(toast.warning).toHaveBeenCalledWith('Kept branch feature', expect.anything());
 		});
 

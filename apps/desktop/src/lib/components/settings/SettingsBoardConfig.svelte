@@ -5,13 +5,7 @@
 	import { Checkbox } from '@workbench/ui/checkbox';
 	import { Separator } from '@workbench/ui/separator';
 	import { getTrelloStore } from '$stores/context';
-	import type {
-		BoardConfig,
-		MergeAction,
-		TrelloLabel,
-		TrelloList,
-		TrelloProjectConfig
-	} from '$types/trello';
+	import type { BoardConfig, MergeAction, TrelloLabel, TrelloList } from '$types/trello';
 	import { trelloLabelColor } from '$features/trello/label-colors';
 	import LoaderIcon from '@lucide/svelte/icons/loader';
 	import PlusIcon from '@lucide/svelte/icons/plus';
@@ -50,12 +44,13 @@
 	}
 
 	/**
-	 * Every edit goes to the config on disk, so links the main window saved
-	 * survive. Resolves to whether it saved; a failure is shown above the boards.
+	 * Saves the boards only, so links the main window wrote survive. Resolves to
+	 * whether it saved; a failure is shown above the boards.
 	 */
-	async function update(change: (config: TrelloProjectConfig) => TrelloProjectConfig) {
+	async function update(change: (boards: BoardConfig[]) => BoardConfig[]) {
 		try {
-			await trelloStore.updateProjectConfig(projectPath, change);
+			const boards = trelloStore.configByProject[projectPath]?.boards ?? [];
+			await trelloStore.saveBoards(projectPath, change(boards));
 			saveError = '';
 			return true;
 		} catch (e) {
@@ -67,10 +62,8 @@
 
 	async function handleAddBoard(boardId: string, boardName: string) {
 		const newBoard: BoardConfig = { boardId, boardName, hiddenColumns: [] };
-		const saved = await update((config) =>
-			config.boards.some((b) => b.boardId === boardId)
-				? config
-				: { ...config, boards: [...config.boards, newBoard] }
+		const saved = await update((boards) =>
+			boards.some((b) => b.boardId === boardId) ? boards : [...boards, newBoard]
 		);
 		if (!saved) return;
 		showPicker = false;
@@ -78,11 +71,7 @@
 	}
 
 	async function handleRemoveBoard(boardId: string) {
-		await update((config) => ({
-			...config,
-			boards: config.boards.filter((b) => b.boardId !== boardId),
-			taskLinks: config.taskLinks.filter((t) => t.boardId !== boardId)
-		}));
+		await update((boards) => boards.filter((b) => b.boardId !== boardId));
 	}
 
 	async function loadColumnsAndLabels(boardId: string) {
@@ -101,12 +90,11 @@
 	function toggleColumn(boardId: string, columnId: string) {
 		const toggled = (hidden: string[]) =>
 			hidden.includes(columnId) ? hidden.filter((c) => c !== columnId) : [...hidden, columnId];
-		update((config) => ({
-			...config,
-			boards: config.boards.map((b) =>
+		update((boards) =>
+			boards.map((b) =>
 				b.boardId === boardId ? { ...b, hiddenColumns: toggled(b.hiddenColumns) } : b
 			)
-		}));
+		);
 	}
 
 	function updateBoardAction(
@@ -114,10 +102,7 @@
 		field: 'linkAction' | 'mergeAction',
 		action: MergeAction | undefined
 	) {
-		update((config) => ({
-			...config,
-			boards: config.boards.map((b) => (b.boardId === boardId ? { ...b, [field]: action } : b))
-		}));
+		update((boards) => boards.map((b) => (b.boardId === boardId ? { ...b, [field]: action } : b)));
 	}
 
 	function defaultAction(): MergeAction {

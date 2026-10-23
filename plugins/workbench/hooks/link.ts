@@ -350,16 +350,16 @@ export async function askInChat(
 			withdraw(fetch, requestId, true);
 			return null;
 		}
-		confirm(batch);
-		failed = 0;
-		first = undefined;
 		try {
 			answer = askAnswer(res.text);
 		} catch {
-			// Not the server's reply: the terminal's dialog asks, so the card goes.
+			// Not the server's reply, so its lines stay queued; the terminal's dialog asks.
 			withdraw(fetch, requestId, true);
 			return null;
 		}
+		confirm(batch);
+		failed = 0;
+		first = undefined;
 	}
 	if (signal.aborted) withdraw(fetch, requestId);
 	return answer ?? null;
