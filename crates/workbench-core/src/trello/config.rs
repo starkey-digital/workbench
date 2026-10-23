@@ -55,6 +55,7 @@ fn update_project_config(
     let _writing = WRITING.lock().unwrap_or_else(|e| e.into_inner());
     let mut config = load_project_config(project_path)?;
     change(&mut config);
+    config.revision += 1;
     paths::save_json(&project_config_path(project_path), &config)?;
     Ok(config)
 }
@@ -151,5 +152,6 @@ mod tests {
         assert_eq!((config.boards.len(), config.task_links.len()), (1, 1));
         let config = set_task_link(project, "c1", None).unwrap();
         assert!(config.task_links.is_empty());
+        assert_eq!(config.revision, 8, "one per save");
     }
 }

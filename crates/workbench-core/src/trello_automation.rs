@@ -110,6 +110,7 @@ mod tests {
                 worktree_path: None,
                 project_path: "/repo".to_string(),
             }],
+            revision: 0,
         }
     }
 
@@ -143,6 +144,7 @@ mod tests {
                 worktree_path: None,
                 project_path: "/repo".to_string(),
             }],
+            revision: 0,
         };
 
         assert!(resolve_merge_action(&config, "feature/x").is_none());

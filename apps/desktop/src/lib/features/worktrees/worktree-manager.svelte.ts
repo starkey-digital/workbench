@@ -82,13 +82,16 @@ export class WorktreeManagerStore {
 				: null;
 		this._suggestedBranch = options?.suggestedBranch ?? '';
 		this._suggestedMode = options?.existingBranch ? 'existing' : 'new';
-		this.dialogSession++;
+		const session = ++this.dialogSession;
 		this.dialogOpen = true;
 
 		try {
-			this.dialogBranches = await invoke<BranchInfo[]>('list_branches', { path: projectPath });
+			const branches = await invoke<BranchInfo[]>('list_branches', { path: projectPath });
+			// A later open's dialog isn't this project's.
+			if (session === this.dialogSession) this.dialogBranches = branches;
 		} catch (e) {
-			this.dialogError = `Failed to list branches: ${String(e)}`;
+			if (session === this.dialogSession)
+				this.dialogError = `Failed to list branches: ${String(e)}`;
 		}
 	}
 
@@ -180,7 +183,7 @@ export class WorktreeManagerStore {
 				if (!branchDeleted) {
 					toast.warning(`Kept branch ${branch}`, {
 						description:
-							'git branch -d refused it: it is checked out elsewhere, or has commits that are not merged.'
+							"It couldn't be deleted: it may be checked out elsewhere, or have commits that aren't merged."
 					});
 				}
 			}

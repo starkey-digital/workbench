@@ -111,4 +111,7 @@ pub struct TrelloProjectConfig {
     pub boards: Vec<BoardConfig>,
     #[serde(default)]
     pub task_links: Vec<TaskLink>,
+    /// Bumped by every save, so a window can tell an older copy from a newer one.
+    #[serde(default)]
+    pub revision: u64,
 }

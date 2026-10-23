@@ -15,6 +15,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'svelte-sonner';
 import { emit, listen } from '@tauri-apps/api/event';
 import { log } from '$lib/log';
+import { serial } from '$lib/utils/serial';
+import { uid } from '$lib/utils/uid';
 
 /**
  * The settings OS window instantiates TrelloStore without a WorkspaceStore in
@@ -51,13 +53,11 @@ export class TrelloStore {
 	// Private refs to other stores. Null in the settings window (no WorkspaceStore
 	// in context there); the settings UI takes its project path from the query string.
 	private workspaces = tryGetWorkspaceStore();
-	private windowId = crypto.randomUUID();
+	private windowId = uid();
 
 	constructor() {
-		// Another window's write: its result, so no read here can race a newer save.
 		listen<ConfigChange>(CONFIG_CHANGED, ({ payload }) => {
-			if (payload.source === this.windowId) return;
-			this.configByProject = { ...this.configByProject, [payload.projectPath]: payload.config };
+			if (payload.source !== this.windowId) this.applyConfig(payload.projectPath, payload.config);
 		}).catch((e) => log.warn('TrelloStore', 'Failed to listen for config changes:', e));
 		listen<TrelloMergeActionAppliedEvent>('trello:merge-action-applied', (event) => {
 			void this.refreshAllBoards(event.payload.projectPath);
@@ -132,7 +132,7 @@ export class TrelloStore {
 			const config = await invoke<TrelloProjectConfig>('trello_load_project_config', {
 				projectPath
 			});
-			this.configByProject = { ...this.configByProject, [projectPath]: config };
+			this.applyConfig(projectPath, config);
 		} catch (e) {
 			log.warn('TrelloStore', 'Failed to load project config:', e);
 		}
@@ -149,7 +149,7 @@ export class TrelloStore {
 	editBoard(projectPath: string, boardId: string, edit: (board: BoardConfig) => BoardConfig) {
 		return this.queueBoardWrite(async () => {
 			const board = this.configByProject[projectPath]?.boards.find((b) => b.boardId === boardId);
-			if (!board) return;
+			if (!board) throw new Error('that board is no longer in the saved settings');
 			this.applySaved(
 				projectPath,
 				await invoke<TrelloProjectConfig>('trello_put_board', {
@@ -184,13 +184,7 @@ export class TrelloStore {
 		);
 	}
 
-	private boardWrites: Promise<unknown> = Promise.resolve();
-
-	private queueBoardWrite(write: () => Promise<void>): Promise<void> {
-		const next = this.boardWrites.catch(() => {}).then(write);
-		this.boardWrites = next;
-		return next;
-	}
+	private queueBoardWrite = serial();
 
 	private async setTaskLink(projectPath: string, cardId: string, link: TaskLink | null) {
 		const config = await invoke<TrelloProjectConfig>('trello_set_task_link', {
@@ -202,8 +196,18 @@ export class TrelloStore {
 		return config;
 	}
 
-	private applySaved(projectPath: string, config: TrelloProjectConfig) {
+	/**
+	 * Keep `config` unless this window already has a newer one: loads, saves and
+	 * other windows' results can land in any order.
+	 */
+	private applyConfig(projectPath: string, config: TrelloProjectConfig) {
+		const held = this.configByProject[projectPath];
+		if (held && (held.revision ?? 0) > (config.revision ?? 0)) return;
 		this.configByProject = { ...this.configByProject, [projectPath]: config };
+	}
+
+	private applySaved(projectPath: string, config: TrelloProjectConfig) {
+		this.applyConfig(projectPath, config);
 		const change: ConfigChange = { source: this.windowId, projectPath, config };
 		void emit(CONFIG_CHANGED, change).catch(() => {});
 	}

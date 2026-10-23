@@ -162,6 +162,17 @@ describe('TrelloStore', () => {
 		});
 	});
 
+	describe('config revisions', () => {
+		it('a load that lands after a newer save does not roll it back', async () => {
+			store.configByProject = { '/proj': { boards: [], taskLinks: [], revision: 5 } };
+			mockInvoke('trello_load_project_config', () => ({ boards: [], taskLinks: [], revision: 4 }));
+
+			await store.loadProjectConfig('/proj');
+
+			expect(store.configByProject['/proj'].revision).toBe(5);
+		});
+	});
+
 	describe('board writes', () => {
 		const board = (hiddenColumns: string[] = []) => ({
 			boardId: 'b1',

@@ -43,11 +43,13 @@
 		loadingPicker = false;
 	}
 
-	/** Resolves to whether `write` saved; a failure is shown above the boards. */
+	/**
+	 * Resolves to whether `write` saved. A failure is shown above the boards
+	 * until dismissed, so a later save that works doesn't hide it.
+	 */
 	async function save(write: Promise<void>) {
 		try {
 			await write;
-			saveError = '';
 			return true;
 		} catch (e) {
 			log.warn('SettingsBoardConfig', 'Failed to save board config:', e);
@@ -305,7 +307,15 @@
 	</div>
 
 	{#if saveError}
-		<p class="text-xs text-wb-err">{saveError}</p>
+		<div class="flex items-start gap-2 text-xs text-wb-err">
+			<p class="flex-1">{saveError}</p>
+			<button
+				type="button"
+				class="shrink-0 underline"
+				onclick={() => (saveError = '')}
+				aria-label="Dismiss the save error">Dismiss</button
+			>
+		</div>
 	{/if}
 
 	<!-- Board picker -->

@@ -14,6 +14,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { load } from '@tauri-apps/plugin-store';
 import { log } from '$lib/log';
+import { serial } from '$lib/utils/serial';
 
 type CheckNotification = {
 	name: string;
@@ -140,7 +141,7 @@ export class GitHubStore {
 
 	// Not reactive — internal bookkeeping only
 	private trackedProjectsFingerprint = '';
-	private trackedSync: Promise<void> = Promise.resolve();
+	private trackedSync = serial();
 	private trackedRetry: ReturnType<typeof setTimeout> | undefined;
 	private trackedRetryMs = TRACKED_RETRY_MS;
 	lastRefreshedAt: Record<string, number> = {};
@@ -275,8 +276,7 @@ export class GitHubStore {
 
 	/** One send at a time, each of the set as it is then, so the newest set lands last. */
 	syncTrackedProjects(): Promise<void> {
-		this.trackedSync = this.trackedSync.catch(() => {}).then(() => this.sendTrackedProjects());
-		return this.trackedSync;
+		return this.trackedSync(() => this.sendTrackedProjects());
 	}
 
 	private async sendTrackedProjects(): Promise<void> {

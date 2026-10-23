@@ -35,7 +35,7 @@
 	// Seeded once: the manager remounts this dialog for every open.
 	const seed = untrack(() => ({ mode: suggestedMode, branch: suggestedBranch }));
 	let mode = $state<'new' | 'existing'>(seed.mode);
-	let newBranchName: string = $state(seed.mode === 'new' ? seed.branch : '');
+	let newBranchName: string = $state(seed.branch);
 	let selectedBranch: string = $state(seed.mode === 'existing' ? seed.branch : '');
 	let copyAiConfig = $state(true);
 	let copyEnvFiles = $state(true);
