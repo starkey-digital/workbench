@@ -265,13 +265,24 @@ impl TerminalManager {
             }
         }
 
-        let child = workbench_core::pty::spawn(&pair, cmd)?;
+        let mut child = workbench_core::pty::spawn(&pair, cmd)?;
         drop(pair.slave);
 
         let master = pair.master;
-        let reader = master.try_clone_reader()?;
+        let (reader, writer) = match master
+            .try_clone_reader()
+            .and_then(|reader| Ok((reader, master.take_writer()?)))
+        {
+            Ok(io) => io,
+            // Not in `inner` yet, so nothing else would ever end this shell.
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(e);
+            }
+        };
         let (input, input_rx) = mpsc::channel(INPUT_QUEUE);
-        spawn_writer(master.take_writer()?, input_rx);
+        spawn_writer(writer, input_rx);
 
         let id = uuid::Uuid::new_v4().to_string();
         let created_at = SystemTime::now()

@@ -516,14 +516,22 @@ pub fn remove_worktree(repo_path: &str, worktree_path: &str, force: bool) -> Res
     Ok(())
 }
 
-/// Whether `branch`'s whole diff already landed on `origin/<default>` as one
-/// commit — a squash merge, which `git branch -d` reads as unmerged. A later
-/// commit on the branch changes its diff, so this never vouches for unmerged work.
-pub fn squash_merged(repo_path: &str, branch: &str) -> Result<bool> {
+/// Whether `branch` is already on `origin/<default>`: merged there, or its whole
+/// diff landed as one commit (a squash merge). `git branch -d` reads both as
+/// unmerged when HEAD is elsewhere. A later commit on the branch changes its
+/// diff, so this never vouches for unmerged work.
+pub fn merged_into_default(repo_path: &str, branch: &str) -> Result<bool> {
     let base = format!("origin/{}", get_default_branch(repo_path)?);
     let _ = git_output(&["fetch", "-q", "origin"], repo_path);
+    if git_output(&["merge-base", "--is-ancestor", branch, &base], repo_path).is_ok() {
+        return Ok(true);
+    }
     let merge_base = git_output(&["merge-base", &base, branch], repo_path)?;
     let tree = git_output(&["rev-parse", &format!("{branch}^{{tree}}")], repo_path)?;
+    // No net diff (commits that undo each other) would match any empty commit on the base.
+    if tree == git_output(&["rev-parse", &format!("{merge_base}^{{tree}}")], repo_path)? {
+        return Ok(false);
+    }
     // The branch squashed onto its merge base: a dangling object, never referenced.
     let squashed = git_output(
         &[
@@ -1071,6 +1079,34 @@ mod tests {
     }
 
     #[test]
+    fn a_branch_already_on_the_default_branch_counts_as_merged() {
+        let remote = tempfile::tempdir().unwrap();
+        let repo = tempfile::tempdir().unwrap();
+        let (remote_dir, dir) = (
+            remote.path().to_str().unwrap(),
+            repo.path().to_str().unwrap(),
+        );
+        git(remote_dir, &["init", "-q", "--bare", "-b", "main"]);
+        git(dir, &["init", "-q", "-b", "main"]);
+        git(dir, &["remote", "add", "origin", remote_dir]);
+        git(dir, &["commit", "-q", "--allow-empty", "-m", "base"]);
+        git(dir, &["branch", "merged"]);
+        // A branch whose commits cancel out, and an empty commit on main to match its empty diff.
+        git(dir, &["checkout", "-q", "-b", "undone"]);
+        std::fs::write(repo.path().join("a"), "1").unwrap();
+        git(dir, &["add", "a"]);
+        git(dir, &["commit", "-q", "-m", "add"]);
+        git(dir, &["rm", "-q", "a"]);
+        git(dir, &["commit", "-q", "-m", "revert"]);
+        git(dir, &["checkout", "-q", "main"]);
+        git(dir, &["commit", "-q", "--allow-empty", "-m", "ci"]);
+        git(dir, &["push", "-q", "origin", "main"]);
+
+        assert!(merged_into_default(dir, "merged").unwrap());
+        assert!(!merged_into_default(dir, "undone").unwrap());
+    }
+
+    #[test]
     fn a_squash_merged_branch_is_told_apart_from_unmerged_work() {
         let remote = tempfile::tempdir().unwrap();
         let repo = tempfile::tempdir().unwrap();
@@ -1093,14 +1129,14 @@ mod tests {
         git(dir, &["merge", "-q", "--squash", "feat"]);
         git(dir, &["commit", "-q", "-m", "feat (#1)"]);
         git(dir, &["push", "-q", "origin", "main"]);
-        assert!(squash_merged(dir, "feat").unwrap());
+        assert!(merged_into_default(dir, "feat").unwrap());
 
         git(dir, &["checkout", "-q", "feat"]);
         std::fs::write(repo.path().join("c"), "3").unwrap();
         git(dir, &["add", "c"]);
         git(dir, &["commit", "-q", "-m", "after the merge"]);
         git(dir, &["checkout", "-q", "main"]);
-        assert!(!squash_merged(dir, "feat").unwrap());
+        assert!(!merged_into_default(dir, "feat").unwrap());
     }
 
     #[test]

@@ -426,8 +426,8 @@ fn deny_target(root: &Path, rel: &str) -> PathBuf {
 
 /// Every linked worktree of the repo at `root`, read from disk rather than
 /// through git, since a sandboxed session can write `.git/worktrees/*`: each
-/// registration's `gitdir`, plus every checkout under `.worktrees/`, which a
-/// session cannot hide by editing git's metadata.
+/// registration's `gitdir`, plus every checkout under `.worktrees/` and
+/// `.claude/worktrees/`, which a session cannot hide by editing git's metadata.
 fn linked_worktrees(root: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     if let Ok(entries) = std::fs::read_dir(root.join(".git/worktrees")) {
@@ -442,7 +442,10 @@ fn linked_worktrees(root: &Path) -> Vec<PathBuf> {
             }
         }
     }
-    find_checkouts(&root.join(".worktrees"), 4, &mut found);
+    // Workbench's "inside" layout, and Claude Code's own worktrees.
+    for dir in [".worktrees", ".claude/worktrees"] {
+        find_checkouts(&root.join(dir), 4, &mut found);
+    }
     found
 }
 

@@ -47,10 +47,11 @@
 	/** A preview of where the host's layout puts it; the host decides. */
 	let worktreePath = $derived.by(() => {
 		if (!branchName) return '';
+		const folder = branchName.replaceAll('/', '-');
 		if (workbenchSettings.worktreeStrategy === 'inside') {
-			return `${projectPath}${sep}.worktrees${sep}${branchName}`;
+			return `${projectPath}${sep}.worktrees${sep}${folder}`;
 		}
-		return `${parentDir}${sep}${projectDirName}-${branchName}`;
+		return `${parentDir}${sep}${projectDirName}-${folder}`;
 	});
 
 	let localBranches = $derived(branches.filter((b) => !b.isRemote && !b.isCurrent));

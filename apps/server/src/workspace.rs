@@ -245,8 +245,8 @@ impl WorkspaceService {
         let applying = |slot: &RequestSlot| matches!(slot.try_lock(), Err(TryLockError::WouldBlock));
         let mut requests = lock(&self.0.requests);
         requests.retain(|(_, at, slot)| at.elapsed() < REQUEST_TTL || applying(slot));
-        let slot = match requests.iter().find(|(id, ..)| *id == request_id) {
-            Some((_, _, slot)) => slot.clone(),
+        let (slot, fresh) = match requests.iter().find(|(id, ..)| *id == request_id) {
+            Some((_, _, slot)) => (slot.clone(), false),
             None => {
                 if requests.len() >= REQUESTS_KEPT {
                     if let Some(oldest) = requests.iter().position(|(_, _, slot)| !applying(slot)) {
@@ -255,12 +255,19 @@ impl WorkspaceService {
                 }
                 let slot = RequestSlot::default();
                 requests.push_back((request_id, Instant::now(), slot.clone()));
-                slot
+                (slot, true)
             }
         };
-        // Taken before the list is released, so a retry racing the first waits for its answer.
-        let mut answer = lock(&slot);
-        drop(requests);
+        // A first try takes its slot before releasing the list, so a racing retry
+        // waits for its answer; a retry releases the list first, so only it waits.
+        let mut answer = if fresh {
+            let answer = lock(&slot);
+            drop(requests);
+            answer
+        } else {
+            drop(requests);
+            lock(&slot)
+        };
         if let Some(applied) = answer.as_ref() {
             return Ok(applied.clone());
         }
