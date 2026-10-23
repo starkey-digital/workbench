@@ -104,141 +104,106 @@ describe('TrelloStore', () => {
 	// --- Task link/unlink ---
 
 	describe('linkTaskToBranch', () => {
-		it('adds a new task link and saves config', async () => {
-			store.configByProject = {
-				'/proj': { boards: [], taskLinks: [] }
-			};
+		it('asks the host to link the card and keeps the config it answers with', async () => {
+			const saved = { boards: [], taskLinks: [{ cardId: 'card-0' }, { cardId: 'card-1' }] };
+			mockInvoke('trello_set_task_link', () => saved);
 
-			store.linkTaskToBranch('/proj', 'card-1', 'board-1', 'feature-x');
+			await store.linkTaskToBranch('/proj', 'card-1', 'board-1', 'feature-x');
 
-			expect(invokeSpy).toHaveBeenCalledWith('trello_save_project_config', {
+			expect(invokeSpy).toHaveBeenCalledWith('trello_set_task_link', {
 				projectPath: '/proj',
-				config: {
-					boards: [],
-					taskLinks: [
-						{
-							cardId: 'card-1',
-							boardId: 'board-1',
-							branch: 'feature-x',
-							worktreePath: undefined,
-							projectPath: '/proj'
-						}
-					]
+				cardId: 'card-1',
+				link: {
+					cardId: 'card-1',
+					boardId: 'board-1',
+					branch: 'feature-x',
+					worktreePath: undefined,
+					projectPath: '/proj'
 				}
 			});
+			expect(store.configByProject['/proj']).toEqual(saved);
 		});
 
-		it('replaces existing link for the same card', async () => {
-			store.configByProject = {
-				'/proj': {
-					boards: [],
-					taskLinks: [
-						{
-							cardId: 'card-1',
-							boardId: 'board-old',
-							branch: 'old-branch',
-							projectPath: '/proj'
-						}
-					]
-				}
-			};
-
-			store.linkTaskToBranch('/proj', 'card-1', 'board-new', 'new-branch');
-
-			expect(invokeSpy).toHaveBeenCalledWith('trello_save_project_config', {
-				projectPath: '/proj',
-				config: {
-					boards: [],
-					taskLinks: [
-						{
-							cardId: 'card-1',
-							boardId: 'board-new',
-							branch: 'new-branch',
-							worktreePath: undefined,
-							projectPath: '/proj'
-						}
-					]
-				}
-			});
-		});
-
-		it('creates config when none exists for project', async () => {
-			store.configByProject = {};
-
-			store.linkTaskToBranch('/proj', 'card-1', 'board-1', 'feat');
-
-			expect(invokeSpy).toHaveBeenCalledWith('trello_save_project_config', {
-				projectPath: '/proj',
-				config: {
-					boards: [],
-					taskLinks: [
-						{
-							cardId: 'card-1',
-							boardId: 'board-1',
-							branch: 'feat',
-							worktreePath: undefined,
-							projectPath: '/proj'
-						}
-					]
-				}
-			});
-		});
-
-		it('executes link action when board has one configured', async () => {
+		it('executes the link action of the board in the saved config', async () => {
 			const linkAction = { moveToColumnId: 'col-wip', addLabelIds: [], removeLabelIds: [] };
-			store.configByProject = {
-				'/proj': {
-					boards: [
-						{
-							boardId: 'board-1',
-							boardName: 'B',
-							hiddenColumns: [],
-							linkAction
-						}
-					],
-					taskLinks: []
-				}
-			};
+			mockInvoke('trello_set_task_link', () => ({
+				boards: [{ boardId: 'board-1', boardName: 'B', hiddenColumns: [], linkAction }],
+				taskLinks: []
+			}));
 
-			store.linkTaskToBranch('/proj', 'card-1', 'board-1', 'feat');
+			await store.linkTaskToBranch('/proj', 'card-1', 'board-1', 'feat');
 
-			// Should invoke move_card for the link action
 			expect(invokeSpy).toHaveBeenCalledWith('trello_move_card', {
 				cardId: 'card-1',
 				targetListId: 'col-wip'
 			});
 		});
+
+		it('skips the link action when the link could not be saved', async () => {
+			mockInvoke('trello_set_task_link', () => Promise.reject(new Error('disk full')));
+
+			await store.linkTaskToBranch('/proj', 'card-1', 'board-1', 'feat');
+
+			expect(invokeSpy).not.toHaveBeenCalledWith('trello_move_card', expect.anything());
+		});
 	});
 
 	describe('unlinkTask', () => {
-		it('removes the task link and saves config', async () => {
-			store.configByProject = {
-				'/proj': {
-					boards: [],
-					taskLinks: [
-						{ cardId: 'card-1', boardId: 'b', branch: 'x', projectPath: '/proj' },
-						{ cardId: 'card-2', boardId: 'b', branch: 'y', projectPath: '/proj' }
-					]
-				}
-			};
+		it('asks the host to drop the card link', async () => {
+			mockInvoke('trello_set_task_link', () => ({ boards: [], taskLinks: [] }));
 
-			store.unlinkTask('/proj', 'card-1');
+			await store.unlinkTask('/proj', 'card-1');
 
-			expect(invokeSpy).toHaveBeenCalledWith('trello_save_project_config', {
+			expect(invokeSpy).toHaveBeenCalledWith('trello_set_task_link', {
 				projectPath: '/proj',
-				config: {
-					boards: [],
-					taskLinks: [{ cardId: 'card-2', boardId: 'b', branch: 'y', projectPath: '/proj' }]
-				}
+				cardId: 'card-1',
+				link: null
+			});
+		});
+	});
+
+	describe('config revisions', () => {
+		it('a load that lands after a newer save does not roll it back', async () => {
+			store.configByProject = { '/proj': { boards: [], taskLinks: [], revision: 5 } };
+			mockInvoke('trello_load_project_config', () => ({ boards: [], taskLinks: [], revision: 4 }));
+
+			await store.loadProjectConfig('/proj');
+
+			expect(store.configByProject['/proj'].revision).toBe(5);
+		});
+	});
+
+	describe('board writes', () => {
+		const board = (hiddenColumns: string[] = []) => ({
+			boardId: 'b1',
+			boardName: 'B',
+			hiddenColumns
+		});
+
+		it('adds a single board, so an unloaded config cannot drop the others', async () => {
+			mockInvoke('trello_put_board', () => ({ boards: [board()], taskLinks: [] }));
+
+			await store.addBoard('/proj', board());
+
+			expect(invokeSpy).toHaveBeenCalledWith('trello_put_board', {
+				projectPath: '/proj',
+				board: board(),
+				keepExisting: true
 			});
 		});
 
-		it('no-ops when project config does not exist', () => {
-			store.configByProject = {};
+		it('runs quick edits one after another, each from the last saved board', async () => {
+			store.configByProject = { '/proj': { boards: [board()], taskLinks: [] } };
+			mockInvoke('trello_put_board', (args) => ({
+				boards: [(args as { board: ReturnType<typeof board> }).board],
+				taskLinks: []
+			}));
+			const hide = (col: string) =>
+				store.editBoard('/proj', 'b1', (b) => ({ ...b, hiddenColumns: [...b.hiddenColumns, col] }));
 
-			store.unlinkTask('/proj', 'card-1');
+			await Promise.all([hide('a'), hide('b')]);
 
-			expect(invokeSpy).not.toHaveBeenCalled();
+			expect(store.configByProject['/proj'].boards[0].hiddenColumns).toEqual(['a', 'b']);
 		});
 	});
 

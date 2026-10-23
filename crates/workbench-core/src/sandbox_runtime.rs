@@ -125,6 +125,9 @@ const PROJECT_DENY_WRITE: &[&str] = &[
     ".git/hooks",
     ".git/config",
     ".git/modules",
+    // Git reads either from any git dir: `commondir` moves where `config` is read.
+    ".git/commondir",
+    ".git/config.worktree",
     ".claude/settings.json",
     ".claude/settings.local.json",
     ".claude/hooks",
@@ -132,7 +135,13 @@ const PROJECT_DENY_WRITE: &[&str] = &[
     ".claude/skills",
     ".claude/commands",
     ".mcp.json",
+    // Codex is never sandboxed, and loads a trusted project's `.codex/config.toml`.
+    ".codex",
 ];
+
+/// Where linked worktrees live under a project root: Workbench's "inside"
+/// layout and Claude Code's own.
+const WORKTREE_DIRS: &[&str] = &[".worktrees", ".claude/worktrees"];
 
 /// Credential stores a sandboxed session must not read.
 ///
@@ -221,8 +230,9 @@ fn write_current(settings: &WorkbenchSettings, projects: &[ProjectConfig]) -> Re
     write_settings(settings, projects, hook_socket.as_deref())
 }
 
-/// Build the config without touching the filesystem — the unit-testable half of
-/// [`write_settings`].
+/// Build the config without writing it — the unit-testable half of
+/// [`write_settings`]. It reads the disk: paths are symlink-resolved, a deny
+/// lands on the first missing directory, and linked worktrees are found on disk.
 ///
 /// `hook_socket` is the `host:port` of the Workbench hook bridge, which the
 /// `workbench` Claude Code plugin (and Codex's notify script) dials over loopback. It changes on every app launch, so
@@ -289,9 +299,53 @@ pub fn build_config(
     // Redundant while the config dir is absent from allowWrite, but keeps the
     // sandbox sealed if a project root is ever an ancestor of it.
     deny_write.push(resolved(config_dir));
-    for project in projects {
-        let root = Path::new(&project.path);
-        deny_write.extend(PROJECT_DENY_WRITE.iter().map(|p| resolved(&root.join(p))));
+    // An "inside" layout worktree lives under its project root, so the root's
+    // allowWrite covers its `.claude/` too.
+    let roots: Vec<PathBuf> = projects
+        .iter()
+        .flat_map(|p| {
+            let root = PathBuf::from(&p.path);
+            let mut roots = linked_worktrees(&root);
+            roots.push(root);
+            roots
+        })
+        .collect();
+    // A linked worktree's git dir lives in the main repo's `.git/worktrees/`.
+    let registrations = projects.iter().flat_map(|p| {
+        std::fs::read_dir(Path::new(&p.path).join(".git/worktrees"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .flat_map(|entry| ["commondir", "config.worktree"].map(|f| entry.path().join(f)))
+    });
+    deny_write.extend(registrations.map(|path| resolved(&path)));
+    for root in &roots {
+        deny_write.extend(
+            PROJECT_DENY_WRITE
+                .iter()
+                .map(|p| resolved(&deny_target(root, p))),
+        );
+    }
+    // The lists above are fixed at launch; a worktree made mid-session would
+    // have none of them. srt matches globs (new files included) only on macOS,
+    // so there a sandboxed session can't register a worktree or touch one's
+    // escape hatches: the cost is that it can't create worktrees at all.
+    if cfg!(target_os = "macos") {
+        for project in projects {
+            let root = Path::new(&project.path);
+            let registry = resolved(&root.join(".git/worktrees"));
+            deny_write.extend(
+                ["gitdir", "commondir", "config.worktree"].map(|f| format!("{registry}/*/{f}")),
+            );
+            for dir in WORKTREE_DIRS {
+                if !root.join(dir).is_dir() {
+                    deny_write.push(resolved(&deny_target(root, dir)));
+                    continue;
+                }
+                let dir = resolved(&root.join(dir));
+                deny_write.extend(PROJECT_DENY_WRITE.iter().map(|rel| format!("{dir}/**/{rel}")));
+            }
+        }
     }
     dedupe(&mut deny_write);
 
@@ -386,6 +440,62 @@ fn resolved(path: &Path) -> String {
             // Nothing on this path exists (a fake home in tests, say) — emit it
             // as given rather than inventing a resolution.
             _ => return path.to_string_lossy().to_string(),
+        }
+    }
+}
+
+/// `root/rel`, or the shallowest ancestor below `root` that is not a directory.
+///
+/// srt matches on the real path, so a deny on `.claude/settings.json` in a
+/// project with no `.claude` is bypassed by creating `.claude` as a symlink to
+/// somewhere writable: the missing directory is denied instead. A linked
+/// worktree's `.git` is a file naming its git dir, so it is denied itself.
+fn deny_target(root: &Path, rel: &str) -> PathBuf {
+    let mut path = root.to_path_buf();
+    for part in Path::new(rel).components() {
+        path.push(part);
+        if !path.is_dir() {
+            break;
+        }
+    }
+    path
+}
+
+/// Every linked worktree of the repo at `root`, read from disk rather than
+/// through git, since a sandboxed session can write `.git/worktrees/*`: each
+/// registration's `gitdir`, plus every checkout under `.worktrees/` and
+/// `.claude/worktrees/`, which a session cannot hide by editing git's metadata.
+fn linked_worktrees(root: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(root.join(".git/worktrees")) {
+        for entry in entries.flatten() {
+            let Ok(gitdir) = std::fs::read_to_string(entry.path().join("gitdir")) else {
+                continue;
+            };
+            // Relative registrations (`worktree.useRelativePaths`) are relative to that entry.
+            let gitfile = entry.path().join(gitdir.trim_end());
+            if let Some(worktree) = gitfile.parent() {
+                found.push(worktree.to_path_buf());
+            }
+        }
+    }
+    for dir in WORKTREE_DIRS {
+        find_checkouts(&root.join(dir), 4, &mut found);
+    }
+    found
+}
+
+fn find_checkouts(dir: &Path, depth: usize, found: &mut Vec<PathBuf>) {
+    if dir.join(".git").symlink_metadata().is_ok() {
+        found.push(dir.to_path_buf());
+        return;
+    }
+    let Some(depth) = depth.checked_sub(1) else {
+        return;
+    };
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        if entry.file_type().is_ok_and(|t| t.is_dir()) {
+            find_checkouts(&entry.path(), depth, found);
         }
     }
 }
@@ -620,20 +730,15 @@ mod tests {
     /// where a sibling root's `.git/hooks` and `.claude/` were writable.
     #[test]
     fn project_escape_hatches_are_denied_per_project_root() {
-        let cfg = build(&[], &[project("/repos/a"), project("/repos/b")], None);
-        for root in ["/repos/a", "/repos/b"] {
-            for rel in [
-                ".git/hooks",
-                ".git/config",
-                ".git/modules",
-                ".claude/settings.json",
-                ".claude/settings.local.json",
-                ".claude/hooks",
-                ".claude/agents",
-                ".claude/skills",
-                ".claude/commands",
-                ".mcp.json",
-            ] {
+        let dirs = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
+        let roots: Vec<String> = dirs.iter().map(|d| resolved(d.path())).collect();
+        for root in &roots {
+            std::fs::create_dir_all(Path::new(root).join(".git")).unwrap();
+            std::fs::create_dir_all(Path::new(root).join(".claude")).unwrap();
+        }
+        let cfg = build(&[], &[project(&roots[0]), project(&roots[1])], None);
+        for root in &roots {
+            for rel in PROJECT_DENY_WRITE {
                 assert_contains(
                     &cfg.filesystem.deny_write,
                     &format!("{root}/{rel}"),
@@ -641,6 +746,108 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A deny under a missing dir is bypassed by creating that dir as a symlink.
+    #[test]
+    fn a_missing_parent_dir_is_denied_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = resolved(dir.path());
+        let cfg = build(&[], &[project(&root)], None);
+        assert_contains(
+            &cfg.filesystem.deny_write,
+            &format!("{root}/.claude"),
+            "denyWrite",
+        );
+        assert!(!cfg
+            .filesystem
+            .deny_write
+            .contains(&format!("{root}/.claude/settings.json")));
+    }
+
+    #[test]
+    fn a_worktree_inside_a_project_root_gets_its_own_denies() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = resolved(dir.path());
+        let git = |args: &[&str]| crate::git::git_output(args, &root).unwrap();
+        git(&["init", "-q"]);
+        git(&[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "i",
+        ]);
+        git(&["worktree", "add", "-q", ".worktrees/feat", "-b", "feat"]);
+
+        // A registration git can't follow still leaves the checkout covered.
+        let registry = Path::new(&root).join(".git/worktrees/feat/gitdir");
+        std::fs::write(&registry, "nowhere/.git\n").unwrap();
+
+        let cfg = build(&[], &[project(&root)], None);
+        for rel in [
+            ".worktrees/feat/.claude",
+            ".worktrees/feat/.git",
+            ".git/worktrees/feat/commondir",
+        ] {
+            assert_contains(
+                &cfg.filesystem.deny_write,
+                &format!("{root}/{rel}"),
+                "denyWrite",
+            );
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn worktrees_made_mid_session_are_covered_by_globs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = resolved(dir.path());
+        std::fs::create_dir_all(Path::new(&root).join(".worktrees")).unwrap();
+        std::fs::create_dir_all(Path::new(&root).join(".claude")).unwrap();
+        let cfg = build(&[], &[project(&root)], None);
+        for expected in [
+            format!("{root}/.worktrees/**/.git/config"),
+            format!("{root}/.worktrees/**/.claude/settings.json"),
+            format!("{root}/.git/worktrees/*/gitdir"),
+            // Missing, so it can't be created.
+            format!("{root}/.claude/worktrees"),
+        ] {
+            assert_contains(&cfg.filesystem.deny_write, &expected, "denyWrite");
+        }
+    }
+
+    #[test]
+    fn a_sibling_worktree_is_found_through_its_registration() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = resolved(dir.path());
+        let root = format!("{base}/repo");
+        std::fs::create_dir(&root).unwrap();
+        let git = |args: &[&str]| crate::git::git_output(args, &root).unwrap();
+        git(&["init", "-q"]);
+        git(&[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "i",
+        ]);
+        git(&["worktree", "add", "-q", "../repo-feat", "-b", "feat"]);
+
+        let cfg = build(&[], &[project(&root)], None);
+        assert_contains(
+            &cfg.filesystem.deny_write,
+            &format!("{base}/repo-feat/.git"),
+            "denyWrite",
+        );
     }
 
     // --- denyRead ---
@@ -872,7 +1079,7 @@ mod tests {
         assert_contains(&written.filesystem.allow_write, "/repos/a", "allowWrite");
         assert_contains(
             &written.filesystem.deny_write,
-            "/repos/a/.git/hooks",
+            "/repos/a/.git",
             "denyWrite",
         );
         assert_contains(

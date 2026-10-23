@@ -25,6 +25,7 @@
 	);
 
 	let showPicker = $state(false);
+	let saveError = $state('');
 	let loadingPicker = $state(false);
 
 	// Per-board column/label data for config UI
@@ -42,27 +43,30 @@
 		loadingPicker = false;
 	}
 
-	async function handleAddBoard(boardId: string, boardName: string) {
-		const config = trelloStore.configByProject[projectPath] ?? { boards: [], taskLinks: [] };
-		if (config.boards.some((b) => b.boardId === boardId)) return;
+	/**
+	 * Resolves to whether `write` saved. A failure is shown above the boards
+	 * until dismissed, so a later save that works doesn't hide it.
+	 */
+	async function save(write: Promise<void>) {
+		try {
+			await write;
+			return true;
+		} catch (e) {
+			log.warn('SettingsBoardConfig', 'Failed to save board config:', e);
+			saveError = `Couldn't save the board settings: ${String(e)}`;
+			return false;
+		}
+	}
 
+	async function handleAddBoard(boardId: string, boardName: string) {
 		const newBoard: BoardConfig = { boardId, boardName, hiddenColumns: [] };
-		await trelloStore.saveProjectConfig(projectPath, {
-			...config,
-			boards: [...config.boards, newBoard]
-		});
+		if (!(await save(trelloStore.addBoard(projectPath, newBoard)))) return;
 		showPicker = false;
 		loadColumnsAndLabels(boardId);
 	}
 
 	async function handleRemoveBoard(boardId: string) {
-		const config = trelloStore.configByProject[projectPath];
-		if (!config) return;
-		await trelloStore.saveProjectConfig(projectPath, {
-			...config,
-			boards: config.boards.filter((b) => b.boardId !== boardId),
-			taskLinks: config.taskLinks.filter((t) => t.boardId !== boardId)
-		});
+		await save(trelloStore.removeBoard(projectPath, boardId));
 	}
 
 	async function loadColumnsAndLabels(boardId: string) {
@@ -79,22 +83,14 @@
 	}
 
 	function toggleColumn(boardId: string, columnId: string) {
-		const config = trelloStore.configByProject[projectPath];
-		if (!config) return;
-		const board = config.boards.find((b) => b.boardId === boardId);
-		if (!board) return;
-
-		const hidden = board.hiddenColumns.includes(columnId)
-			? board.hiddenColumns.filter((c) => c !== columnId)
-			: [...board.hiddenColumns, columnId];
-
-		const updated = {
-			...config,
-			boards: config.boards.map((b) =>
-				b.boardId === boardId ? { ...b, hiddenColumns: hidden } : b
-			)
-		};
-		trelloStore.saveProjectConfig(projectPath, updated);
+		const toggled = (hidden: string[]) =>
+			hidden.includes(columnId) ? hidden.filter((c) => c !== columnId) : [...hidden, columnId];
+		save(
+			trelloStore.editBoard(projectPath, boardId, (b) => ({
+				...b,
+				hiddenColumns: toggled(b.hiddenColumns)
+			}))
+		);
 	}
 
 	function updateBoardAction(
@@ -102,13 +98,7 @@
 		field: 'linkAction' | 'mergeAction',
 		action: MergeAction | undefined
 	) {
-		const config = trelloStore.configByProject[projectPath];
-		if (!config) return;
-		const updated = {
-			...config,
-			boards: config.boards.map((b) => (b.boardId === boardId ? { ...b, [field]: action } : b))
-		};
-		trelloStore.saveProjectConfig(projectPath, updated);
+		save(trelloStore.editBoard(projectPath, boardId, (b) => ({ ...b, [field]: action })));
 	}
 
 	function defaultAction(): MergeAction {
@@ -315,6 +305,18 @@
 			Add board
 		</Button>
 	</div>
+
+	{#if saveError}
+		<div class="flex items-start gap-2 text-xs text-wb-err">
+			<p class="flex-1">{saveError}</p>
+			<button
+				type="button"
+				class="shrink-0 underline"
+				onclick={() => (saveError = '')}
+				aria-label="Dismiss the save error">Dismiss</button
+			>
+		</div>
+	{/if}
 
 	<!-- Board picker -->
 	{#if showPicker}

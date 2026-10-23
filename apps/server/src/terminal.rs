@@ -32,7 +32,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -139,8 +139,19 @@ struct TerminalSession {
 #[derive(Clone, Default)]
 pub struct TerminalManager {
     inner: Arc<Mutex<HashMap<String, Arc<TerminalSession>>>>,
+    /// Terminals still spawning, so concurrent creates count them against the cap.
+    starting: Arc<AtomicUsize>,
     /// Bumped when the list changes: a terminal opens, exits or is removed.
     changes: crate::changes::Changes,
+}
+
+/// A slot under the cap, held from the check until the terminal is in `inner`.
+struct Reservation(Arc<AtomicUsize>);
+
+impl Drop for Reservation {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -189,9 +200,15 @@ impl TerminalManager {
         native: bool,
     ) -> anyhow::Result<TerminalMeta> {
         let max = max_terminals();
-        if lock(&self.inner).len() >= max {
-            anyhow::bail!("terminal session limit reached ({max})");
-        }
+        let slot = {
+            // Reserved under the map lock, so two creates can't both see room for one.
+            let sessions = lock(&self.inner);
+            if sessions.len() + self.starting.load(Ordering::SeqCst) >= max {
+                anyhow::bail!("terminal session limit reached ({max})");
+            }
+            self.starting.fetch_add(1, Ordering::SeqCst);
+            Reservation(self.starting.clone())
+        };
 
         let pty = native_pty_system();
         let pair = pty.openpty(PtySize {
@@ -248,13 +265,24 @@ impl TerminalManager {
             }
         }
 
-        let child = workbench_core::pty::spawn(&pair, cmd)?;
+        let mut child = workbench_core::pty::spawn(&pair, cmd)?;
         drop(pair.slave);
 
         let master = pair.master;
-        let reader = master.try_clone_reader()?;
+        let (reader, writer) = match master
+            .try_clone_reader()
+            .and_then(|reader| Ok((reader, master.take_writer()?)))
+        {
+            Ok(io) => io,
+            // Not in `inner` yet, so nothing else would ever end this shell.
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(e);
+            }
+        };
         let (input, input_rx) = mpsc::channel(INPUT_QUEUE);
-        spawn_writer(master.take_writer()?, input_rx);
+        spawn_writer(writer, input_rx);
 
         let id = uuid::Uuid::new_v4().to_string();
         let created_at = SystemTime::now()
@@ -336,12 +364,19 @@ impl TerminalManager {
             std::thread::spawn(move || {
                 wait_for_shell_prompt(&session);
                 let mut line = Vec::new();
-                let _ = workbench_core::shell::submit_line(&mut line, &cmd);
-                let _ = session.input.blocking_send(line);
+                match workbench_core::shell::submit_line(&mut line, &cmd) {
+                    Ok(()) => drop(session.input.blocking_send(line)),
+                    Err(e) => tracing::warn!("startup command not typed: {e}"),
+                }
             });
         }
 
-        lock(&self.inner).insert(id, session);
+        {
+            let mut sessions = lock(&self.inner);
+            sessions.insert(id, session);
+            // Swapped for the entry in one step, so the new terminal is never counted twice.
+            drop(slot);
+        }
         self.changes.notify();
         Ok(meta)
     }

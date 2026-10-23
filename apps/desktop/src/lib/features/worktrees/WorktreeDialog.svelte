@@ -8,6 +8,7 @@
 	import type { BranchInfo, WorktreeCopyOptions } from '$types/workbench';
 	import { baseName } from '$lib/utils/path';
 	import { getWorkbenchSettingsStore } from '$stores/context';
+	import { untrack } from 'svelte';
 
 	const workbenchSettings = getWorkbenchSettingsStore();
 
@@ -18,6 +19,7 @@
 		error,
 		pending = false,
 		suggestedBranch = '',
+		suggestedMode = 'new',
 		onSave
 	}: {
 		open: boolean;
@@ -26,12 +28,15 @@
 		error: string;
 		pending?: boolean;
 		suggestedBranch?: string;
+		suggestedMode?: 'new' | 'existing';
 		onSave: (branch: string, newBranch: boolean, copyOptions: WorktreeCopyOptions) => void;
 	} = $props();
 
-	let mode: 'new' | 'existing' = $state('new');
-	let newBranchName: string = $state('');
-	let selectedBranch: string = $state('');
+	// Seeded once: the manager remounts this dialog for every open.
+	const seed = untrack(() => ({ mode: suggestedMode, branch: suggestedBranch }));
+	let mode = $state<'new' | 'existing'>(seed.mode);
+	let newBranchName: string = $state(seed.branch);
+	let selectedBranch: string = $state(seed.mode === 'existing' ? seed.branch : '');
 	let copyAiConfig = $state(true);
 	let copyEnvFiles = $state(true);
 
@@ -44,13 +49,14 @@
 	});
 	let projectDirName = $derived(baseName(projectPath));
 	let sep = $derived(projectPath.includes('\\') ? '\\' : '/');
-	/** A preview of where the host's layout puts it; the host decides. */
+	/** A preview of where the host's layout puts it; the host decides, adding `-2` when that folder is taken. */
 	let worktreePath = $derived.by(() => {
 		if (!branchName) return '';
+		const folder = branchName.replaceAll('/', '-');
 		if (workbenchSettings.worktreeStrategy === 'inside') {
-			return `${projectPath}${sep}.worktrees${sep}${branchName}`;
+			return `${projectPath}${sep}.worktrees${sep}${folder}`;
 		}
-		return `${parentDir}${sep}${projectDirName}-${branchName}`;
+		return `${parentDir}${sep}${projectDirName}-${folder}`;
 	});
 
 	let localBranches = $derived(branches.filter((b) => !b.isRemote && !b.isCurrent));
@@ -62,26 +68,9 @@
 			envFiles: copyEnvFiles
 		});
 	}
-
-	function resetState() {
-		mode = 'new';
-		newBranchName = suggestedBranch;
-		selectedBranch = '';
-		copyAiConfig = true;
-		copyEnvFiles = true;
-	}
 </script>
 
-<Dialog.Root
-	bind:open
-	onOpenChange={(isOpen) => {
-		if (isOpen) {
-			newBranchName = suggestedBranch;
-		} else {
-			resetState();
-		}
-	}}
->
+<Dialog.Root bind:open>
 	<Dialog.Content
 		class="border-wb-hair bg-wb-panel text-wb-ink shadow-2xl sm:max-w-lg"
 		showCloseButton={!pending}
@@ -181,6 +170,9 @@
 						readonly
 						class="border-wb-hair bg-wb-bg font-mono text-[11.5px] text-wb-ink-mute"
 					/>
+					<span class="text-[11px] text-wb-ink-soft">
+						If that folder exists, the host adds -2, -3, … to the name.
+					</span>
 				</div>
 			{/if}
 

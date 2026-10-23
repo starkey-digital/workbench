@@ -241,9 +241,19 @@ export async function poll(fetch: Fetch): Promise<Line[]> {
 	);
 	if (res?.status === 404) hello.needed = true;
 	if (!res?.ok) return [];
-	const lines = JSON.parse(res.text || '[]') as Line[];
+	let lines: unknown;
+	try {
+		lines = JSON.parse(res.text || '[]');
+	} catch {
+		return [];
+	}
+	if (!Array.isArray(lines)) return [];
 	// An older server numbers nothing.
-	return lines.filter((line) => typeof line.wbSeq !== 'number' || line.wbSeq > inSeq);
+	return (lines as unknown[]).filter((line): line is Line => {
+		if (!line || typeof line !== 'object') return false;
+		const seq = (line as Line).wbSeq;
+		return typeof seq !== 'number' || seq > inSeq;
+	});
 }
 
 /** `line` from `poll` has run (or failed): the next poll acknowledges it. */
@@ -344,10 +354,16 @@ export async function askInChat(
 			withdraw(fetch, requestId, true);
 			return null;
 		}
+		try {
+			answer = askAnswer(res.text);
+		} catch {
+			// Not the server's reply, so its lines stay queued; the terminal's dialog asks.
+			withdraw(fetch, requestId, true);
+			return null;
+		}
 		confirm(batch);
 		failed = 0;
 		first = undefined;
-		answer = askAnswer(res.text);
 	}
 	if (signal.aborted) withdraw(fetch, requestId);
 	return answer ?? null;

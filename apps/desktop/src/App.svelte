@@ -76,8 +76,10 @@
 	setClaudeSettingsStore(new ClaudeSettingsStore());
 	setUpdaterStore(new UpdaterStore());
 	setProjectManager(new ProjectManagerStore(projectStore, gitStore));
-	setWorktreeManager(new WorktreeManagerStore(projectStore, workspaceStore, gitStore, githubStore));
 	const trelloStore = setTrelloStore(new TrelloStore());
+	setWorktreeManager(
+		new WorktreeManagerStore(projectStore, workspaceStore, gitStore, githubStore, trelloStore)
+	);
 	setSidebarStore(new SidebarStore());
 	const instancesStore = setInstancesStore(new InstancesStore());
 	new NotificationStore(workspaceStore, claudeSessionStore);

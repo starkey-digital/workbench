@@ -9,15 +9,18 @@
 	let removalBranch = $derived(manager.removal.pendingValue?.branch ?? '');
 </script>
 
-<WorktreeDialog
-	bind:open={manager.dialogOpen}
-	branches={manager.dialogBranches}
-	projectPath={manager.dialogProjectPath}
-	error={manager.dialogError}
-	pending={manager.creating}
-	suggestedBranch={manager._suggestedBranch}
-	onSave={(branch, newBranch, copyOptions) => manager.create(branch, newBranch, copyOptions)}
-/>
+{#key manager.dialogSession}
+	<WorktreeDialog
+		bind:open={manager.dialogOpen}
+		branches={manager.dialogBranches}
+		projectPath={manager.dialogProjectPath}
+		error={manager.dialogError}
+		pending={manager.creating}
+		suggestedBranch={manager._suggestedBranch}
+		suggestedMode={manager._suggestedMode}
+		onSave={(branch, newBranch, copyOptions) => manager.create(branch, newBranch, copyOptions)}
+	/>
+{/key}
 
 <ConfirmDialog
 	bind:open={manager.removal.open}

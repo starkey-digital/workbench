@@ -14,6 +14,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { load } from '@tauri-apps/plugin-store';
 import { log } from '$lib/log';
+import { serial } from '$lib/utils/serial';
 
 type CheckNotification = {
 	name: string;
@@ -34,6 +35,8 @@ const EDIT_ONLY_TRIGGERS = new Set([
 
 /** Floor between hook/watcher-driven GitHub fetches for a given project. */
 const HOOK_REFRESH_THROTTLE_MS = 60_000;
+const TRACKED_RETRY_MS = 15_000;
+const TRACKED_RETRY_MAX_MS = 10 * 60_000;
 
 export class GitHubStore {
 	private workspaces = getWorkspaceStore();
@@ -138,6 +141,9 @@ export class GitHubStore {
 
 	// Not reactive — internal bookkeeping only
 	private trackedProjectsFingerprint = '';
+	private trackedSync = serial();
+	private trackedRetry: ReturnType<typeof setTimeout> | undefined;
+	private trackedRetryMs = TRACKED_RETRY_MS;
 	lastRefreshedAt: Record<string, number> = {};
 	private lastHookRefreshAt: Record<string, number> = {};
 	private pendingHookRefresh: Record<string, ReturnType<typeof setTimeout>> = {};
@@ -268,17 +274,28 @@ export class GitHubStore {
 		this.checksByPr = nextChecksByPr;
 	}
 
-	async syncTrackedProjects(): Promise<void> {
+	/** One send at a time, each of the set as it is then, so the newest set lands last. */
+	syncTrackedProjects(): Promise<void> {
+		return this.trackedSync(() => this.sendTrackedProjects());
+	}
+
+	private async sendTrackedProjects(): Promise<void> {
 		if (this.ghAvailable !== true) return;
 		const projectPaths = this.trackedProjectPaths.slice().sort();
 		const fingerprint = projectPaths.join('\n');
 		if (fingerprint === this.trackedProjectsFingerprint) return;
-		this.trackedProjectsFingerprint = fingerprint;
-
 		try {
 			await invoke('github_set_tracked_projects', { projectPaths });
+			this.trackedProjectsFingerprint = fingerprint;
+			clearTimeout(this.trackedRetry);
+			this.trackedRetryMs = TRACKED_RETRY_MS;
 		} catch (e) {
 			log.warn('GitHubStore', 'Failed to sync tracked projects:', e);
+			// The set may not change again for a long while, so try again on our own,
+			// backing off while it keeps failing.
+			clearTimeout(this.trackedRetry);
+			this.trackedRetry = setTimeout(() => void this.syncTrackedProjects(), this.trackedRetryMs);
+			this.trackedRetryMs = Math.min(this.trackedRetryMs * 2, TRACKED_RETRY_MAX_MS);
 		}
 	}
 

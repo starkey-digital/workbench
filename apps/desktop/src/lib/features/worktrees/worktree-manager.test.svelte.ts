@@ -1,11 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { invokeSpy, mockInvoke, clearInvokeMocks } from '../../../test/tauri-mocks';
+import { toast } from 'svelte-sonner';
 import { WorktreeManagerStore } from './worktree-manager.svelte';
 import type { GitHubStore } from '$stores/github.svelte';
 import type { GitStore } from '$stores/git.svelte';
 import type { ProjectStore } from '$stores/projects.svelte';
 import type { WorkspaceStore } from '$stores/workspaces.svelte';
 import type { BranchInfo, ProjectConfig, ProjectWorkspace } from '$types/workbench';
+
+vi.mock('svelte-sonner', () => ({ toast: { warning: vi.fn() } }));
 
 function makeProject(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
 	return { name: 'Test', path: '/projects/test', ...overrides };
@@ -30,7 +33,9 @@ function createMocks() {
 		prsByProject: {}
 	} as unknown as GitHubStore;
 
-	return { projectStore, workspaceStore, gitStore, githubStore };
+	const trelloStore = { linkTaskToBranch: vi.fn() };
+
+	return { projectStore, workspaceStore, gitStore, githubStore, trelloStore };
 }
 
 describe('WorktreeManagerStore', () => {
@@ -43,15 +48,28 @@ describe('WorktreeManagerStore', () => {
 			mocks.projectStore,
 			mocks.workspaceStore,
 			mocks.gitStore,
-			mocks.githubStore
+			mocks.githubStore,
+			mocks.trelloStore
 		);
 	});
 
 	afterEach(() => {
 		clearInvokeMocks();
+		vi.mocked(toast.warning).mockClear();
 	});
 
 	describe('add', () => {
+		it('starts a fresh dialog session per add, in existing mode for a fetched branch', async () => {
+			mockInvoke('list_branches', () => []);
+			const before = manager.dialogSession;
+
+			await manager.add('/projects/test', { suggestedBranch: 'pr-head', existingBranch: true });
+
+			expect(manager.dialogSession).toBe(before + 1);
+			expect(manager._suggestedMode).toBe('existing');
+			expect(manager._suggestedBranch).toBe('pr-head');
+		});
+
 		it('opens dialog and fetches branches via invoke', async () => {
 			const branches: BranchInfo[] = [
 				{ name: 'main', sha: 'abc123', isCurrent: true, isRemote: false },
@@ -166,6 +184,24 @@ describe('WorktreeManagerStore', () => {
 			expect(manager.dialogOpen).toBe(false);
 		});
 
+		it('links the pending Trello card to the new branch', async () => {
+			vi.mocked(mocks.gitStore.refreshGitState).mockResolvedValue();
+			mockInvoke('list_branches', () => []);
+			mockInvoke('create_worktree', () => '/projects/repo-wt');
+			await manager.add('/projects/repo', { cardId: 'c1', boardId: 'b1' });
+
+			await manager.create('feature', true, { aiConfig: false, envFiles: false });
+
+			expect(mocks.trelloStore.linkTaskToBranch).toHaveBeenCalledWith(
+				'/projects/repo',
+				'c1',
+				'b1',
+				'feature',
+				'/projects/repo-wt'
+			);
+			expect(manager.dialogError).toBe('');
+		});
+
 		it('clears creating after failure so the user can retry', async () => {
 			mockInvoke('create_worktree', () => Promise.reject(new Error('boom')));
 			manager.dialogProjectPath = '/projects/repo';
@@ -234,7 +270,8 @@ describe('WorktreeManagerStore', () => {
 				projectPath: '/projects/repo',
 				worktreePath: '/projects/repo-wt',
 				branch: 'feature',
-				branchHasMergedPr: false
+				branchHasMergedPr: false,
+				mergedHeads: []
 			});
 		});
 
@@ -295,6 +332,35 @@ describe('WorktreeManagerStore', () => {
 				deleteBranch: true
 			});
 			expect(invokeSpy).not.toHaveBeenCalledWith('delete_branch', expect.anything());
+			expect(toast.warning).toHaveBeenCalledWith('Kept branch feature', expect.anything());
+		});
+
+		it('deletes a squash-merged branch through its merged PR heads', async () => {
+			vi.mocked(mocks.workspaceStore.getByWorktreePath).mockReturnValue(undefined);
+			vi.mocked(mocks.gitStore.refreshGitState).mockResolvedValue();
+			mocks.githubStore.prsByProject = {
+				'/projects/repo': [
+					{ headRefName: 'feature', state: 'MERGED', headRefOid: 'old' },
+					{ headRefName: 'feature', state: 'MERGED', headRefOid: 'new' }
+				]
+			} as never;
+			mockInvoke('remove_worktree', () => ({ branchDeleted: false }));
+			let deleted = true;
+			mockInvoke('delete_merged_branch', () => deleted);
+
+			manager.remove('/projects/repo', '/projects/repo-wt', 'feature');
+			await manager.confirmRemove();
+			expect(invokeSpy).toHaveBeenCalledWith('delete_merged_branch', {
+				repoPath: '/projects/repo',
+				branch: 'feature',
+				heads: ['old', 'new']
+			});
+			expect(toast.warning).not.toHaveBeenCalled();
+
+			deleted = false;
+			manager.remove('/projects/repo', '/projects/repo-wt', 'feature');
+			await manager.confirmRemove();
+			expect(toast.warning).toHaveBeenCalledWith('Kept branch feature', expect.anything());
 		});
 
 		it('confirmRemove() deletes the branch itself on a host that predates deleteBranch', async () => {

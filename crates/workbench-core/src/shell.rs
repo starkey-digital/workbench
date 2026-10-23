@@ -345,6 +345,14 @@ pub fn inherited_env() -> Vec<(&'static str, String)> {
 /// bare LF leaves the command sitting at the prompt, unexecuted. Every startup
 /// command goes through here so the two can't drift apart again.
 pub fn submit_line(writer: &mut dyn Write, line: &str) -> std::io::Result<()> {
+    // Typed into a line editor, any other control character is a key: TAB
+    // completes, ^C or ^U discard the line and run what follows it.
+    if line.chars().any(|c| c != '\n' && c.is_control()) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "a typed command can't hold control characters",
+        ));
+    }
     writer.write_all(line.as_bytes())?;
     writer.write_all(b"\r")?;
     writer.flush()
@@ -493,6 +501,7 @@ mod tests {
     fn submit_line_terminates_with_cr() {
         let mut out: Vec<u8> = Vec::new();
         submit_line(&mut out, "claude").unwrap();
+        assert!(submit_line(&mut Vec::new(), "claude '\u{3}rm x'").is_err());
         assert_eq!(out, b"claude\r");
     }
 

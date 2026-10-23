@@ -1,7 +1,9 @@
+import { toast } from 'svelte-sonner';
 import { ConfirmAction } from '$lib/utils/confirm-action.svelte';
 import type { GitHubStore } from '$stores/github.svelte';
 import type { GitStore } from '$stores/git.svelte';
 import type { ProjectStore } from '$stores/projects.svelte';
+import type { TrelloStore } from '$stores/trello.svelte';
 import type { WorkspaceStore } from '$stores/workspaces.svelte';
 import type { BranchInfo, WorktreeCopyOptions } from '$types/workbench';
 import { invoke } from '$lib/transport';
@@ -12,6 +14,8 @@ interface WorktreeRemoval {
 	worktreePath: string;
 	branch: string;
 	branchHasMergedPr: boolean;
+	/** Head commits of the branch's merged PRs, as GitHub gave them. */
+	mergedHeads: string[];
 }
 
 export class WorktreeManagerStore {
@@ -25,11 +29,15 @@ export class WorktreeManagerStore {
 
 	_pendingTaskLink: { cardId: string; boardId: string } | null = $state(null);
 	_suggestedBranch = $state('');
+	_suggestedMode = $state<'new' | 'existing'>('new');
+	/** Bumped by each `add()`, so the dialog starts fresh from the suggestions. */
+	dialogSession = $state(0);
 
 	private projectStore: ProjectStore;
 	private workspaceStore: WorkspaceStore;
 	private gitStore: GitStore;
 	private githubStore: GitHubStore;
+	private trelloStore: Pick<TrelloStore, 'linkTaskToBranch'>;
 
 	/** Closing the dialog is ignored while a worktree is being created. */
 	get dialogOpen() {
@@ -44,17 +52,25 @@ export class WorktreeManagerStore {
 		projectStore: ProjectStore,
 		workspaceStore: WorkspaceStore,
 		gitStore: GitStore,
-		githubStore: GitHubStore
+		githubStore: GitHubStore,
+		trelloStore: Pick<TrelloStore, 'linkTaskToBranch'>
 	) {
 		this.projectStore = projectStore;
 		this.workspaceStore = workspaceStore;
 		this.gitStore = gitStore;
 		this.githubStore = githubStore;
+		this.trelloStore = trelloStore;
 	}
 
 	async add(
 		projectPath: string,
-		options?: { suggestedBranch?: string; cardId?: string; boardId?: string }
+		options?: {
+			suggestedBranch?: string;
+			/** The suggestion is a branch that already exists, e.g. a fetched PR head. */
+			existingBranch?: boolean;
+			cardId?: string;
+			boardId?: string;
+		}
 	) {
 		if (this.creating) return;
 		this.dialogProjectPath = projectPath;
@@ -65,12 +81,17 @@ export class WorktreeManagerStore {
 				? { cardId: options.cardId, boardId: options.boardId }
 				: null;
 		this._suggestedBranch = options?.suggestedBranch ?? '';
+		this._suggestedMode = options?.existingBranch ? 'existing' : 'new';
+		const session = ++this.dialogSession;
 		this.dialogOpen = true;
 
 		try {
-			this.dialogBranches = await invoke<BranchInfo[]>('list_branches', { path: projectPath });
+			const branches = await invoke<BranchInfo[]>('list_branches', { path: projectPath });
+			// A later open's dialog isn't this project's.
+			if (session === this.dialogSession) this.dialogBranches = branches;
 		} catch (e) {
-			this.dialogError = `Failed to list branches: ${String(e)}`;
+			if (session === this.dialogSession)
+				this.dialogError = `Failed to list branches: ${String(e)}`;
 		}
 	}
 
@@ -92,9 +113,7 @@ export class WorktreeManagerStore {
 			}
 
 			if (this._pendingTaskLink) {
-				const { getTrelloStore } = await import('$stores/context');
-				const trelloStore = getTrelloStore();
-				trelloStore.linkTaskToBranch(
+				this.trelloStore.linkTaskToBranch(
 					this.dialogProjectPath,
 					this._pendingTaskLink.cardId,
 					this._pendingTaskLink.boardId,
@@ -121,14 +140,22 @@ export class WorktreeManagerStore {
 	remove(projectPath: string, worktreePath: string, branch: string) {
 		if (this.removal.busy) return;
 		const prs = this.githubStore.prsByProject[projectPath] ?? [];
-		const branchHasMergedPr = prs.some((p) => p.headRefName === branch && p.state === 'MERGED');
+		// A reused branch name can have several merged PRs.
+		const merged = prs.filter((p) => p.headRefName === branch && p.state === 'MERGED');
+		const branchHasMergedPr = merged.length > 0;
 		this.deleteBranchOnRemove = branchHasMergedPr;
-		this.removal.request({ projectPath, worktreePath, branch, branchHasMergedPr });
+		this.removal.request({
+			projectPath,
+			worktreePath,
+			branch,
+			branchHasMergedPr,
+			mergedHeads: merged.flatMap((p) => (p.headRefOid ? [p.headRefOid] : []))
+		});
 	}
 
 	async confirmRemove(force = false) {
 		const deleteBranch = this.deleteBranchOnRemove;
-		await this.removal.confirm(async ({ projectPath, worktreePath, branch }) => {
+		await this.removal.confirm(async ({ projectPath, worktreePath, branch, mergedHeads }) => {
 			const removeBranch = deleteBranch && !!branch;
 			const removed = await invoke<{ branchDeleted?: boolean } | null>('remove_worktree', {
 				repoPath: projectPath,
@@ -138,11 +165,27 @@ export class WorktreeManagerStore {
 			});
 			const ws = this.workspaceStore.getByWorktreePath(worktreePath);
 			if (ws) this.workspaceStore.close(ws.id);
-			// A host that predates `deleteBranch` leaves the branch to us.
-			if (removeBranch && removed?.branchDeleted === undefined) {
-				await invoke('delete_branch', { repoPath: projectPath, branch, force: false }).catch((e) =>
-					log.warn('WorktreeManager', 'Failed to delete branch:', e)
-				);
+			if (removeBranch) {
+				const attempt = (cmd: string, args: Record<string, unknown>) =>
+					invoke<unknown>(cmd, { repoPath: projectPath, branch, ...args }).then(
+						(deleted) => deleted !== false,
+						(e) => {
+							log.warn('WorktreeManager', 'Failed to delete branch:', e);
+							return false;
+						}
+					);
+				// A host that predates `deleteBranch` leaves the branch to us. `git branch -d`
+				// refuses a squash-merged branch, so it goes too while it still is a merged PR's head.
+				const branchDeleted =
+					(removed?.branchDeleted ?? (await attempt('delete_branch', { force: false }))) ||
+					(mergedHeads.length > 0 &&
+						(await attempt('delete_merged_branch', { heads: mergedHeads })));
+				if (!branchDeleted) {
+					toast.warning(`Kept branch ${branch}`, {
+						description:
+							"It couldn't be deleted: it may be checked out elsewhere, or have commits that aren't merged."
+					});
+				}
 			}
 			await this.gitStore.refreshGitState(projectPath);
 		});

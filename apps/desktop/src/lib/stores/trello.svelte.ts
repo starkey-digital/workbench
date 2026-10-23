@@ -12,8 +12,11 @@ import type { TrelloMergeActionAppliedEvent } from '$types/workbench';
 import type { WorkspaceStore } from './workspaces.svelte';
 import { getWorkspaceStore } from './context';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { toast } from 'svelte-sonner';
+import { emit, listen } from '@tauri-apps/api/event';
 import { log } from '$lib/log';
+import { serial } from '$lib/utils/serial';
+import { uid } from '$lib/utils/uid';
 
 /**
  * The settings OS window instantiates TrelloStore without a WorkspaceStore in
@@ -29,6 +32,15 @@ function tryGetWorkspaceStore(): WorkspaceStore | null {
 	}
 }
 
+/** A window saved a project's Trello config. */
+const CONFIG_CHANGED = 'trello:config-changed';
+
+interface ConfigChange {
+	source: string;
+	projectPath: string;
+	config: TrelloProjectConfig;
+}
+
 export class TrelloStore {
 	// --- State ---
 	credentials: TrelloCredentials | null = $state(null);
@@ -41,8 +53,12 @@ export class TrelloStore {
 	// Private refs to other stores. Null in the settings window (no WorkspaceStore
 	// in context there); the settings UI takes its project path from the query string.
 	private workspaces = tryGetWorkspaceStore();
+	private windowId = uid();
 
 	constructor() {
+		listen<ConfigChange>(CONFIG_CHANGED, ({ payload }) => {
+			if (payload.source !== this.windowId) this.applyConfig(payload.projectPath, payload.config);
+		}).catch((e) => log.warn('TrelloStore', 'Failed to listen for config changes:', e));
 		listen<TrelloMergeActionAppliedEvent>('trello:merge-action-applied', (event) => {
 			void this.refreshAllBoards(event.payload.projectPath);
 		});
@@ -116,15 +132,84 @@ export class TrelloStore {
 			const config = await invoke<TrelloProjectConfig>('trello_load_project_config', {
 				projectPath
 			});
-			this.configByProject = { ...this.configByProject, [projectPath]: config };
+			this.applyConfig(projectPath, config);
 		} catch (e) {
 			log.warn('TrelloStore', 'Failed to load project config:', e);
 		}
 	}
 
-	async saveProjectConfig(projectPath: string, config: TrelloProjectConfig): Promise<void> {
-		await invoke('trello_save_project_config', { projectPath, config });
+	/**
+	 * The host writes one board or one link at a time, under one lock, so the
+	 * settings window's board edits and this window's links can't drop each
+	 * other; each write's result goes to every other window.
+	 *
+	 * `edit` gets the saved board (as last written) and returns its new state;
+	 * edits run one after another, each from the previous one's result.
+	 */
+	editBoard(projectPath: string, boardId: string, edit: (board: BoardConfig) => BoardConfig) {
+		return this.queueBoardWrite(async () => {
+			const board = this.configByProject[projectPath]?.boards.find((b) => b.boardId === boardId);
+			if (!board) throw new Error('that board is no longer in the saved settings');
+			this.applySaved(
+				projectPath,
+				await invoke<TrelloProjectConfig>('trello_put_board', {
+					projectPath,
+					board: edit(board),
+					keepExisting: false
+				})
+			);
+		});
+	}
+
+	/** Add a board; one already saved keeps its settings. */
+	addBoard(projectPath: string, board: BoardConfig) {
+		return this.queueBoardWrite(async () =>
+			this.applySaved(
+				projectPath,
+				await invoke<TrelloProjectConfig>('trello_put_board', {
+					projectPath,
+					board,
+					keepExisting: true
+				})
+			)
+		);
+	}
+
+	removeBoard(projectPath: string, boardId: string) {
+		return this.queueBoardWrite(async () =>
+			this.applySaved(
+				projectPath,
+				await invoke<TrelloProjectConfig>('trello_remove_board', { projectPath, boardId })
+			)
+		);
+	}
+
+	private queueBoardWrite = serial();
+
+	private async setTaskLink(projectPath: string, cardId: string, link: TaskLink | null) {
+		const config = await invoke<TrelloProjectConfig>('trello_set_task_link', {
+			projectPath,
+			cardId,
+			link
+		});
+		this.applySaved(projectPath, config);
+		return config;
+	}
+
+	/**
+	 * Keep `config` unless this window already has a newer one: loads, saves and
+	 * other windows' results can land in any order.
+	 */
+	private applyConfig(projectPath: string, config: TrelloProjectConfig) {
+		const held = this.configByProject[projectPath];
+		if (held && (held.revision ?? 0) > (config.revision ?? 0)) return;
 		this.configByProject = { ...this.configByProject, [projectPath]: config };
+	}
+
+	private applySaved(projectPath: string, config: TrelloProjectConfig) {
+		this.applyConfig(projectPath, config);
+		const change: ConfigChange = { source: this.windowId, projectPath, config };
+		void emit(CONFIG_CHANGED, change).catch(() => {});
 	}
 
 	async fetchAvailableBoards(): Promise<void> {
@@ -184,38 +269,37 @@ export class TrelloStore {
 		await invoke('trello_remove_label', { cardId, labelId });
 	}
 
-	linkTaskToBranch(
+	async linkTaskToBranch(
 		projectPath: string,
 		cardId: string,
 		boardId: string,
 		branch: string,
 		worktreePath?: string
-	): void {
-		const config = this.configByProject[projectPath] ?? { boards: [], taskLinks: [] };
-		const existing = config.taskLinks.findIndex((t) => t.cardId === cardId);
+	): Promise<void> {
 		const link: TaskLink = { cardId, boardId, branch, worktreePath, projectPath };
-		const taskLinks =
-			existing >= 0
-				? config.taskLinks.map((t, i) => (i === existing ? link : t))
-				: [...config.taskLinks, link];
-		const updated = { ...config, taskLinks };
-		this.saveProjectConfig(projectPath, updated);
+		let config: TrelloProjectConfig;
+		try {
+			config = await this.setTaskLink(projectPath, cardId, link);
+		} catch (e) {
+			log.warn('TrelloStore', 'Failed to link task:', e);
+			toast.error(`Couldn't link the Trello card: ${String(e)}`);
+			return;
+		}
 
 		// Execute link action if configured
 		const board = config.boards.find((b) => b.boardId === boardId);
 		if (board?.linkAction) {
-			this.executeBoardAction(cardId, board.linkAction, projectPath);
+			await this.executeBoardAction(cardId, board.linkAction, projectPath);
 		}
 	}
 
-	unlinkTask(projectPath: string, cardId: string): void {
-		const config = this.configByProject[projectPath];
-		if (!config) return;
-		const updated = {
-			...config,
-			taskLinks: config.taskLinks.filter((t) => t.cardId !== cardId)
-		};
-		this.saveProjectConfig(projectPath, updated);
+	async unlinkTask(projectPath: string, cardId: string): Promise<void> {
+		try {
+			await this.setTaskLink(projectPath, cardId, null);
+		} catch (e) {
+			log.warn('TrelloStore', 'Failed to unlink task:', e);
+			toast.error(`Couldn't unlink the Trello card: ${String(e)}`);
+		}
 	}
 
 	private async executeBoardAction(

@@ -68,4 +68,6 @@ export interface TaskLink {
 export interface TrelloProjectConfig {
 	boards: BoardConfig[];
 	taskLinks: TaskLink[];
+	/** Bumped by every save; absent from an older host. */
+	revision?: number;
 }

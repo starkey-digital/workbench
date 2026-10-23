@@ -397,6 +397,7 @@ mod tests {
             url: String::new(),
             is_draft: false,
             head_ref_name: branch.to_string(),
+            head_ref_oid: String::new(),
             review_decision: None,
             checks_status: checks_status(0),
             merge_state_status: Some("CLEAN".to_string()),

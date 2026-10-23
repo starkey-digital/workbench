@@ -8,7 +8,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
-use std::sync::{mpsc, Arc, Mutex, OnceLock};
+use std::sync::{mpsc, Arc, Mutex, OnceLock, TryLockError};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -127,10 +127,14 @@ struct Inner {
     /// Held while this process keeps the config dir's model file.
     lock: OnceLock<lock::ModelLock>,
     /// Recent commands by their client `requestId`, so a retry gets the first
-    /// answer instead of a second session.
-    requests: Mutex<VecDeque<(String, Instant, Applied)>>,
+    /// answer instead of a second session. Each answer has its own lock, held
+    /// while it is applied: a retry waits for its first try, nothing else does.
+    requests: Mutex<VecDeque<(String, Instant, RequestSlot)>>,
     saving: Mutex<Saving>,
 }
+
+/// One `requestId`'s answer: `None` until applied, and again if that failed.
+type RequestSlot = Arc<Mutex<Option<Applied>>>;
 
 /// How many request ids, and for how long, a command's answer is kept.
 const REQUESTS_KEPT: usize = 256;
@@ -237,17 +241,38 @@ impl WorkspaceService {
         let Some(request_id) = request_id else {
             return self.command(cmd);
         };
-        // Held across the apply, so a retry racing the first waits for its answer.
+        // A slot still being applied is never dropped, or its retry would apply again.
+        let applying = |slot: &RequestSlot| matches!(slot.try_lock(), Err(TryLockError::WouldBlock));
         let mut requests = lock(&self.0.requests);
-        requests.retain(|(_, at, _)| at.elapsed() < REQUEST_TTL);
-        if let Some((_, _, applied)) = requests.iter().find(|(id, ..)| *id == request_id) {
+        requests.retain(|(_, at, slot)| at.elapsed() < REQUEST_TTL || applying(slot));
+        let (slot, fresh) = match requests.iter().find(|(id, ..)| *id == request_id) {
+            Some((_, _, slot)) => (slot.clone(), false),
+            None => {
+                if requests.len() >= REQUESTS_KEPT {
+                    if let Some(oldest) = requests.iter().position(|(_, _, slot)| !applying(slot)) {
+                        requests.remove(oldest);
+                    }
+                }
+                let slot = RequestSlot::default();
+                requests.push_back((request_id, Instant::now(), slot.clone()));
+                (slot, true)
+            }
+        };
+        // A first try takes its slot before releasing the list, so a racing retry
+        // waits for its answer; a retry releases the list first, so only it waits.
+        let mut answer = if fresh {
+            let answer = lock(&slot);
+            drop(requests);
+            answer
+        } else {
+            drop(requests);
+            lock(&slot)
+        };
+        if let Some(applied) = answer.as_ref() {
             return Ok(applied.clone());
         }
         let applied = self.command(cmd)?;
-        if requests.len() >= REQUESTS_KEPT {
-            requests.pop_front();
-        }
-        requests.push_back((request_id, Instant::now(), applied.clone()));
+        *answer = Some(applied.clone());
         Ok(applied)
     }
 

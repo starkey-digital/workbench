@@ -9,6 +9,7 @@
 	import { openUrl } from '$lib/utils/open-url';
 	import { invoke } from '@tauri-apps/api/core';
 	import { onDestroy } from 'svelte';
+	import { toast } from 'svelte-sonner';
 	import { watch } from 'runed';
 	import ChecksList from './ChecksList.svelte';
 	import GitHubBranchBar from './GitHubBranchBar.svelte';
@@ -43,8 +44,18 @@
 
 	async function openPrAsWorktree() {
 		if (!projectPath || !pr) return;
-		await invoke('github_fetch_pr_branch', { projectPath, branch: pr.headRefName });
-		worktreeManager.add(projectPath, { suggestedBranch: pr.headRefName });
+		try {
+			await invoke('github_fetch_pr_branch', {
+				projectPath,
+				prNumber: pr.number,
+				branch: pr.headRefName
+			});
+		} catch (e) {
+			// git won't fetch into a checked-out branch, or over a local one that moved elsewhere.
+			toast.error(`Couldn't fetch ${pr.headRefName}: ${String(e)}`);
+			return;
+		}
+		worktreeManager.add(projectPath, { suggestedBranch: pr.headRefName, existingBranch: true });
 	}
 
 	// Trigger data fetch when sidebar target changes (external side effect -- network requests)

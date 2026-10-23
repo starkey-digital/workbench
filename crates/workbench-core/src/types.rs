@@ -549,6 +549,9 @@ pub struct GitHubPR {
     pub url: String,
     pub is_draft: bool,
     pub head_ref_name: String,
+    /// The PR's head commit; empty from an older listing.
+    #[serde(default)]
+    pub head_ref_oid: String,
     pub review_decision: Option<String>,
     pub checks_status: GitHubChecksStatus,
     pub merge_state_status: Option<String>,

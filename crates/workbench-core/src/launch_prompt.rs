@@ -3,8 +3,18 @@
 //! prompt like `--dangerously-skip-permissions` stays a prompt, never a flag.
 
 /// The prompt trimmed with line endings unified, or `None` when there's nothing to send.
+///
+/// The command is typed into an interactive shell, where any other control
+/// character is a line-editor key (TAB completes, ^C or ^U discard the line and
+/// run what follows), so tabs become spaces and the rest are dropped.
 pub fn normalize(prompt: Option<&str>) -> Option<String> {
-    let prompt = prompt?.replace("\r\n", "\n").replace('\r', "\n");
+    let prompt: String = prompt?
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .replace('\t', "    ")
+        .chars()
+        .filter(|&c| c == '\n' || !c.is_control())
+        .collect();
     let prompt = prompt.trim();
     (!prompt.is_empty()).then(|| prompt.to_string())
 }
@@ -31,4 +41,22 @@ pub fn dropped_notice(agent: &str) -> String {
 
 pub fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', r#"'"'"'"#))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn line_editor_keys_never_reach_the_shell() {
+        assert_eq!(
+            normalize(Some("fix:\r\n\tcode\u{3}rm -rf ~\u{15}\u{1b}[A")).as_deref(),
+            Some("fix:\n    coderm -rf ~[A")
+        );
+    }
+
+    #[test]
+    fn a_prompt_of_only_control_characters_is_nothing() {
+        assert_eq!(normalize(Some("\u{3}\t\r\n")), None);
+    }
 }

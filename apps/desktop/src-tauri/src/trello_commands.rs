@@ -126,13 +126,36 @@ pub async fn trello_load_project_config(
 }
 
 #[tauri::command]
-pub async fn trello_save_project_config(
+pub async fn trello_put_board(
     project_path: String,
-    config: TrelloProjectConfig,
-) -> Result<bool, String> {
+    board: BoardConfig,
+    keep_existing: bool,
+) -> Result<TrelloProjectConfig, String> {
     crate::blocking(move || {
-        config::save_project_config(&project_path, &config).map_err(|e| e.to_string())?;
-        Ok(true)
+        config::put_board(&project_path, board, keep_existing).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn trello_remove_board(
+    project_path: String,
+    board_id: String,
+) -> Result<TrelloProjectConfig, String> {
+    crate::blocking(move || {
+        config::remove_board(&project_path, &board_id).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn trello_set_task_link(
+    project_path: String,
+    card_id: String,
+    link: Option<TaskLink>,
+) -> Result<TrelloProjectConfig, String> {
+    crate::blocking(move || {
+        config::set_task_link(&project_path, &card_id, link).map_err(|e| e.to_string())
     })
     .await
 }

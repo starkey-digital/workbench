@@ -627,6 +627,21 @@ describe('GitHubStore', () => {
 			expect(calls).toHaveLength(1);
 			expect(calls[0]).toEqual(['github_set_tracked_projects', { projectPaths: ['/project'] }]);
 		});
+
+		it('sends again after a failed send', async () => {
+			store.ghAvailable = true;
+			mockProjectStore.projects = [{ name: 'test', path: '/project' }];
+			mockSessionStore.activeSessionsByProject = { '/project': ['session-1'] };
+			mockGitStore.branchByProject = { '/project': 'main' };
+			mockInvoke('github_set_tracked_projects', () => Promise.reject(new Error('busy')));
+			await store.syncTrackedProjects();
+
+			mockInvoke('github_set_tracked_projects', () => undefined);
+			await store.syncTrackedProjects();
+
+			const calls = invokeSpy.mock.calls.filter(([cmd]) => cmd === 'github_set_tracked_projects');
+			expect(calls).toHaveLength(2);
+		});
 	});
 
 	// ─── github:project-status event ──────────────────────────

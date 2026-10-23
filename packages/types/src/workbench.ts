@@ -325,6 +325,8 @@ export interface GitHubPR {
 	url: string;
 	isDraft: boolean;
 	headRefName: string;
+	/** The PR's head commit; empty from an older host. */
+	headRefOid?: string;
 	reviewDecision: 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED' | null;
 	checksStatus: GitHubChecksStatus;
 	mergeStateStatus:

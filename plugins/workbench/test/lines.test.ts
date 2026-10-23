@@ -1,5 +1,11 @@
 import { expect, test } from 'bun:test';
-import { commandRowOutput } from '../hooks/lines';
+import { askAnswer, commandRowOutput } from '../hooks/lines';
+
+test("a reply that isn't the server's answer throws, for the caller to fall back", () => {
+	for (const text of ['<html>502</html>', '', 'null', '7', '[]']) {
+		expect(() => askAnswer(text)).toThrow();
+	}
+});
 
 test("a command's output row gives what it printed", () => {
 	expect(

@@ -58,5 +58,6 @@ export function clearListeners() {
 }
 
 vi.mock('@tauri-apps/api/event', () => ({
-	listen: listenSpy
+	listen: listenSpy,
+	emit: vi.fn(async () => {})
 }));
