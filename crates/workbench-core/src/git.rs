@@ -415,21 +415,21 @@ pub fn create_worktree(request: &CreateWorktreeRequest) -> Result<String> {
     // One folder per worktree: `feature/login` would otherwise nest under a shared `feature/`.
     let folder = request.branch.replace('/', "-");
 
-    let worktree_path = if strategy == "inside" {
-        Path::new(&repo_root)
-            .join(".worktrees")
-            .join(&folder)
-            .to_string_lossy()
-            .to_string()
+    let base = if strategy == "inside" {
+        Path::new(&repo_root).join(".worktrees").join(&folder)
     } else {
         let repo = Path::new(&request.repo_path);
         let parent = repo.parent().context("Cannot determine parent directory")?;
         let repo_name = repo.file_name().and_then(|n| n.to_str()).unwrap_or("repo");
-        parent
-            .join(format!("{repo_name}-{folder}"))
-            .to_string_lossy()
-            .to_string()
+        parent.join(format!("{repo_name}-{folder}"))
     };
+    // `feature/login` and `feature-login` share a folder name: the second gets `-2`.
+    let worktree_path = std::iter::once(base.clone())
+        .chain((2..).map(|n| PathBuf::from(format!("{}-{n}", base.display()))))
+        .find(|path| path.symlink_metadata().is_err())
+        .expect("an unbounded range has a free name")
+        .to_string_lossy()
+        .to_string();
 
     // For new branches: optionally fetch first, then branch from a start point
     let resolved_start_point = if request.new_branch {
@@ -514,6 +514,34 @@ pub fn remove_worktree(repo_path: &str, worktree_path: &str, force: bool) -> Res
     args.push(worktree_path);
     git_output(&args, repo_path)?;
     Ok(())
+}
+
+/// Whether `branch`'s whole diff already landed on `origin/<default>` as one
+/// commit — a squash merge, which `git branch -d` reads as unmerged. A later
+/// commit on the branch changes its diff, so this never vouches for unmerged work.
+pub fn squash_merged(repo_path: &str, branch: &str) -> Result<bool> {
+    let base = format!("origin/{}", get_default_branch(repo_path)?);
+    let _ = git_output(&["fetch", "-q", "origin"], repo_path);
+    let merge_base = git_output(&["merge-base", &base, branch], repo_path)?;
+    let tree = git_output(&["rev-parse", &format!("{branch}^{{tree}}")], repo_path)?;
+    // The branch squashed onto its merge base: a dangling object, never referenced.
+    let squashed = git_output(
+        &[
+            "-c",
+            "user.name=Workbench",
+            "-c",
+            "user.email=workbench@localhost",
+            "commit-tree",
+            &tree,
+            "-p",
+            &merge_base,
+            "-m",
+            "squash",
+        ],
+        repo_path,
+    )?;
+    let cherry = git_output(&["cherry", &base, &squashed], repo_path)?;
+    Ok(cherry.starts_with('-'))
 }
 
 pub fn delete_branch(repo_path: &str, branch: &str, force: bool) -> Result<()> {
@@ -1043,6 +1071,39 @@ mod tests {
     }
 
     #[test]
+    fn a_squash_merged_branch_is_told_apart_from_unmerged_work() {
+        let remote = tempfile::tempdir().unwrap();
+        let repo = tempfile::tempdir().unwrap();
+        let (remote_dir, dir) = (
+            remote.path().to_str().unwrap(),
+            repo.path().to_str().unwrap(),
+        );
+        git(remote_dir, &["init", "-q", "--bare", "-b", "main"]);
+        git(dir, &["init", "-q", "-b", "main"]);
+        git(dir, &["remote", "add", "origin", remote_dir]);
+        git(dir, &["commit", "-q", "--allow-empty", "-m", "base"]);
+        git(dir, &["checkout", "-q", "-b", "feat"]);
+        for (file, text) in [("a", "1"), ("b", "2")] {
+            std::fs::write(repo.path().join(file), text).unwrap();
+            git(dir, &["add", file]);
+            git(dir, &["commit", "-q", "-m", file]);
+        }
+        // Squash `feat` onto main, as a squash-merged PR does.
+        git(dir, &["checkout", "-q", "main"]);
+        git(dir, &["merge", "-q", "--squash", "feat"]);
+        git(dir, &["commit", "-q", "-m", "feat (#1)"]);
+        git(dir, &["push", "-q", "origin", "main"]);
+        assert!(squash_merged(dir, "feat").unwrap());
+
+        git(dir, &["checkout", "-q", "feat"]);
+        std::fs::write(repo.path().join("c"), "3").unwrap();
+        git(dir, &["add", "c"]);
+        git(dir, &["commit", "-q", "-m", "after the merge"]);
+        git(dir, &["checkout", "-q", "main"]);
+        assert!(!squash_merged(dir, "feat").unwrap());
+    }
+
+    #[test]
     fn a_slashed_branch_gets_one_worktree_folder() {
         let parent = tempfile::tempdir().unwrap();
         let repo = parent.path().join("repo");
@@ -1064,6 +1125,18 @@ mod tests {
 
         assert_eq!(Path::new(&path).file_name().unwrap(), "repo-feature-login");
         assert_eq!(Path::new(&path).parent(), repo.parent());
+
+        let clash = create_worktree(&CreateWorktreeRequest {
+            repo_path: dir.into(),
+            branch: "feature-login".into(),
+            new_branch: true,
+            copy_options: None,
+            strategy: None,
+            start_point: Some("current".into()),
+            fetch_before_create: Some(false),
+        })
+        .unwrap();
+        assert_eq!(Path::new(&clash).file_name().unwrap(), "repo-feature-login-2");
     }
 
     #[test]

@@ -1,7 +1,6 @@
 import type {
 	Capabilities,
 	ControlPlaneCommands,
-	ControlPlaneEvents,
 	ControlPlaneTransport,
 	Unsubscribe
 } from './transport.ts';
@@ -131,61 +130,6 @@ export function createHttpTransport(opts: HttpTransportOptions): ControlPlaneTra
 
 	const capabilities: Capabilities = { terminalIO: false, nativeDialogs: false };
 
-	// Lazily-opened, multiplexed event stream. The server WebSocket endpoint
-	// (`/events`) is not implemented yet; this fans out frames of the shape
-	// `{ event, payload }` to per-event subscriber sets once it exists.
-	let ws: WebSocket | null = null;
-	let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-	const listeners = new Map<string, Set<(payload: unknown) => void>>();
-
-	// Exponential backoff so a server that doesn't (yet) expose `/events` — or is
-	// down — isn't hammered every 2s. Resets to the base delay on a successful open.
-	const BASE_RECONNECT_MS = 2000;
-	const MAX_RECONNECT_MS = 30000;
-	let reconnectDelay = BASE_RECONNECT_MS;
-
-	const scheduleReconnect = () => {
-		if (reconnectTimer || listeners.size === 0) return;
-		reconnectTimer = setTimeout(() => {
-			reconnectTimer = null;
-			ensureSocket();
-		}, reconnectDelay);
-		reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_MS);
-	};
-
-	const ensureSocket = () => {
-		if (ws) return;
-		const wsUrl = base.replace(/^http/, 'ws') + '/events';
-		try {
-			// Capture the socket locally so a stale handler (from a previous socket
-			// that errors/closes late) never acts on the current one.
-			const sock = new WebSocket(wsUrl);
-			ws = sock;
-			sock.addEventListener('open', () => {
-				reconnectDelay = BASE_RECONNECT_MS;
-			});
-			sock.addEventListener('message', (ev) => {
-				try {
-					const { event, payload } = JSON.parse(ev.data as string);
-					listeners.get(event)?.forEach((cb) => cb(payload));
-				} catch {
-					/* ignore malformed frames */
-				}
-			});
-			// Reconnect on drop/failure so subscriptions survive server restarts
-			// and transient network blips instead of going silently dead.
-			sock.addEventListener('close', () => {
-				if (ws !== sock) return; // a newer socket is already active
-				ws = null;
-				scheduleReconnect();
-			});
-			sock.addEventListener('error', () => sock.close());
-		} catch {
-			ws = null;
-			scheduleReconnect();
-		}
-	};
-
 	return {
 		capabilities,
 		...workspaceMethods(async () => ({ baseUrl: base, token: opts.token }), opts.openEventSource),
@@ -230,27 +174,10 @@ export function createHttpTransport(opts: HttpTransportOptions): ControlPlaneTra
 			);
 		},
 
-		async subscribe<E extends keyof ControlPlaneEvents>(
-			event: E,
-			cb: (payload: ControlPlaneEvents[E]) => void
-		): Promise<Unsubscribe> {
-			ensureSocket();
-			const key = event as string;
-			const set = listeners.get(key) ?? new Set();
-			set.add(cb as (p: unknown) => void);
-			listeners.set(key, set);
-			return () => {
-				set.delete(cb as (p: unknown) => void);
-				if (set.size === 0 && listeners.get(key) === set) listeners.delete(key);
-				if (listeners.size > 0) return;
-				// Nothing left listening: stop reconnecting.
-				if (reconnectTimer) clearTimeout(reconnectTimer);
-				reconnectTimer = null;
-				reconnectDelay = BASE_RECONNECT_MS;
-				const sock = ws;
-				ws = null;
-				sock?.close();
-			};
+		// The server has no stream for these events; workspace changes come
+		// over `subscribeWorkspace`.
+		async subscribe(): Promise<Unsubscribe> {
+			return () => {};
 		}
 	};
 }

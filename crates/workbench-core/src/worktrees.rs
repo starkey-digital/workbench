@@ -53,8 +53,9 @@ fn start_point(settings: &WorkbenchSettings) -> Option<String> {
 }
 
 /// Remove a known worktree of a registered project, then its branch when
-/// `delete_branch` is set. A branch git won't delete (unmerged) stays, logged:
-/// the worktree is already gone. Returns whether the branch was deleted.
+/// `delete_branch` is set. A squash-merged branch is force-deleted; any other
+/// branch git won't delete (unmerged, checked out elsewhere) stays, logged: the
+/// worktree is already gone. Returns whether the branch was deleted.
 pub fn remove(
     repo_path: &str,
     worktree_path: &str,
@@ -67,6 +68,10 @@ pub fn remove(
     let branch = Some(worktree.branch).filter(|b| delete_branch && !b.is_empty());
     let branch_deleted = branch.is_some_and(|branch| {
         crate::git::delete_branch(repo_path, &branch, false)
+            .or_else(|e| match crate::git::squash_merged(repo_path, &branch) {
+                Ok(true) => crate::git::delete_branch(repo_path, &branch, true),
+                _ => Err(e),
+            })
             .inspect_err(|e| log::warn!("[worktrees] Failed to delete branch {branch}: {e}"))
             .is_ok()
     });

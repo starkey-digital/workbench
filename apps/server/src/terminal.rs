@@ -200,7 +200,7 @@ impl TerminalManager {
         native: bool,
     ) -> anyhow::Result<TerminalMeta> {
         let max = max_terminals();
-        let _slot = {
+        let slot = {
             // Reserved under the map lock, so two creates can't both see room for one.
             let sessions = lock(&self.inner);
             if sessions.len() + self.starting.load(Ordering::SeqCst) >= max {
@@ -358,7 +358,12 @@ impl TerminalManager {
             });
         }
 
-        lock(&self.inner).insert(id, session);
+        {
+            let mut sessions = lock(&self.inner);
+            sessions.insert(id, session);
+            // Swapped for the entry in one step, so the new terminal is never counted twice.
+            drop(slot);
+        }
         self.changes.notify();
         Ok(meta)
     }

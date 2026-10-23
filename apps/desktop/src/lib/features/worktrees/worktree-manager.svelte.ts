@@ -152,10 +152,10 @@ export class WorktreeManagerStore {
 							return false;
 						}
 					));
-				// `git branch -d` refuses a squash-merged branch once its remote is gone.
 				if (!branchDeleted) {
-					toast.warning(`Kept branch ${branch}: git sees it as unmerged`, {
-						description: `Delete it with git branch -D ${branch} if its PR was squash-merged.`
+					toast.warning(`Kept branch ${branch}`, {
+						description:
+							'It has commits not on the default branch, or is checked out somewhere else.'
 					});
 				}
 			}

@@ -37,6 +37,7 @@
 				Created at <code>&lt;parent&gt;/&lt;repo&gt;-&lt;branch&gt;</code>, next to the project
 				folder.
 			{/if}
+			A <code>/</code> in the branch name becomes <code>-</code>.
 		</SettingsNote>
 	</SettingsSelect>
 </SettingsSection>

@@ -320,10 +320,7 @@ describe('WorktreeManagerStore', () => {
 				deleteBranch: true
 			});
 			expect(invokeSpy).not.toHaveBeenCalledWith('delete_branch', expect.anything());
-			expect(toast.warning).toHaveBeenCalledWith(
-				'Kept branch feature: git sees it as unmerged',
-				expect.anything()
-			);
+			expect(toast.warning).toHaveBeenCalledWith('Kept branch feature', expect.anything());
 		});
 
 		it('confirmRemove() deletes the branch itself on a host that predates deleteBranch', async () => {

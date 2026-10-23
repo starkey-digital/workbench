@@ -8,7 +8,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
-use std::sync::{mpsc, Arc, Mutex, OnceLock};
+use std::sync::{mpsc, Arc, Mutex, OnceLock, TryLockError};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -241,13 +241,17 @@ impl WorkspaceService {
         let Some(request_id) = request_id else {
             return self.command(cmd);
         };
+        // A slot still being applied is never dropped, or its retry would apply again.
+        let applying = |slot: &RequestSlot| matches!(slot.try_lock(), Err(TryLockError::WouldBlock));
         let mut requests = lock(&self.0.requests);
-        requests.retain(|(_, at, _)| at.elapsed() < REQUEST_TTL);
+        requests.retain(|(_, at, slot)| at.elapsed() < REQUEST_TTL || applying(slot));
         let slot = match requests.iter().find(|(id, ..)| *id == request_id) {
             Some((_, _, slot)) => slot.clone(),
             None => {
                 if requests.len() >= REQUESTS_KEPT {
-                    requests.pop_front();
+                    if let Some(oldest) = requests.iter().position(|(_, _, slot)| !applying(slot)) {
+                        requests.remove(oldest);
+                    }
                 }
                 let slot = RequestSlot::default();
                 requests.push_back((request_id, Instant::now(), slot.clone()));
