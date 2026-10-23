@@ -46,4 +46,11 @@ class NotificationFeedTest {
     assertEquals("server:0", feed.cursor)
     assertEquals(1, feed.accept(batch("server:1", event("waiting"))).size)
   }
+
+  @Test fun theProjectIsTheFolderNameOfEitherPathStyle() {
+    val feed = NotificationFeed()
+    val unix = event("waiting").put("projectPath", "/home/me/repos/workbench/")
+    val windows = event("waiting", id = "w").put("projectPath", "C:\\Users\\me\\shop")
+    assertEquals(listOf("workbench", "shop"), feed.accept(batch("server:1", unix, windows)).map { it.project })
+  }
 }

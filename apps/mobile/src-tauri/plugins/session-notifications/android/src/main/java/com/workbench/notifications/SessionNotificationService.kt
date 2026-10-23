@@ -95,7 +95,7 @@ class SessionNotificationService : Service() {
             if (generation != current) return@post
             try {
               val events = currentFeed.accept(JSONObject(text))
-              for (event in events) notifySession(event, machineId, name)
+              for (event in events) notifySession(event, machineId)
             } catch (e: Exception) { Telemetry.exceptionOnce(e) }
           }
         } finally { connection.disconnect(); if (activeConnection === connection) activeConnection = null }
@@ -110,7 +110,7 @@ class SessionNotificationService : Service() {
   }
 
   /** Post, replace or clear the same event the desktop consumed. */
-  private fun notifySession(event: NotificationEvent, machineId: String, name: String) {
+  private fun notifySession(event: NotificationEvent, machineId: String) {
     val s = event.session
     val sessionId = s.getString("sessionId")
     val notificationId = 2 + (sessionId.hashCode() and 0x3fffffff)
@@ -125,7 +125,7 @@ class SessionNotificationService : Service() {
     val payload = JSONObject().put("machineId", machineId).put("chat", s).toString()
     val notification = NotificationCompat.Builder(this, "sessions")
       .setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle(event.message)
-      .setContentText(if (s.isNull("title")) "Workbench chat" else s.getString("title")).setSubText(name)
+      .setContentText(if (s.isNull("title")) "Workbench chat" else s.getString("title")).setSubText(event.project)
       .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).setAutoCancel(true)
       .setContentIntent(open(payload, notificationId)).build()
     manager.notify(notificationId, notification)
