@@ -153,9 +153,10 @@ export class WorktreeManagerStore {
 						}
 					));
 				if (!branchDeleted) {
+					// `git branch -d` also refuses a squash-merged branch once its remote is gone.
 					toast.warning(`Kept branch ${branch}`, {
 						description:
-							'It has commits not on the default branch, or is checked out somewhere else.'
+							'git branch -d refused it: it is checked out elsewhere, or has commits git sees as unmerged (as a squash-merged PR does).'
 					});
 				}
 			}

@@ -125,6 +125,9 @@ const PROJECT_DENY_WRITE: &[&str] = &[
     ".git/hooks",
     ".git/config",
     ".git/modules",
+    // Git reads either from any git dir: `commondir` moves where `config` is read.
+    ".git/commondir",
+    ".git/config.worktree",
     ".claude/settings.json",
     ".claude/settings.local.json",
     ".claude/hooks",
@@ -303,6 +306,15 @@ pub fn build_config(
             roots
         })
         .collect();
+    // A linked worktree's git dir lives in the main repo's `.git/worktrees/`.
+    let registrations = projects.iter().flat_map(|p| {
+        std::fs::read_dir(Path::new(&p.path).join(".git/worktrees"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .flat_map(|entry| ["commondir", "config.worktree"].map(|f| entry.path().join(f)))
+    });
+    deny_write.extend(registrations.map(|path| resolved(&path)));
     for root in &roots {
         deny_write.extend(
             PROJECT_DENY_WRITE
@@ -753,10 +765,14 @@ mod tests {
         std::fs::write(&registry, "nowhere/.git\n").unwrap();
 
         let cfg = build(&[], &[project(&root)], None);
-        for rel in [".claude", ".git"] {
+        for rel in [
+            ".worktrees/feat/.claude",
+            ".worktrees/feat/.git",
+            ".git/worktrees/feat/commondir",
+        ] {
             assert_contains(
                 &cfg.filesystem.deny_write,
-                &format!("{root}/.worktrees/feat/{rel}"),
+                &format!("{root}/{rel}"),
                 "denyWrite",
             );
         }

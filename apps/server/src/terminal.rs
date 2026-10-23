@@ -364,8 +364,10 @@ impl TerminalManager {
             std::thread::spawn(move || {
                 wait_for_shell_prompt(&session);
                 let mut line = Vec::new();
-                let _ = workbench_core::shell::submit_line(&mut line, &cmd);
-                let _ = session.input.blocking_send(line);
+                match workbench_core::shell::submit_line(&mut line, &cmd) {
+                    Ok(()) => drop(session.input.blocking_send(line)),
+                    Err(e) => tracing::warn!("startup command not typed: {e}"),
+                }
             });
         }
 

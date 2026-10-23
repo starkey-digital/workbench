@@ -44,7 +44,7 @@
 	});
 	let projectDirName = $derived(baseName(projectPath));
 	let sep = $derived(projectPath.includes('\\') ? '\\' : '/');
-	/** A preview of where the host's layout puts it; the host decides. */
+	/** A preview of where the host's layout puts it; the host decides, adding `-2` when that folder is taken. */
 	let worktreePath = $derived.by(() => {
 		if (!branchName) return '';
 		const folder = branchName.replaceAll('/', '-');
@@ -182,6 +182,9 @@
 						readonly
 						class="border-wb-hair bg-wb-bg font-mono text-[11.5px] text-wb-ink-mute"
 					/>
+					<span class="text-[11px] text-wb-ink-soft">
+						If that folder exists, the host adds -2, -3, … to the name.
+					</span>
 				</div>
 			{/if}
 
