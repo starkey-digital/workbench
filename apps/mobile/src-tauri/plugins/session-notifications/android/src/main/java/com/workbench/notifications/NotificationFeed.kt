@@ -2,7 +2,10 @@ package com.workbench.notifications
 
 import org.json.JSONObject
 
-data class NotificationEvent(val session: JSONObject, val message: String?)
+data class NotificationEvent(val session: JSONObject, val message: String?) {
+  /** The project's folder name; the server may run on Windows, so split on either separator. */
+  val project: String get() = session.getString("projectPath").trimEnd('/', '\\').split('/', '\\').last()
+}
 
 /** The server already decided what deserves attention. Only translate its events. */
 class NotificationFeed {
