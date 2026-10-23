@@ -132,6 +132,8 @@ const PROJECT_DENY_WRITE: &[&str] = &[
     ".claude/skills",
     ".claude/commands",
     ".mcp.json",
+    // Codex is never sandboxed, and loads a trusted project's `.codex/config.toml`.
+    ".codex",
 ];
 
 /// Credential stores a sandboxed session must not read.
@@ -289,9 +291,29 @@ pub fn build_config(
     // Redundant while the config dir is absent from allowWrite, but keeps the
     // sandbox sealed if a project root is ever an ancestor of it.
     deny_write.push(resolved(config_dir));
-    for project in projects {
-        let root = Path::new(&project.path);
-        deny_write.extend(PROJECT_DENY_WRITE.iter().map(|p| resolved(&root.join(p))));
+    // An "inside" layout worktree lives under its project root, so the root's
+    // allowWrite covers its `.claude/` too.
+    let linked_worktrees = projects.iter().flat_map(|p| {
+        crate::git_read::list_worktrees(&p.path)
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|w| !w.is_main)
+            .map(|w| w.path)
+    });
+    let roots: Vec<String> = projects
+        .iter()
+        .map(|p| p.path.clone())
+        .chain(linked_worktrees)
+        .collect();
+    for root in &roots {
+        let root = Path::new(root);
+        deny_write.extend(
+            PROJECT_DENY_WRITE
+                .iter()
+                .map(|p| resolved(&deny_target(root, p))),
+        );
     }
     dedupe(&mut deny_write);
 
@@ -388,6 +410,22 @@ fn resolved(path: &Path) -> String {
             _ => return path.to_string_lossy().to_string(),
         }
     }
+}
+
+/// `root/rel`, or its shallowest ancestor below `root` that does not exist yet.
+///
+/// srt matches on the real path, so a deny on `.claude/settings.json` in a
+/// project with no `.claude` is bypassed by creating `.claude` as a symlink to
+/// somewhere writable. Denying the missing directory itself blocks that.
+fn deny_target(root: &Path, rel: &str) -> PathBuf {
+    let mut path = root.to_path_buf();
+    for part in Path::new(rel).components() {
+        path.push(part);
+        if path.symlink_metadata().is_err() {
+            break;
+        }
+    }
+    path
 }
 
 fn dedupe(values: &mut Vec<String>) {
@@ -620,20 +658,15 @@ mod tests {
     /// where a sibling root's `.git/hooks` and `.claude/` were writable.
     #[test]
     fn project_escape_hatches_are_denied_per_project_root() {
-        let cfg = build(&[], &[project("/repos/a"), project("/repos/b")], None);
-        for root in ["/repos/a", "/repos/b"] {
-            for rel in [
-                ".git/hooks",
-                ".git/config",
-                ".git/modules",
-                ".claude/settings.json",
-                ".claude/settings.local.json",
-                ".claude/hooks",
-                ".claude/agents",
-                ".claude/skills",
-                ".claude/commands",
-                ".mcp.json",
-            ] {
+        let dirs = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
+        let roots: Vec<String> = dirs.iter().map(|d| resolved(d.path())).collect();
+        for root in &roots {
+            std::fs::create_dir_all(Path::new(root).join(".git")).unwrap();
+            std::fs::create_dir_all(Path::new(root).join(".claude")).unwrap();
+        }
+        let cfg = build(&[], &[project(&roots[0]), project(&roots[1])], None);
+        for root in &roots {
+            for rel in PROJECT_DENY_WRITE {
                 assert_contains(
                     &cfg.filesystem.deny_write,
                     &format!("{root}/{rel}"),
@@ -641,6 +674,50 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A deny under a missing dir is bypassed by creating that dir as a symlink.
+    #[test]
+    fn a_missing_parent_dir_is_denied_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = resolved(dir.path());
+        let cfg = build(&[], &[project(&root)], None);
+        assert_contains(
+            &cfg.filesystem.deny_write,
+            &format!("{root}/.claude"),
+            "denyWrite",
+        );
+        assert!(!cfg
+            .filesystem
+            .deny_write
+            .contains(&format!("{root}/.claude/settings.json")));
+    }
+
+    #[test]
+    fn a_worktree_inside_a_project_root_gets_its_own_denies() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = resolved(dir.path());
+        let git = |args: &[&str]| crate::git::git_output(args, &root).unwrap();
+        git(&["init", "-q"]);
+        git(&[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "i",
+        ]);
+        git(&["worktree", "add", "-q", ".worktrees/feat", "-b", "feat"]);
+
+        let cfg = build(&[], &[project(&root)], None);
+        assert_contains(
+            &cfg.filesystem.deny_write,
+            &format!("{root}/.worktrees/feat/.claude"),
+            "denyWrite",
+        );
     }
 
     // --- denyRead ---
@@ -872,7 +949,7 @@ mod tests {
         assert_contains(&written.filesystem.allow_write, "/repos/a", "allowWrite");
         assert_contains(
             &written.filesystem.deny_write,
-            "/repos/a/.git/hooks",
+            "/repos/a/.git",
             "denyWrite",
         );
         assert_contains(
