@@ -225,6 +225,18 @@ describe('HttpTransport event socket reconnect backoff', () => {
 		expect(FakeWS.instances).toHaveLength(4);
 	});
 
+	it('stops reconnecting once the last subscriber leaves', async () => {
+		vi.useFakeTimers();
+		vi.stubGlobal('WebSocket', FakeWS);
+		const t = createHttpTransport({ baseUrl: 'http://host:4317' });
+		const unsub = await t.subscribe('codex:notify', () => {});
+		FakeWS.instances[0].fail();
+
+		unsub();
+		await vi.advanceTimersByTimeAsync(60000);
+		expect(FakeWS.instances).toHaveLength(1);
+	});
+
 	it('does not open a socket or reconnect when there are no subscribers', async () => {
 		vi.useFakeTimers();
 		vi.stubGlobal('WebSocket', FakeWS);

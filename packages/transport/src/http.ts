@@ -240,7 +240,16 @@ export function createHttpTransport(opts: HttpTransportOptions): ControlPlaneTra
 			set.add(cb as (p: unknown) => void);
 			listeners.set(key, set);
 			return () => {
-				listeners.get(key)?.delete(cb as (p: unknown) => void);
+				set.delete(cb as (p: unknown) => void);
+				if (set.size === 0 && listeners.get(key) === set) listeners.delete(key);
+				if (listeners.size > 0) return;
+				// Nothing left listening: stop reconnecting.
+				if (reconnectTimer) clearTimeout(reconnectTimer);
+				reconnectTimer = null;
+				reconnectDelay = BASE_RECONNECT_MS;
+				const sock = ws;
+				ws = null;
+				sock?.close();
 			};
 		}
 	};

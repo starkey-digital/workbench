@@ -439,8 +439,9 @@ mod tests {
     #[test]
     fn a_freeze_across_a_sleep_or_wake_or_a_sample_is_not_reported_as_one() {
         assert!(power_events().is_some(), "kern.sleeptime/waketime readable");
+        // Not zeros: a Mac that never slept since boot reports exactly that.
         let mut watch = Watch {
-            power: Some([0; 4]),
+            power: Some([-1; 4]),
             ..Watch::default()
         };
         watch.note_freeze(FROZE * 2);

@@ -1,7 +1,9 @@
+import { toast } from 'svelte-sonner';
 import { ConfirmAction } from '$lib/utils/confirm-action.svelte';
 import type { GitHubStore } from '$stores/github.svelte';
 import type { GitStore } from '$stores/git.svelte';
 import type { ProjectStore } from '$stores/projects.svelte';
+import type { TrelloStore } from '$stores/trello.svelte';
 import type { WorkspaceStore } from '$stores/workspaces.svelte';
 import type { BranchInfo, WorktreeCopyOptions } from '$types/workbench';
 import { invoke } from '$lib/transport';
@@ -30,6 +32,7 @@ export class WorktreeManagerStore {
 	private workspaceStore: WorkspaceStore;
 	private gitStore: GitStore;
 	private githubStore: GitHubStore;
+	private trelloStore: Pick<TrelloStore, 'linkTaskToBranch'>;
 
 	/** Closing the dialog is ignored while a worktree is being created. */
 	get dialogOpen() {
@@ -44,12 +47,14 @@ export class WorktreeManagerStore {
 		projectStore: ProjectStore,
 		workspaceStore: WorkspaceStore,
 		gitStore: GitStore,
-		githubStore: GitHubStore
+		githubStore: GitHubStore,
+		trelloStore: Pick<TrelloStore, 'linkTaskToBranch'>
 	) {
 		this.projectStore = projectStore;
 		this.workspaceStore = workspaceStore;
 		this.gitStore = gitStore;
 		this.githubStore = githubStore;
+		this.trelloStore = trelloStore;
 	}
 
 	async add(
@@ -92,9 +97,7 @@ export class WorktreeManagerStore {
 			}
 
 			if (this._pendingTaskLink) {
-				const { getTrelloStore } = await import('$stores/context');
-				const trelloStore = getTrelloStore();
-				trelloStore.linkTaskToBranch(
+				this.trelloStore.linkTaskToBranch(
 					this.dialogProjectPath,
 					this._pendingTaskLink.cardId,
 					this._pendingTaskLink.boardId,
@@ -138,11 +141,23 @@ export class WorktreeManagerStore {
 			});
 			const ws = this.workspaceStore.getByWorktreePath(worktreePath);
 			if (ws) this.workspaceStore.close(ws.id);
-			// A host that predates `deleteBranch` leaves the branch to us.
-			if (removeBranch && removed?.branchDeleted === undefined) {
-				await invoke('delete_branch', { repoPath: projectPath, branch, force: false }).catch((e) =>
-					log.warn('WorktreeManager', 'Failed to delete branch:', e)
-				);
+			if (removeBranch) {
+				// A host that predates `deleteBranch` leaves the branch to us.
+				const branchDeleted =
+					removed?.branchDeleted ??
+					(await invoke('delete_branch', { repoPath: projectPath, branch, force: false }).then(
+						() => true,
+						(e) => {
+							log.warn('WorktreeManager', 'Failed to delete branch:', e);
+							return false;
+						}
+					));
+				// `git branch -d` refuses a squash-merged branch once its remote is gone.
+				if (!branchDeleted) {
+					toast.warning(`Kept branch ${branch}: git sees it as unmerged`, {
+						description: `Delete it with git branch -D ${branch} if its PR was squash-merged.`
+					});
+				}
 			}
 			await this.gitStore.refreshGitState(projectPath);
 		});

@@ -412,11 +412,13 @@ pub fn create_worktree(request: &CreateWorktreeRequest) -> Result<String> {
     let repo_root = git_output(&["rev-parse", "--show-toplevel"], &request.repo_path)?;
     let copy_options = request.copy_options.clone().unwrap_or_default();
     let strategy = request.strategy.as_deref().unwrap_or("sibling");
+    // One folder per worktree: `feature/login` would otherwise nest under a shared `feature/`.
+    let folder = request.branch.replace('/', "-");
 
     let worktree_path = if strategy == "inside" {
         Path::new(&repo_root)
             .join(".worktrees")
-            .join(&request.branch)
+            .join(&folder)
             .to_string_lossy()
             .to_string()
     } else {
@@ -424,7 +426,7 @@ pub fn create_worktree(request: &CreateWorktreeRequest) -> Result<String> {
         let parent = repo.parent().context("Cannot determine parent directory")?;
         let repo_name = repo.file_name().and_then(|n| n.to_str()).unwrap_or("repo");
         parent
-            .join(format!("{}-{}", repo_name, request.branch))
+            .join(format!("{repo_name}-{folder}"))
             .to_string_lossy()
             .to_string()
     };
@@ -1038,6 +1040,30 @@ mod tests {
         ];
         full.extend_from_slice(args);
         git_output(&full, dir).unwrap();
+    }
+
+    #[test]
+    fn a_slashed_branch_gets_one_worktree_folder() {
+        let parent = tempfile::tempdir().unwrap();
+        let repo = parent.path().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        let dir = repo.to_str().unwrap();
+        git(dir, &["init", "-q"]);
+        git(dir, &["commit", "-q", "--allow-empty", "-m", "a"]);
+
+        let path = create_worktree(&CreateWorktreeRequest {
+            repo_path: dir.into(),
+            branch: "feature/login".into(),
+            new_branch: true,
+            copy_options: None,
+            strategy: None,
+            start_point: Some("current".into()),
+            fetch_before_create: Some(false),
+        })
+        .unwrap();
+
+        assert_eq!(Path::new(&path).file_name().unwrap(), "repo-feature-login");
+        assert_eq!(Path::new(&path).parent(), repo.parent());
     }
 
     #[test]
