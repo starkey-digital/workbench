@@ -30,8 +30,8 @@ const WORKTREE_TIMEOUT_MS = 120_000;
 
 /**
  * Maps each control-plane command to a concrete `workbench-server` request.
- * Commands the server intentionally does not expose (project/workspace
- * persistence is machine-specific and never synced) are omitted and throw.
+ * Commands the server intentionally does not expose (saving the whole project
+ * list; a remote client edits one project at a time) are omitted and throw.
  */
 function toRequest<K extends keyof ControlPlaneCommands>(
 	name: K,
@@ -41,6 +41,18 @@ function toRequest<K extends keyof ControlPlaneCommands>(
 	switch (name) {
 		case 'list_projects':
 			return { method: 'GET', path: '/projects' };
+		case 'add_project':
+			return { method: 'POST', path: '/projects', body: a.edit };
+		case 'update_project':
+			return { method: 'PUT', path: '/projects', body: a.edit };
+		case 'remove_project':
+			return { method: 'DELETE', path: '/projects', body: { path: a.path } };
+		case 'list_folders':
+			return {
+				method: 'GET',
+				path: '/fs/folders',
+				...(a.path ? { query: { path: String(a.path) } } : {})
+			};
 		case 'list_worktrees':
 			return { method: 'GET', path: '/projects/worktrees', query: { path: String(a.path) } };
 		case 'create_worktree':

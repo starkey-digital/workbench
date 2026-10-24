@@ -264,6 +264,7 @@ pub fn run() {
             }
             sc.watch_attention(app.handle().clone());
             sc.watch_settings(app.handle().clone());
+            sc.watch_projects(app.handle().clone());
 
             Ok(())
         });

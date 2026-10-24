@@ -18,8 +18,10 @@ function readSet(key: string): string[] {
 export class ProjectPrefs {
 	readonly favourites: SvelteSet<string>;
 	readonly collapsed: SvelteSet<string>;
+	private readonly machineId: string;
 
-	constructor(private readonly machineId: string) {
+	constructor(machineId: string) {
+		this.machineId = machineId;
 		this.favourites = new SvelteSet(readSet(machineKey(LS_FAVOURITES, machineId)));
 		this.collapsed = new SvelteSet(readSet(machineKey(LS_COLLAPSED, machineId)));
 	}
@@ -29,6 +31,11 @@ export class ProjectPrefs {
 		if (this.favourites.has(path) && this.collapsed.has('favourites')) {
 			this.toggleSection('favourites');
 		}
+	}
+
+	/** A removed project's star goes with it, so re-adding the folder starts unstarred. */
+	forget(path: string): void {
+		if (this.favourites.has(path)) this.toggle(this.favourites, LS_FAVOURITES, path);
 	}
 
 	toggleSection(key: string): void {

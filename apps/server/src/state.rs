@@ -25,6 +25,9 @@ pub struct Managers {
     /// Bumped when a route changes the saved Workbench settings, so the desktop
     /// reloads them.
     pub settings: Changes,
+    /// Bumped when a route adds, edits or removes a project, so the desktop
+    /// reloads its list.
+    pub projects: Changes,
     /// The workspace model every client renders, and the panes' processes.
     pub workspace: WorkspaceService,
     /// The embedding app shows native terminal views (the macOS desktop), to
@@ -48,6 +51,7 @@ pub struct AppState {
     pub models: ModelsCache,
     pub host: Option<Arc<dyn HostControl>>,
     pub settings: Changes,
+    pub projects: Changes,
     pub workspace: WorkspaceService,
     pub native_views: bool,
     /// When `Some`, requests must present this as a bearer token. Only the
@@ -72,6 +76,7 @@ impl AppState {
             models: managers.models,
             host: managers.host,
             settings: managers.settings,
+            projects: managers.projects,
             workspace: managers.workspace,
             native_views: managers.native_views,
             token,

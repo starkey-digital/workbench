@@ -8,13 +8,21 @@ use serde_json::Value;
 
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
-use workbench_core::types::CreateWorktreeRequest;
+use workbench_core::types::{CreateWorktreeRequest, ProjectEdit};
+use workbench_core::workspace::Command;
 
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/", get(index))
         .route("/health", get(health))
-        .route("/projects", get(list_projects))
+        .route(
+            "/projects",
+            get(list_projects)
+                .post(add_project)
+                .put(update_project)
+                .delete(remove_project),
+        )
+        .route("/fs/folders", get(list_folders))
         .route(
             "/projects/worktrees",
             get(list_worktrees)
@@ -126,9 +134,75 @@ async fn list_projects() -> ApiResult<Json<Value>> {
     Ok(Json(serde_json::to_value(projects)?))
 }
 
+/// The phone's Add project: the folder it picked with `GET /fs/folders`.
+async fn add_project(
+    State(state): State<AppState>,
+    Json(edit): Json<ProjectEdit>,
+) -> ApiResult<Json<Value>> {
+    let project = blocking(move || workbench_core::projects::add(edit)).await?;
+    state.projects.notify();
+    Ok(Json(serde_json::to_value(project)?))
+}
+
+/// A renamed project's open workspaces take the new name, on every client.
+async fn update_project(
+    State(state): State<AppState>,
+    Json(edit): Json<ProjectEdit>,
+) -> ApiResult<Json<Value>> {
+    let workspace = state.workspace.clone();
+    let project = blocking(move || {
+        workbench_core::projects::update(edit, |before, after| {
+            if before.name != after.name {
+                workspace.command(Command::UpdateProject {
+                    project_path: after.path.clone(),
+                    new_path: after.path.clone(),
+                    project_name: after.name.clone(),
+                })?;
+            }
+            Ok(())
+        })
+    })
+    .await?;
+    state.projects.notify();
+    Ok(Json(serde_json::to_value(project)?))
+}
+
 #[derive(Deserialize)]
 struct PathQuery {
     path: String,
+}
+
+/// Unregisters the project, then closes its workspaces (ending their sessions),
+/// as the desktop's Remove does; the folder itself stays.
+async fn remove_project(
+    State(state): State<AppState>,
+    Json(body): Json<PathQuery>,
+) -> ApiResult<StatusCode> {
+    let workspace = state.workspace.clone();
+    blocking(move || {
+        workbench_core::projects::remove(&body.path, || {
+            workspace.command(Command::CloseProject {
+                project_path: body.path.clone(),
+            })?;
+            Ok(())
+        })
+    })
+    .await?;
+    state.projects.notify();
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct OptionalPathQuery {
+    path: Option<String>,
+}
+
+/// The phone's folder picker: a token holder already runs shells here, so
+/// listing folder names exposes nothing new.
+async fn list_folders(Query(q): Query<OptionalPathQuery>) -> ApiResult<Json<Value>> {
+    let listing =
+        blocking(move || workbench_core::projects::list_folders(q.path.as_deref())).await?;
+    Ok(Json(serde_json::to_value(listing)?))
 }
 
 async fn list_worktrees(Query(q): Query<PathQuery>) -> ApiResult<Json<Value>> {

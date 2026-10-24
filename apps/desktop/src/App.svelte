@@ -126,6 +126,17 @@
 		});
 	});
 
+	// The phone added, edited or removed a project through the server.
+	listen('projects:changed', () => {
+		void attempt('reload projects', async () => {
+			const added = await projectStore.reload();
+			await Promise.all([
+				gitStore.refreshAll(added),
+				...added.map((path) => trelloStore.loadProjectConfig(path))
+			]);
+		});
+	});
+
 	async function loadTrello() {
 		await trelloStore.loadCredentials();
 		await Promise.all(projectStore.projects.map((p) => trelloStore.loadProjectConfig(p.path)));

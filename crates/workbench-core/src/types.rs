@@ -28,6 +28,42 @@ pub struct ProjectConfig {
     pub claude_account_id: Option<String>,
 }
 
+/// A client's add or edit of one project (`projects::add`/`update`). `path`
+/// names the folder and never changes; the fields a client can't edit
+/// (`shell`, legacy `startupCommand`/`tasks`) are kept.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectEdit {
+    pub path: String,
+    /// Blank: the folder's name.
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub group: Option<String>,
+    /// As `ProjectConfig.claude_account_id`: `None` follows the active account.
+    #[serde(default)]
+    pub claude_account_id: Option<String>,
+}
+
+/// The folders inside one folder of the host, for picking a project there.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderListing {
+    pub path: String,
+    /// `None` at the filesystem root.
+    pub parent: Option<String>,
+    pub folders: Vec<Folder>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Folder {
+    pub name: String,
+    pub path: String,
+    /// Holds a `.git`: a checkout, likely the project itself.
+    pub git: bool,
+}
+
 /// A runnable entry from a project's root `package.json` `scripts`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -42,6 +42,20 @@ export class ProjectStore {
 		this.loaded = true;
 	}
 
+	/**
+	 * After another client (the phone) changed the list: drops favourites of
+	 * projects it removed and returns the paths it added.
+	 */
+	async reload(): Promise<string[]> {
+		const before = this.projects.map((p) => p.path);
+		await this.load();
+		const paths = this.projects.map((p) => p.path);
+		const gone = [...this.favourites].filter((f) => !paths.includes(f));
+		for (const f of gone) this.favourites.delete(f);
+		if (gone.length) this.saveFavourites();
+		return paths.filter((p) => !before.includes(p));
+	}
+
 	async persist() {
 		await invoke('save_projects', { projects: this.projects });
 	}

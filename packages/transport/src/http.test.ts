@@ -60,6 +60,26 @@ describe('HttpTransport route mapping', () => {
 		expect(res).toEqual([{ name: 'a', path: '/a' }]);
 	});
 
+	it('maps one-project edits to /projects and the folder picker to /fs/folders', async () => {
+		const f = mockFetch((_url, init) =>
+			init.method === 'DELETE' ? new Response(null, { status: 204 }) : json({})
+		);
+		const t = createHttpTransport({ baseUrl: 'http://host:4317' });
+		const edit = { path: '/repo', name: 'Repo', claudeAccountId: '' };
+		await t.invoke('add_project', { edit });
+		await t.invoke('update_project', { edit });
+		await t.invoke('remove_project', { path: '/repo' });
+		await t.invoke('list_folders', {});
+		await t.invoke('list_folders', { path: '/home/me' });
+		expect(f.mock.calls.map(([url, init]) => [init.method, url, init.body])).toEqual([
+			['POST', 'http://host:4317/projects', JSON.stringify(edit)],
+			['PUT', 'http://host:4317/projects', JSON.stringify(edit)],
+			['DELETE', 'http://host:4317/projects', JSON.stringify({ path: '/repo' })],
+			['GET', 'http://host:4317/fs/folders', undefined],
+			['GET', 'http://host:4317/fs/folders?path=%2Fhome%2Fme', undefined]
+		]);
+	});
+
 	it('puts path in the query string for list_worktrees', async () => {
 		const f = mockFetch(() => json([]));
 		const t = createHttpTransport({ baseUrl: 'http://host:4317' });

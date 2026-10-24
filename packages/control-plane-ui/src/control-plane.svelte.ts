@@ -1,12 +1,12 @@
 import type { ControlPlaneTransport } from '@workbench/transport';
-import type { ProjectConfig, WorktreeInfo } from '@workbench/types';
+import type { FolderListing, ProjectConfig, ProjectEdit, WorktreeInfo } from '@workbench/types';
 
 /**
  * Transport-driven control-plane state for the shared sidebar. Works against any
  * {@link ControlPlaneTransport} — the desktop app's local Tauri transport or a
  * remote `workbench-server` over HTTP. Covers the operations a remote client
- * needs: list projects, view/create worktrees and their GitHub links. No
- * terminal IO.
+ * needs: list, add, edit and remove projects, view/create worktrees and their
+ * GitHub links. No terminal IO.
  */
 export class ControlPlaneStore {
 	private transport: ControlPlaneTransport;
@@ -55,6 +55,29 @@ export class ControlPlaneStore {
 	async loadProjects() {
 		const projects = await this.run(() => this.transport.invoke('list_projects', undefined));
 		if (projects) this.projects = projects;
+	}
+
+	/** The project edits throw, so the form that sent one can show why it failed. */
+	async addProject(edit: ProjectEdit): Promise<ProjectConfig> {
+		const project = await this.transport.invoke('add_project', { edit });
+		this.projects = [...this.projects, project];
+		return project;
+	}
+
+	async updateProject(edit: ProjectEdit): Promise<ProjectConfig> {
+		const project = await this.transport.invoke('update_project', { edit });
+		this.projects = this.projects.map((p) => (p.path === project.path ? project : p));
+		return project;
+	}
+
+	async removeProject(path: string): Promise<void> {
+		await this.transport.invoke('remove_project', { path });
+		this.projects = this.projects.filter((p) => p.path !== path);
+	}
+
+	/** The subfolders of `path` on the server's machine (its home folder when absent). */
+	listFolders(path?: string): Promise<FolderListing> {
+		return this.transport.invoke('list_folders', path ? { path } : {});
 	}
 
 	async loadWorktrees(projectPath: string) {

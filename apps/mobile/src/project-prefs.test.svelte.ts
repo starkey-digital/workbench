@@ -24,6 +24,15 @@ it('reopens a collapsed Favourites section when a project is starred', () => {
 	expect(prefs.collapsed.has('favourites')).toBe(false);
 });
 
+it("forgets a removed project's star, and saves that", () => {
+	const prefs = new ProjectPrefs('mac');
+	prefs.toggleFavourite('/repo');
+	prefs.forget('/repo');
+	prefs.forget('/never-starred');
+	expect(new ProjectPrefs('mac').favourites.has('/repo')).toBe(false);
+	expect(prefs.favourites.has('/never-starred')).toBe(false);
+});
+
 it('ignores a corrupt saved value', () => {
 	localStorage.setItem('wb.favourites.mac', '{nope');
 	expect(new ProjectPrefs('mac').favourites.size).toBe(0);
