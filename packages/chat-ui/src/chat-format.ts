@@ -576,9 +576,12 @@ export function pickTasks(
 
 export type TaskView = 'conversation' | 'output';
 
-/** A subagent opens on its own conversation; other tasks only have output. */
+/**
+ * A subagent has its own conversation; other tasks only have output. (The CLI's
+ * output file for a subagent is a link to that conversation's raw JSONL.)
+ */
 export function taskViews(task: TaskInfo): TaskView[] {
-	return task.kind === 'agent' ? ['conversation', 'output'] : ['output'];
+	return task.kind === 'agent' ? ['conversation'] : ['output'];
 }
 
 export function pickTaskView(task: TaskInfo, picked: TaskView | null): TaskView {

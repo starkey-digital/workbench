@@ -529,9 +529,9 @@ describe('tasks panel', () => {
 	it('opens an agent on its conversation and a shell on its output', () => {
 		const agent = task('a1', 'agent', 'running');
 		const shell = task('shell', 'local_bash', 'running');
-		expect(taskViews(agent)).toEqual(['conversation', 'output']);
+		expect(taskViews(agent)).toEqual(['conversation']);
 		expect(pickTaskView(agent, null)).toBe('conversation');
-		expect(pickTaskView(agent, 'output')).toBe('output');
+		expect(pickTaskView(agent, 'output')).toBe('conversation');
 		expect(taskViews(shell)).toEqual(['output']);
 		expect(pickTaskView(shell, 'conversation')).toBe('output');
 	});

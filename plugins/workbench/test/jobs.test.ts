@@ -1,8 +1,10 @@
 import { expect, test } from 'bun:test';
-import { ENDED_KEPT, notifiedJob, startJob } from '../hooks/jobs';
+import { ENDED_KEPT, notifiedJobs, startJob } from '../hooks/jobs';
 
 const note = (id: string, status: string) =>
 	`<task-notification><task-id>${id}</task-id><status>${status}</status></task-notification>`;
+const notifiedJob = (text: string, tracked?: (id: string) => boolean) =>
+	notifiedJobs(text, tracked)[0];
 
 test('a job started before a plugin reload still reports how it ended', () => {
 	// This load never saw `startJob('b1')`: the job ran before the reload.
@@ -22,6 +24,15 @@ test('a subagent this load tracks ends its own task, not by its notification', (
 test("a known job's notification reports its outcome", () => {
 	expect(startJob('b2')).toBe(true);
 	expect(notifiedJob(note('b2', 'killed'))).toMatchObject({ task_id: 'b2', status: 'stopped' });
+});
+
+test('a batched delivery ends every job it names', () => {
+	expect(startJob('b3')).toBe(true);
+	expect(startJob('b4')).toBe(true);
+	expect(notifiedJobs(`${note('b3', 'completed')}\n${note('b4', 'failed')}`)).toMatchObject([
+		{ task_id: 'b3', status: 'completed' },
+		{ task_id: 'b4', status: 'failed' }
+	]);
 });
 
 test('ended jobs are forgotten oldest first, running ones never', () => {
