@@ -29,6 +29,26 @@ export interface ProjectConfig {
 	claudeAccountId?: string;
 }
 
+/**
+ * One project's add or edit from a remote client (`POST`/`PUT /projects`).
+ * `path` names the folder and never changes; a blank `name` is the folder's.
+ */
+export interface ProjectEdit {
+	path: string;
+	name: string;
+	group?: string;
+	/** As {@link ProjectConfig.claudeAccountId}: absent follows the active account. */
+	claudeAccountId?: string;
+}
+
+/** The folders inside one host folder (`GET /fs/folders`), for picking a project. */
+export interface FolderListing {
+	path: string;
+	/** `null` at the filesystem root. */
+	parent: string | null;
+	folders: { name: string; path: string; /** Holds a `.git`. */ git: boolean }[];
+}
+
 /** A runnable entry from a project's root `package.json` `scripts`. */
 export interface PackageScript {
 	name: string;

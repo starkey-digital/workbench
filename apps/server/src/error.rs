@@ -34,6 +34,9 @@ where
         } else if err
             .downcast_ref::<workbench_core::claude_plugins::Refused>()
             .is_some()
+            || err
+                .downcast_ref::<workbench_core::projects::Invalid>()
+                .is_some()
         {
             StatusCode::BAD_REQUEST
         } else {

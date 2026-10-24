@@ -4,6 +4,7 @@
 	import FileDiffIcon from '@lucide/svelte/icons/file-diff';
 	import GitBranchIcon from '@lucide/svelte/icons/git-branch';
 	import HistoryIcon from '@lucide/svelte/icons/history';
+	import PencilIcon from '@lucide/svelte/icons/pencil';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import StarIcon from '@lucide/svelte/icons/star';
 	import type { ProjectConfig } from '@workbench/types';
@@ -22,7 +23,8 @@
 		highlight = '',
 		open,
 		onToggle,
-		onReview
+		onReview,
+		onEdit
 	}: {
 		client: MobileClient;
 		project: ProjectConfig;
@@ -34,6 +36,7 @@
 		open: boolean;
 		onToggle: () => void;
 		onReview: (folder: ReviewFolder, tab: 'history' | 'changes') => void;
+		onEdit: () => void;
 	} = $props();
 
 	const store = $derived(client.store!);
@@ -71,6 +74,11 @@
 		<button type="button" class={chip} onclick={() => onReview(folder, 'changes')}>
 			<FileDiffIcon class="size-3.5 shrink-0" />Changes
 		</button>
+		{#if !worktreePath}
+			<button type="button" class={chip} onclick={onEdit}>
+				<PencilIcon class="size-3.5 shrink-0" />Edit
+			</button>
+		{/if}
 		{#if !worktreePath && githubUrl}
 			<button type="button" class={chip} onclick={() => openExternal(githubUrl)}>
 				<ExternalLinkIcon class="size-3.5 shrink-0" />

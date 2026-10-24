@@ -17,6 +17,30 @@ describe('ControlPlaneStore', () => {
 		expect(store.projects).toEqual([{ name: 'a', path: '/a' }]);
 	});
 
+	it('adds, edits and removes one project, keeping the list in step', async () => {
+		store.projects = [{ name: 'a', path: '/a' }];
+		transport.mockInvoke('add_project', (args) => ({ ...(args as { edit: object }).edit }));
+		transport.mockInvoke('update_project', () => ({ name: 'A', path: '/a', group: 'g' }));
+		transport.mockInvoke('remove_project', () => undefined);
+		await store.addProject({ path: '/b', name: 'b' });
+		await store.updateProject({ path: '/a', name: 'A', group: 'g' });
+		expect(store.projects).toEqual([
+			{ name: 'A', path: '/a', group: 'g' },
+			{ path: '/b', name: 'b' }
+		]);
+		await store.removeProject('/b');
+		expect(store.projects.map((p) => p.path)).toEqual(['/a']);
+	});
+
+	it('a refused project edit throws and leaves the list alone', async () => {
+		store.projects = [{ name: 'a', path: '/a' }];
+		transport.mockInvoke('add_project', () => {
+			throw new Error('already a project: /a');
+		});
+		await expect(store.addProject({ path: '/a', name: '' })).rejects.toThrow(/already/);
+		expect(store.projects).toHaveLength(1);
+	});
+
 	it('loadWorktrees stores per-project worktrees', async () => {
 		transport.mockInvoke('list_worktrees', () => [{ path: '/a/wt', branch: 'x', isMain: false }]);
 		await store.loadWorktrees('/a');

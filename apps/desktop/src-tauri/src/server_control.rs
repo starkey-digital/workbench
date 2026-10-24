@@ -90,6 +90,19 @@ impl ServerControl {
         });
     }
 
+    /// Emits `projects:changed` when a route (the phone's project sheet) adds,
+    /// edits or removes a project, so the sidebar reloads the list.
+    pub fn watch_projects(&self, app: tauri::AppHandle) {
+        let mut changes = self.managers.projects.subscribe();
+        tauri::async_runtime::spawn(async move {
+            while changes.changed().await.is_ok() {
+                if let Err(e) = app.emit("projects:changed", ()) {
+                    log::warn!("failed to emit projects:changed: {e}");
+                }
+            }
+        });
+    }
+
     /// The hook bridge every terminal and chat on this machine reports to.
     pub fn hooks(&self) -> workbench_server::hook_bridge::HookBridge {
         self.managers.agents.hooks.clone()

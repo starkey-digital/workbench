@@ -17,12 +17,14 @@ import type {
 	BranchInfo,
 	CodexNotifyEvent,
 	DiscoveredClaudeSession,
+	FolderListing,
 	GitHubRemote,
 	GitInfo,
 	GitStatusResult,
 	HostUpdateStarted,
 	HostUpdateStatus,
 	ProjectConfig,
+	ProjectEdit,
 	ProjectRefreshRequestedEvent,
 	WorkspaceCommand,
 	WorkspaceCommandResult,
@@ -34,6 +36,14 @@ import type { WorkspaceStreamHandlers } from './workspace.ts';
 export interface ControlPlaneCommands {
 	list_projects: { args: void; result: ProjectConfig[] };
 	save_projects: { args: { projects: ProjectConfig[] }; result: void };
+	/** Server only: register one folder; answers the saved project. */
+	add_project: { args: { edit: ProjectEdit }; result: ProjectConfig };
+	/** Server only: rename/regroup/re-account one project; its path stays. */
+	update_project: { args: { edit: ProjectEdit }; result: ProjectConfig };
+	/** Server only: close its workspaces and unregister it; the folder stays. */
+	remove_project: { args: { path: string }; result: void };
+	/** Server only: the subfolders of `path` (the host's home when absent). */
+	list_folders: { args: { path?: string }; result: FolderListing };
 	list_worktrees: { args: { path: string }; result: WorktreeInfo[] };
 	create_worktree: { args: { request: unknown }; result: string };
 	remove_worktree: {

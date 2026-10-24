@@ -1,13 +1,16 @@
 <script lang="ts">
 	import { SvelteSet } from 'svelte/reactivity';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import PlusIcon from '@lucide/svelte/icons/plus';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import StarIcon from '@lucide/svelte/icons/star';
 	import XIcon from '@lucide/svelte/icons/x';
+	import type { ProjectConfig } from '@workbench/types';
 	import type { MobileClient } from './client.svelte.ts';
 	import type { ReviewFolder } from './project-review.svelte';
 	import { projectSections } from '@workbench/control-plane-ui';
 	import ProjectRow from './ProjectRow.svelte';
+	import ProjectSheet from './ProjectSheet.svelte';
 
 	let {
 		client,
@@ -20,6 +23,8 @@
 	const store = $derived(client.store!);
 	const prefs = $derived(client.projectPrefs);
 	let query = $state('');
+	/** The open add (no project) or edit sheet. */
+	let sheet = $state<{ project?: ProjectConfig } | null>(null);
 	/** Kept here so a row stays open when starring or searching remounts it. */
 	const expanded = new SvelteSet<string>();
 	const searching = $derived(query.trim() !== '');
@@ -35,36 +40,44 @@
 </script>
 
 <section class="flex flex-col gap-3" aria-label="Projects">
-	<div
-		class="flex h-10 items-center gap-2 rounded-xl border border-wb-hair bg-wb-panel pr-1 pl-3 text-wb-ink-soft focus-within:border-wb-ink-soft"
-	>
-		<SearchIcon class="size-4 shrink-0" />
-		<input
-			bind:value={query}
-			type="search"
-			aria-label="Search projects"
-			placeholder="Search {store.projects.length} projects"
-			autocapitalize="off"
-			autocorrect="off"
-			spellcheck={false}
-			class="min-w-0 flex-1 bg-transparent text-[13.5px] text-wb-ink placeholder:text-wb-ink-soft focus:outline-none [&::-webkit-search-cancel-button]:hidden"
-		/>
-		{#if query}
-			<button
-				type="button"
-				class="grid size-8 shrink-0 place-items-center rounded-lg active:bg-wb-panel2"
-				aria-label="Clear search"
-				onpointerdown={(e) => e.preventDefault()}
-				onclick={() => (query = '')}
-			>
-				<XIcon class="size-4" />
-			</button>
-		{/if}
+	<div class="flex gap-2">
+		<div
+			class="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-xl border border-wb-hair bg-wb-panel pr-1 pl-3 text-wb-ink-soft focus-within:border-wb-ink-soft"
+		>
+			<SearchIcon class="size-4 shrink-0" />
+			<input
+				bind:value={query}
+				type="search"
+				aria-label="Search projects"
+				placeholder="Search {store.projects.length} projects"
+				autocapitalize="off"
+				autocorrect="off"
+				spellcheck={false}
+				class="min-w-0 flex-1 bg-transparent text-[13.5px] text-wb-ink placeholder:text-wb-ink-soft focus:outline-none [&::-webkit-search-cancel-button]:hidden"
+			/>
+			{#if query}
+				<button
+					type="button"
+					class="grid size-8 shrink-0 place-items-center rounded-lg active:bg-wb-panel2"
+					aria-label="Clear search"
+					onpointerdown={(e) => e.preventDefault()}
+					onclick={() => (query = '')}
+				>
+					<XIcon class="size-4" />
+				</button>
+			{/if}
+		</div>
+		<button
+			type="button"
+			class="grid size-10 shrink-0 place-items-center rounded-xl border border-wb-hair bg-wb-panel text-wb-ink-mute active:bg-wb-panel2"
+			aria-label="Add project"
+			onclick={() => (sheet = {})}
+		>
+			<PlusIcon class="size-4" />
+		</button>
 	</div>
 	{#if store.projects.length === 0}
-		<p class="px-1 text-xs text-wb-ink-soft">
-			No projects on this server yet. Add one in Workbench on the desktop.
-		</p>
+		<p class="px-1 text-xs text-wb-ink-soft">No projects on this server yet. Add one with +.</p>
 	{:else if sections.length === 0}
 		<p class="px-1 text-xs text-wb-ink-soft">No projects match “{query}”.</p>
 	{:else if !searching && sections[0].kind !== 'favourites'}
@@ -109,9 +122,14 @@
 							if (!expanded.delete(project.path)) expanded.add(project.path);
 						}}
 						{onReview}
+						onEdit={() => (sheet = { project })}
 					/>
 				{/each}
 			{/if}
 		</div>
 	{/each}
 </section>
+
+{#if sheet}
+	<ProjectSheet {client} project={sheet.project} onClose={() => (sheet = null)} />
+{/if}
