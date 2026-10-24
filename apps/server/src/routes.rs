@@ -151,15 +151,16 @@ async fn update_project(
 ) -> ApiResult<Json<Value>> {
     let workspace = state.workspace.clone();
     let project = blocking(move || {
-        let (before, after) = workbench_core::projects::update(edit)?;
-        if before.name != after.name {
-            workspace.command(Command::UpdateProject {
-                project_path: after.path.clone(),
-                new_path: after.path.clone(),
-                project_name: after.name.clone(),
-            })?;
-        }
-        Ok(after)
+        workbench_core::projects::update(edit, |before, after| {
+            if before.name != after.name {
+                workspace.command(Command::UpdateProject {
+                    project_path: after.path.clone(),
+                    new_path: after.path.clone(),
+                    project_name: after.name.clone(),
+                })?;
+            }
+            Ok(())
+        })
     })
     .await?;
     state.projects.notify();
@@ -171,18 +172,20 @@ struct PathQuery {
     path: String,
 }
 
-/// Closes the project's workspaces (ending their sessions) before unregistering
-/// it, as the desktop's Remove does; the folder itself stays.
+/// Unregisters the project, then closes its workspaces (ending their sessions),
+/// as the desktop's Remove does; the folder itself stays.
 async fn remove_project(
     State(state): State<AppState>,
     Json(body): Json<PathQuery>,
 ) -> ApiResult<StatusCode> {
     let workspace = state.workspace.clone();
     blocking(move || {
-        workspace.command(Command::CloseProject {
-            project_path: body.path.clone(),
-        })?;
-        workbench_core::projects::remove(&body.path)
+        workbench_core::projects::remove(&body.path, || {
+            workspace.command(Command::CloseProject {
+                project_path: body.path.clone(),
+            })?;
+            Ok(())
+        })
     })
     .await?;
     state.projects.notify();

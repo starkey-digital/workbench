@@ -129,8 +129,11 @@
 	// The phone added, edited or removed a project through the server.
 	listen('projects:changed', () => {
 		void attempt('reload projects', async () => {
-			await projectStore.load();
-			gitStore.refreshAll(projectStore.projects.map((p) => p.path));
+			const added = await projectStore.reload();
+			await Promise.all([
+				gitStore.refreshAll(added),
+				...added.map((path) => trelloStore.loadProjectConfig(path))
+			]);
 		});
 	});
 

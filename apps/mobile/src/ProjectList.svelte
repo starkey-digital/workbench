@@ -131,5 +131,13 @@
 </section>
 
 {#if sheet}
-	<ProjectSheet {client} project={sheet.project} onClose={() => (sheet = null)} />
+	<ProjectSheet
+		{client}
+		project={sheet.project}
+		onClose={() => (sheet = null)}
+		onRemoved={(path) => {
+			expanded.delete(path);
+			prefs.forget(path);
+		}}
+	/>
 {/if}

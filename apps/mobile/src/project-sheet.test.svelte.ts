@@ -5,16 +5,20 @@ import {
 	accountOption,
 	DEFAULT_LOGIN,
 	FOLLOW_ACTIVE,
-	FolderBrowser
+	FolderBrowser,
+	unknownAccount
 } from './project-sheet.svelte';
 
 it("maps a project's account to an option and back", () => {
 	const accounts = [{ id: 'work' }];
-	for (const id of [undefined, '', 'work']) {
-		expect(accountFromOption(accountOption(id, accounts))).toBe(id);
+	for (const id of [undefined, '', 'work', 'unknown']) {
+		expect(accountFromOption(accountOption(id))).toBe(id);
 	}
-	expect(accountOption('removed', accounts)).toBe(FOLLOW_ACTIVE);
-	expect(accountOption('', accounts)).toBe(DEFAULT_LOGIN);
+	expect(accountOption(undefined)).toBe(FOLLOW_ACTIVE);
+	expect(accountOption('')).toBe(DEFAULT_LOGIN);
+	expect(unknownAccount('unknown', accounts)).toBe(true);
+	expect(unknownAccount('work', accounts)).toBe(false);
+	expect(unknownAccount(FOLLOW_ACTIVE, [])).toBe(false);
 });
 
 it('keeps the newest folder when an older listing arrives late, and reports errors', async () => {

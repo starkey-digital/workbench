@@ -11,7 +11,8 @@
 		accountOption,
 		DEFAULT_LOGIN,
 		FOLLOW_ACTIVE,
-		FolderBrowser
+		FolderBrowser,
+		unknownAccount
 	} from './project-sheet.svelte';
 	import Sheet from './Sheet.svelte';
 
@@ -19,12 +20,14 @@
 	let {
 		client,
 		project,
-		onClose
+		onClose,
+		onRemoved
 	}: {
 		client: MobileClient;
 		/** Absent: add a new one. */
 		project?: ProjectConfig;
 		onClose: () => void;
+		onRemoved: (path: string) => void;
 	} = $props();
 
 	const store = $derived(client.store!);
@@ -36,7 +39,7 @@
 	// svelte-ignore state_referenced_locally
 	let group = $state(project?.group ?? '');
 	// svelte-ignore state_referenced_locally
-	let account = $state(accountOption(project?.claudeAccountId, client.accounts));
+	let account = $state(accountOption(project?.claudeAccountId));
 	let saving = $state(false);
 	let confirmingRemove = $state(false);
 	let error = $state<string | null>(null);
@@ -76,6 +79,7 @@
 		error = null;
 		try {
 			await store.removeProject(project.path);
+			onRemoved(project.path);
 			onClose();
 		} catch (err) {
 			error = err instanceof Error ? err.message : String(err);
@@ -189,13 +193,16 @@
 						{#each groups as g (g)}<option value={g}></option>{/each}
 					</datalist>
 				</label>
-				{#if client.accounts.length}
+				{#if client.accounts.length || unknownAccount(account, client.accounts)}
 					<label class={label}
 						>Claude account for new sessions
 						<select class={field} bind:value={account}>
 							<option value={FOLLOW_ACTIVE}>Active account</option>
 							<option value={DEFAULT_LOGIN}>{client.defaultAccountName}</option>
 							{#each client.accounts as a (a.id)}<option value={a.id}>{a.name}</option>{/each}
+							{#if unknownAccount(account, client.accounts)}
+								<option value={account}>Account not on this phone ({account})</option>
+							{/if}
 						</select>
 					</label>
 				{/if}

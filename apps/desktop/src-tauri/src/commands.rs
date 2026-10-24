@@ -44,7 +44,7 @@ pub fn list_projects() -> Result<Vec<ProjectConfig>, String> {
 // could finish out of order and an older snapshot overwrite a newer one.
 #[tauri::command]
 pub fn save_projects(projects: Vec<ProjectConfig>) -> Result<bool, String> {
-    config::save_projects(&projects).map_err(|e| e.to_string())?;
+    workbench_core::projects::save_all(&projects).map_err(|e| e.to_string())?;
     Ok(true)
 }
 

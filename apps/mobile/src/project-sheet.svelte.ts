@@ -4,14 +4,17 @@ import type { ClaudeAccount, FolderListing } from '@workbench/types';
 export const FOLLOW_ACTIVE = ':active';
 export const DEFAULT_LOGIN = ':default';
 
-/** A project's `claudeAccountId` as an option; a removed account's shows as following the active one. */
-export function accountOption(
-	id: string | undefined,
-	accounts: Pick<ClaudeAccount, 'id'>[]
-): string {
+/** A project's `claudeAccountId` as an option, an id this phone doesn't know included, so saving keeps it. */
+export function accountOption(id: string | undefined): string {
 	if (id === undefined) return FOLLOW_ACTIVE;
-	if (id === '') return DEFAULT_LOGIN;
-	return accounts.some((a) => a.id === id) ? id : FOLLOW_ACTIVE;
+	return id === '' ? DEFAULT_LOGIN : id;
+}
+
+/** A saved account missing from `accounts` (removed, or added after this phone loaded them). */
+export function unknownAccount(option: string, accounts: Pick<ClaudeAccount, 'id'>[]): boolean {
+	return (
+		option !== FOLLOW_ACTIVE && option !== DEFAULT_LOGIN && !accounts.some((a) => a.id === option)
+	);
 }
 
 export function accountFromOption(option: string): string | undefined {

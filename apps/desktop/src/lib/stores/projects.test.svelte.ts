@@ -42,6 +42,16 @@ describe('ProjectStore', () => {
 			expect(store.loaded).toBe(true);
 		});
 
+		it('reload returns the added paths and drops favourites of removed projects', async () => {
+			mockInvoke('list_projects', () => [makeProject({ path: '/a' }), makeProject({ path: '/b' })]);
+			await store.load();
+			store.favourites.add('/b');
+			mockInvoke('list_projects', () => [makeProject({ path: '/a' }), makeProject({ path: '/c' })]);
+
+			expect(await store.reload()).toEqual(['/c']);
+			expect(store.favourites.has('/b')).toBe(false);
+		});
+
 		it('starts with loaded = false', () => {
 			expect(store.loaded).toBe(false);
 		});
