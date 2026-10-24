@@ -69,9 +69,13 @@ async fn a_client_adds_renames_and_removes_a_project() {
     assert_eq!(added["group"], "Work");
     changes.changed().await.unwrap();
 
-    let again = send(reqwest::Method::POST, "/projects", json!({ "path": picked }))
-        .await
-        .unwrap();
+    let again = send(
+        reqwest::Method::POST,
+        "/projects",
+        json!({ "path": picked }),
+    )
+    .await
+    .unwrap();
     assert_eq!(again.status(), 400);
 
     let renamed = send(
@@ -83,7 +87,10 @@ async fn a_client_adds_renames_and_removes_a_project() {
     .unwrap();
     assert!(renamed.status().is_success());
     let renamed: Value = renamed.json().await.unwrap();
-    assert_eq!(renamed["shell"], "/bin/zsh", "fields a client can't edit stay");
+    assert_eq!(
+        renamed["shell"], "/bin/zsh",
+        "fields a client can't edit stay"
+    );
     assert_eq!(renamed["claudeAccountId"], "");
 
     let unknown_account = send(
@@ -95,9 +102,13 @@ async fn a_client_adds_renames_and_removes_a_project() {
     .unwrap();
     assert_eq!(unknown_account.status(), 400);
 
-    let removed = send(reqwest::Method::DELETE, "/projects", json!({ "path": picked }))
-        .await
-        .unwrap();
+    let removed = send(
+        reqwest::Method::DELETE,
+        "/projects",
+        json!({ "path": picked }),
+    )
+    .await
+    .unwrap();
     assert_eq!(removed.status(), 204);
 
     let projects: Value = http
