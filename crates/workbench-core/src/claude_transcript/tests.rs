@@ -797,6 +797,36 @@ fn load_reads_history_and_never_reports_a_turn_in_flight() {
         .is_empty());
 }
 
+#[cfg(unix)]
+#[test]
+fn follows_a_task_output_link_to_a_moved_sessions_subagent_transcript() {
+    use super::parse::linked_subagent_transcript;
+    let dir = tempfile::tempdir().unwrap();
+    let subagents = dir
+        .path()
+        .join("-repo-worktree")
+        .join(SID)
+        .join("subagents");
+    let tasks = dir.path().join("tmp").join("tasks");
+    fs::create_dir_all(&subagents).unwrap();
+    fs::create_dir_all(&tasks).unwrap();
+    let file = "agent-a1.jsonl";
+    let agent = subagents.join(file);
+    fs::write(&agent, "").unwrap();
+    let output = tasks.join("a1.output");
+    std::os::unix::fs::symlink(&agent, &output).unwrap();
+    assert_eq!(linked_subagent_transcript(&output, file), Some(agent));
+
+    let elsewhere = dir.path().join("secret.jsonl");
+    fs::write(&elsewhere, "").unwrap();
+    let odd = tasks.join("a2.output");
+    std::os::unix::fs::symlink(&elsewhere, &odd).unwrap();
+    assert_eq!(linked_subagent_transcript(&odd, "agent-a2.jsonl"), None);
+    let shell = tasks.join("b1.output");
+    fs::write(&shell, "plain output").unwrap();
+    assert_eq!(linked_subagent_transcript(&shell, "agent-b1.jsonl"), None);
+}
+
 #[test]
 fn finds_and_loads_a_subagent_transcript_beside_its_session() {
     let dir = tempfile::tempdir().unwrap();

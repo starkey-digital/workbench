@@ -6,7 +6,7 @@ import type {
 } from 'claude-code';
 import * as server from './link';
 import { PendingAsks } from './asks';
-import { notifiedJob, startJob, stoppedJobs } from './jobs';
+import { notifiedJobs, startJob, stoppedJobs } from './jobs';
 import { RUN_TOOL_SPEC, runInput, runResult } from './run';
 import { Titles, TITLE_SYSTEM } from './titles';
 import {
@@ -293,10 +293,11 @@ function unlinkTask(task: string) {
 	const agent = taskAgents.get(task);
 	taskAgents.delete(task);
 	if (agent) {
-		agentTasks.delete(agent);
 		asyncAgents.delete(agent);
 		teammates.delete(agent);
 	}
+	// The task's own agent and any it spawned (see `agent.spawn`).
+	for (const [a, t] of agentTasks) if (t === task) agentTasks.delete(a);
 }
 
 const elicitationKey = (e: { mcp_server_name: string; elicitation_id?: string }) =>
@@ -1100,28 +1101,22 @@ export const register: Register = (on) => {
 
 	// A chat's prompt reaches the session through this plugin's own submit;
 	// one typed at the terminal hands what the turn asks back to the terminal.
+	// A background task's notification comes through here, dequeued at idle or
+	// delivered into the running turn: it names how each task ended (a killed one
+	// too); the Stop hook's job list can only tell running from gone.
 	on('prompt.submit', async ($, e, next) => {
-		const tasks =
-			e.origin.kind === 'task-notification'
-				? [...e.text.matchAll(/<task-id>([^<]+)<\/task-id>/g)].map((m) => m[1] ?? '')
-				: [];
+		const notified = e.origin.kind === 'task-notification';
+		if (notified && server.current())
+			emit(...notifiedJobs(e.text, (id) => agentTasks.has(id) || endedByStop.has(id)));
+		const tasks = notified
+			? [...e.text.matchAll(/<task-id>([^<]+)<\/task-id>/g)].map((m) => m[1] ?? '')
+			: [];
 		if (tasks.length && tasks.every((t) => endedByStop.has(t))) {
 			for (const t of tasks) endedByStop.delete(t);
 			return { drop: 'Stopped in Workbench chat' };
 		}
 		if (e.origin.kind === 'plugin') chatTurn = e.origin.name === $.plugin.name;
 		else if (e.origin.kind === 'composer') chatTurn = false;
-		return next(e);
-	});
-
-	// A background job's notification names how it ended (a killed one too);
-	// the Stop hook's job list can only tell running from gone.
-	on('session.receive', ($, e, next) => {
-		const line =
-			server.current() && !e.agentId && e.origin.kind === 'task-notification'
-				? notifiedJob(e.text, (id) => agentTasks.has(id) || endedByStop.has(id))
-				: undefined;
-		if (line) emit(line);
 		return next(e);
 	});
 
@@ -1313,6 +1308,11 @@ export const register: Register = (on) => {
 
 	on('agent.spawn', async ($, e, next) => {
 		const result = await next(e);
+		// An agent a subagent spawned isn't a task of its own: its calls show as
+		// progress on the task of the agent that spawned it (its own loop shows in
+		// that agent's conversation).
+		const parentTask = e.parentAgentId ? agentTasks.get(e.parentAgentId) : undefined;
+		if (parentTask && result.agentId) agentTasks.set(result.agentId, parentTask);
 		// The spawn names its Agent call; only the main thread's calls are tasks.
 		const task = runningAgents.has(e.tool_use_id) ? e.tool_use_id : undefined;
 		if (server.current() && task && result.agentId) {

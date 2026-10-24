@@ -164,16 +164,31 @@ pub fn find_transcript(projects_dir: &Path, session_id: &str) -> Option<PathBuf>
 }
 
 /// A subagent's transcript, which the CLI writes beside its session's JSONL:
-/// `<session-id>/subagents/agent-<agent-id>.jsonl`.
+/// `<session-id>/subagents/agent-<agent-id>.jsonl`. A session that moved
+/// (`EnterWorktree` changes its project folder) writes its later subagents
+/// beside a JSONL elsewhere; the agent's task output file links to it.
 pub fn find_subagent_transcript(session_jsonl: &Path, agent_id: &str) -> Option<PathBuf> {
     if !crate::task_output::is_task_id(agent_id) {
         return None;
     }
+    let file = format!("agent-{agent_id}.jsonl");
     let path = session_jsonl
         .with_extension("")
         .join("subagents")
-        .join(format!("agent-{agent_id}.jsonl"));
-    path.is_file().then_some(path)
+        .join(&file);
+    if path.is_file() {
+        return Some(path);
+    }
+    linked_subagent_transcript(&crate::task_output::find(agent_id)?, &file)
+}
+
+/// The subagent transcript a task output file links to, if it's one.
+pub(super) fn linked_subagent_transcript(output: &Path, file: &str) -> Option<PathBuf> {
+    let target = output.parent()?.join(fs::read_link(output).ok()?);
+    let is_transcript = target.file_name()? == file
+        && target.parent()?.file_name()? == "subagents"
+        && target.is_file();
+    is_transcript.then_some(target)
 }
 
 /// Strict 8-4-4-4-12 hex check — the id becomes part of a file name and a
