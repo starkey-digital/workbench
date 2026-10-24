@@ -432,7 +432,8 @@ impl AgentSession {
         let id = self.id();
         let mut found = lock(&self.transcript_path);
         match &*found {
-            Some((for_id, path)) if *for_id == id => Some(path.clone()),
+            // `EnterWorktree` moves the session's JSONL to the worktree's project folder.
+            Some((for_id, path)) if *for_id == id && path.is_file() => Some(path.clone()),
             _ => {
                 let path = super::claude::history(config_dir.as_deref(), &id);
                 *found = path.clone().map(|p| (id, p));

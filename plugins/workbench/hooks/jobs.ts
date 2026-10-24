@@ -49,10 +49,8 @@ function report(id: string, status: string, summary?: string): Line | undefined 
  * can't override that (a chat's Stop).
  */
 export function notifiedJobs(text: string, tracked: (id: string) => boolean = () => false): Line[] {
-	return text
-		.split('<task-notification>')
-		.slice(1)
-		.map((block) => taskNotification(block))
+	return [...text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)]
+		.map((block) => taskNotification(block[1] ?? ''))
 		.map((note) =>
 			note && !tracked(note.id) ? report(note.id, note.status, note.summary) : undefined
 		)
