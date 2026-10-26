@@ -1051,18 +1051,15 @@ describe('AgentChat prompt cache', () => {
 
 	it('follows the server cache policy and sends pings and changes', async () => {
 		const { chat, ws } = await connected();
-		expect(chat.cachePolicy).toEqual({ compactOnExpiry: false });
+		expect(chat.cachePolicy).toEqual({});
 
-		ws.emit({ t: 'cachePolicy', policy: { compactOnExpiry: true, keepWarmUntil: 5 } });
-		expect(chat.cachePolicy).toEqual({ compactOnExpiry: true, keepWarmUntil: 5 });
+		ws.emit({ t: 'cachePolicy', policy: { keepWarmUntil: 5 } });
+		expect(chat.cachePolicy).toEqual({ keepWarmUntil: 5 });
 
 		chat.pingCache();
-		chat.setCachePolicy({ compactOnExpiry: false });
-		expect(ws.sent).toEqual([
-			{ t: 'cachePing' },
-			{ t: 'cachePolicy', policy: { compactOnExpiry: false } }
-		]);
-		expect(chat.cachePolicy).toEqual({ compactOnExpiry: false });
+		chat.setCachePolicy({});
+		expect(ws.sent).toEqual([{ t: 'cachePing' }, { t: 'cachePolicy', policy: {} }]);
+		expect(chat.cachePolicy).toEqual({});
 	});
 });
 

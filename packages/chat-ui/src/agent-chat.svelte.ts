@@ -154,7 +154,7 @@ export class AgentChat {
 	/** The open "Rewind to here" panel, if any. */
 	rewind = $state.raw<RewindState | null>(null);
 	/** What the server does as the prompt cache nears expiry (Claude only). */
-	cachePolicy = $state.raw<CachePolicy>({ compactOnExpiry: false });
+	cachePolicy = $state.raw<CachePolicy>({});
 
 	readonly live = $derived(this.status === 'live');
 	/** What the agent is doing now, or the request it waits on. */
@@ -438,7 +438,7 @@ export class AgentChat {
 				this.canResync = !!msg.resync;
 				this.resyncedAt = Date.now();
 				this.commands = msg.commands;
-				this.cachePolicy = msg.cachePolicy ?? { compactOnExpiry: false };
+				this.cachePolicy = msg.cachePolicy ?? {};
 				if (msg.claudeAccountId !== undefined) this.followAccount(msg.claudeAccountId ?? undefined);
 				this.setMeta(msg.meta);
 				this.status = msg.exited ? 'exited' : 'live';

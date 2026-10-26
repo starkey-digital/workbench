@@ -807,8 +807,6 @@ export interface GoalInfo {
 export interface CachePolicy {
 	/** Unix ms; hidden keep-alive turns refresh the cache until then (at most 24h ahead). */
 	keepWarmUntil?: number;
-	/** Compact just before the cache expires (once keep-warm has ended). */
-	compactOnExpiry: boolean;
 }
 
 export type CodexAction =

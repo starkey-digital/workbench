@@ -270,7 +270,7 @@ enum ClientMsg {
     CachePing,
     /// Restart a Claude terminal session's `claude`, a stuck turn included.
     Restart,
-    /// Keep the cache warm until a time and/or compact before it expires.
+    /// Keep the cache warm until a time.
     CachePolicy {
         policy: CachePolicy,
     },

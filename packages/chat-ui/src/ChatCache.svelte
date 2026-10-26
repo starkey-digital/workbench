@@ -2,16 +2,9 @@
 	import FlameIcon from '@lucide/svelte/icons/flame';
 	import SnowflakeIcon from '@lucide/svelte/icons/snowflake';
 	import { cn } from '@workbench/ui';
-	import { Switch } from '@workbench/ui/switch';
 	import type { AgentChat } from './agent-chat.svelte';
 	import ChatMetricPill from './ChatMetricPill.svelte';
-	import {
-		cacheClock,
-		cacheState,
-		formatRemaining,
-		KEEP_WARM_HOURS,
-		MIN_COMPACT_TOKENS
-	} from './prompt-cache';
+	import { cacheClock, cacheState, formatRemaining, KEEP_WARM_HOURS } from './prompt-cache';
 
 	let { chat, class: className }: { chat: AgentChat; class?: string } = $props();
 
@@ -95,19 +88,6 @@
 						{/if}
 					</p>
 				</div>
-				<label class="flex items-start justify-between gap-3">
-					<span class="flex flex-col gap-0.5">
-						<span class="font-medium">Compact before it expires</span>
-						<span class="text-wb-ink-mute">
-							Over {MIN_COMPACT_TOKENS / 1000}k tokens, once keep-warm ends.
-						</span>
-					</span>
-					<Switch
-						checked={policy.compactOnExpiry}
-						onCheckedChange={(compactOnExpiry) =>
-							chat.setCachePolicy({ ...policy, compactOnExpiry })}
-					/>
-				</label>
 			</div>
 		{/snippet}
 	</ChatMetricPill>

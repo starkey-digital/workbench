@@ -1271,7 +1271,9 @@ fn a_notification_naming_a_subagent_ends_its_task() {
 #[test]
 fn a_woken_teammate_runs_again() {
     let mut t = Transcript::default();
-    t.apply(&json!({"type":"system","subtype":"task_started","task_id":"toolu_1","description":"PVP"}));
+    t.apply(
+        &json!({"type":"system","subtype":"task_started","task_id":"toolu_1","description":"PVP"}),
+    );
     t.apply(&json!({"type":"system","subtype":"task_notification","task_id":"toolu_1","status":"completed"}));
     t.apply(&json!({"type":"system","subtype":"task_updated","task_id":"toolu_1","patch":{"status":"running"}}));
     assert_eq!(t.meta().tasks.len(), 1);
@@ -1516,6 +1518,28 @@ fn compacting_shows_from_its_status_until_the_boundary_or_turn_end() {
     t.apply(&status(json!("compacting")));
     t.apply(&status(Value::Null));
     assert_eq!(t.meta().compacting_since, None, "skipped");
+}
+
+#[test]
+fn an_idle_compaction_never_reads_as_a_turn() {
+    // Claude Code's idle and auto compaction (2.1.299+) with no turn running:
+    // the plugin sends the status, the boundary and a `result`, so a chat must
+    // neither go busy nor read the `result` as a finished turn.
+    let mut t = Transcript::default();
+    t.apply(&json!({"type":"system","subtype":"status","status":"compacting"}));
+    assert!(!t.meta().busy);
+    t.apply(&json!({"type":"system","subtype":"status","status":null}));
+    t.apply(
+        &json!({"type":"system","subtype":"compact_boundary","uuid":"c",
+        "compact_metadata":{"trigger":"auto","pre_tokens":210_000}}),
+    );
+    t.apply(&json!({"type":"result","subtype":"success","is_error":false}));
+    assert!(!t.meta().busy);
+    assert_eq!(t.meta().compacting_since, None);
+    assert_eq!(t.meta().cache_expires_at, None);
+    assert!(t.items().iter().any(
+        |i| matches!(i, TranscriptItem::Notice { text, .. } if text == "Conversation compacted")
+    ));
 }
 
 #[test]

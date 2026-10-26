@@ -66,16 +66,21 @@ async fn cache_policy_is_shared_saved_and_a_ping_reaches_claude() {
     let (pane, _) = support::start_claude(&base, &project, SID).await;
     let (mut ws, _) = tokio_tungstenite::connect_async(&ws_url).await.unwrap();
     let snapshot = next_json(&mut ws).await;
-    assert_eq!(snapshot["cachePolicy"], json!({"compactOnExpiry": false}));
+    assert_eq!(snapshot["cachePolicy"], json!({}));
 
-    let policy = json!({"compactOnExpiry": true});
+    let in_an_hour = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+        + 3_600_000;
+    let policy = json!({"keepWarmUntil": in_an_hour});
     let set = json!({"t": "cachePolicy", "policy": policy}).to_string();
     ws.send(Message::Text(set)).await.unwrap();
     let frame = next_json(&mut ws).await;
     assert_eq!(frame, json!({"t": "cachePolicy", "policy": policy}));
 
     let forever = json!({"t": "cachePolicy", "policy": {
-        "compactOnExpiry": false, "keepWarmUntil": u64::MAX / 2,
+        "keepWarmUntil": u64::MAX / 2,
     }});
     ws.send(Message::Text(forever.to_string())).await.unwrap();
     let frame = next_json(&mut ws).await;
