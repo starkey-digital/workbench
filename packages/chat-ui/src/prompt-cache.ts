@@ -3,7 +3,7 @@ import type { TranscriptMeta } from '@workbench/types';
 
 /** Mirrors `workbench_core::claude_transcript::KEEPALIVE_PROMPT`; hook events for it aren't activity. */
 export const KEEPALIVE_PROMPT = 'Workbench cache keep-alive. Reply with only "ok".';
-/** Below this a compact saves too little to be worth offering (the server's floor too). */
+/** Below this a compact saves too little to be worth offering. */
 export const MIN_COMPACT_TOKENS = 30_000;
 /** Under this much time left (or a fifth of a shorter lifetime) the cache shows as about to expire. */
 const LOW_MS = 5 * 60_000;

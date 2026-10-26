@@ -19,7 +19,7 @@ use workbench_core::claude_transcript::{
     TranscriptMeta, WaitingSummary, KEEPALIVE_PROMPT,
 };
 
-use super::cache::{self, CachePolicy, PolicyStore, Upkeep};
+use super::cache::{self, CachePolicy, PolicyStore};
 use super::driver::{Driver, Effects, Launch};
 use super::frames::{Frame, Frames};
 use super::modlink::ModLink;
@@ -851,7 +851,7 @@ impl AgentSession {
         !d.view().meta().busy && d.view().waiting_on().is_none()
     }
 
-    /// Run whatever the cache policy calls for at `now`, once per expiry.
+    /// Keep the cache warm if the policy calls for it at `now`, once per expiry.
     pub(super) fn upkeep(&self, now: u64) {
         if self.kind != AgentKind::Claude || self.has_exited() {
             return;
@@ -864,18 +864,11 @@ impl AgentSession {
             let idle = !meta.busy && view.waiting_on().is_none();
             (cache::due(&policy, meta, idle, now), meta.cache_expires_at)
         };
-        let Some(due) = due else {
-            return;
-        };
-        if std::mem::replace(&mut *lock(&self.upkept_for), expires) == expires {
+        if !due || std::mem::replace(&mut *lock(&self.upkept_for), expires) == expires {
             return;
         }
-        let text = match due {
-            Upkeep::KeepAlive => KEEPALIVE_PROMPT,
-            Upkeep::Compact => "/compact",
-        };
-        if let Err(e) = self.prompt(text, &[], &[], false) {
-            tracing::warn!("cache upkeep ({due:?}) failed: {e}");
+        if let Err(e) = self.prompt(KEEPALIVE_PROMPT, &[], &[], false) {
+            tracing::warn!("cache keep-alive failed: {e}");
         }
     }
 

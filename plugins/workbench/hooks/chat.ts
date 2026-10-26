@@ -1076,9 +1076,8 @@ export const register: Register = (on) => {
 		return result;
 	});
 
-	// `/compact` (the chat's, or the server's upkeep) runs no turn either: the chat
-	// needs the boundary and a `result`. Auto compaction runs inside a turn, which
-	// ends with its own.
+	// `/compact` and Claude Code's idle compaction run no turn: the chat needs the
+	// boundary and a `result`. Auto compaction mid-turn ends with the turn's own.
 	on('session.compact', async ($, e, next) => {
 		const ours = !e.agentId && e.trigger !== 'precompute';
 		// The chat's `/compact` running: not a panel waiting to be closed, however long it takes.

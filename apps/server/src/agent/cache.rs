@@ -1,6 +1,6 @@
 //! Per-chat prompt cache upkeep (Claude only): keep the cache warm with hidden
-//! keep-alive turns until a set time, and/or compact the conversation just
-//! before the cache expires, so the next turn doesn't write it all again.
+//! keep-alive turns until a set time, so the next turn doesn't write it all
+//! again. Compacting an idle conversation is Claude Code's own (2.1.299+).
 //! Policies are saved by session id, so a chat keeps its own across restarts.
 
 use std::collections::HashMap;
@@ -19,8 +19,6 @@ pub struct CachePolicy {
     /// Unix ms; keep-alive turns run until then.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keep_warm_until: Option<u64>,
-    #[serde(default)]
-    pub compact_on_expiry: bool,
 }
 
 /// How often sessions are checked.
@@ -30,42 +28,24 @@ pub(super) const TICK: Duration = Duration::from_secs(15);
 const LEAD_MS: u64 = 120_000;
 /// A keep-alive's lead on a 1h cache: Claude Code (2.1.299+) compacts a 200K+
 /// conversation left idle about 54 minutes, so a keep-warm session would be
-/// compacted under it. A compact keeps the short lead: it waits for the cache.
+/// compacted under it.
 const HOUR_KEEPALIVE_LEAD_MS: u64 = 600_000;
-/// Below this a compact saves too little to be worth a turn.
-const MIN_COMPACT_TOKENS: u64 = 30_000;
 
-#[derive(Debug, PartialEq)]
-pub(super) enum Upkeep {
-    KeepAlive,
-    Compact,
-}
-
-/// What `policy` calls for at `now`, for a session that is `idle` (no turn,
-/// nothing waiting on an answer).
-pub(super) fn due(
-    policy: &CachePolicy,
-    meta: &TranscriptMeta,
-    idle: bool,
-    now: u64,
-) -> Option<Upkeep> {
-    let expires = meta.cache_expires_at?;
-    if !idle || now >= expires {
-        return None;
+/// Whether `policy` calls for a keep-alive at `now`, for a session that is
+/// `idle` (no turn, nothing waiting on an answer).
+pub(super) fn due(policy: &CachePolicy, meta: &TranscriptMeta, idle: bool, now: u64) -> bool {
+    let Some(expires) = meta.cache_expires_at else {
+        return false;
+    };
+    if !idle || now >= expires || policy.keep_warm_until.is_none_or(|until| now >= until) {
+        return false;
     }
-    let left = expires - now;
-    if policy.keep_warm_until.is_some_and(|until| now < until) {
-        let lead = if meta.cache_ttl_secs.is_some_and(|ttl| ttl >= 3600) {
-            HOUR_KEEPALIVE_LEAD_MS
-        } else {
-            LEAD_MS
-        };
-        return (left <= lead).then_some(Upkeep::KeepAlive);
-    }
-    (left <= LEAD_MS
-        && policy.compact_on_expiry
-        && meta.context_tokens.unwrap_or(0) >= MIN_COMPACT_TOKENS)
-        .then_some(Upkeep::Compact)
+    let lead = if meta.cache_ttl_secs.is_some_and(|ttl| ttl >= 3600) {
+        HOUR_KEEPALIVE_LEAD_MS
+    } else {
+        LEAD_MS
+    };
+    expires - now <= lead
 }
 
 /// `~/.workbench/chat-cache.json`: session id → policy. Default policies
@@ -113,77 +93,39 @@ mod tests {
 
     const NOW: u64 = 1_000_000_000;
 
-    fn meta(expires_in: i64, tokens: u64) -> TranscriptMeta {
+    fn meta(expires_in: i64) -> TranscriptMeta {
         TranscriptMeta {
             cache_expires_at: Some((NOW as i64 + expires_in) as u64),
-            context_tokens: Some(tokens),
             ..TranscriptMeta::default()
         }
     }
 
+    const WARM: CachePolicy = CachePolicy {
+        keep_warm_until: Some(NOW + 1),
+    };
+
     #[test]
-    fn acts_only_just_before_expiry_while_idle() {
-        let warm = CachePolicy {
-            keep_warm_until: Some(NOW + 1),
-            compact_on_expiry: false,
-        };
-        assert_eq!(
-            due(&warm, &meta(60_000, 0), true, NOW),
-            Some(Upkeep::KeepAlive)
-        );
-        assert_eq!(due(&warm, &meta(600_000, 0), true, NOW), None);
-        assert_eq!(due(&warm, &meta(60_000, 0), false, NOW), None);
+    fn acts_only_just_before_expiry_while_idle_and_kept_warm() {
+        assert!(due(&WARM, &meta(60_000), true, NOW));
+        assert!(!due(&WARM, &meta(600_000), true, NOW));
+        assert!(!due(&WARM, &meta(60_000), false, NOW));
         // Already cold: a keep-alive would only write it all again.
-        assert_eq!(due(&warm, &meta(-1, 0), true, NOW), None);
+        assert!(!due(&WARM, &meta(-1), true, NOW));
+        let ended = CachePolicy {
+            keep_warm_until: Some(NOW),
+        };
+        assert!(!due(&ended, &meta(60_000), true, NOW));
+        assert!(!due(&CachePolicy::default(), &meta(60_000), true, NOW));
     }
 
     #[test]
     fn acts_on_an_hour_cache_before_claude_codes_idle_compaction() {
-        let warm = CachePolicy {
-            keep_warm_until: Some(NOW + 1),
-            compact_on_expiry: false,
-        };
         let hour = |expires_in| TranscriptMeta {
             cache_ttl_secs: Some(3600),
-            ..meta(expires_in, 0)
+            ..meta(expires_in)
         };
-        assert_eq!(
-            due(&warm, &hour(420_000), true, NOW),
-            Some(Upkeep::KeepAlive)
-        );
-        assert_eq!(due(&warm, &hour(660_000), true, NOW), None);
-        assert_eq!(due(&warm, &meta(420_000, 0), true, NOW), None);
-
-        // A compact still waits for the cache's last minutes.
-        let compact = CachePolicy {
-            keep_warm_until: None,
-            compact_on_expiry: true,
-        };
-        let big = |expires_in| TranscriptMeta {
-            cache_ttl_secs: Some(3600),
-            ..meta(expires_in, 80_000)
-        };
-        assert_eq!(due(&compact, &big(420_000), true, NOW), None);
-        assert_eq!(
-            due(&compact, &big(60_000), true, NOW),
-            Some(Upkeep::Compact)
-        );
-    }
-
-    #[test]
-    fn compacts_once_keep_warm_ends_and_only_a_large_context() {
-        let both = CachePolicy {
-            keep_warm_until: Some(NOW),
-            compact_on_expiry: true,
-        };
-        assert_eq!(
-            due(&both, &meta(60_000, 80_000), true, NOW),
-            Some(Upkeep::Compact)
-        );
-        assert_eq!(due(&both, &meta(60_000, 5_000), true, NOW), None);
-        assert_eq!(
-            due(&CachePolicy::default(), &meta(60_000, 80_000), true, NOW),
-            None
-        );
+        assert!(due(&WARM, &hour(420_000), true, NOW));
+        assert!(!due(&WARM, &hour(660_000), true, NOW));
+        assert!(!due(&WARM, &meta(420_000), true, NOW));
     }
 }
