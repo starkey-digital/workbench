@@ -12,6 +12,8 @@ use crate::types::{
 /// `gh` would stall GitHub status everywhere. Mutations (merge, checkout) get longer.
 pub(crate) const GH_READ_TIMEOUT: Duration = Duration::from_secs(15);
 const GH_WRITE_TIMEOUT: Duration = Duration::from_secs(120);
+/// Paginated: one request per 100 repos.
+const GH_LIST_TIMEOUT: Duration = Duration::from_secs(60);
 
 fn gh_output(args: &[&str], cwd: &str, timeout: Duration) -> Result<String> {
     let output = crate::shell::run_with_timeout(
@@ -641,27 +643,37 @@ pub fn merge_pr(path: &str, pr_number: u64, options: &MergePrOptions) -> Result<
     Ok(())
 }
 
+/// Every unarchived repo the user can reach, their organizations' included:
+/// `gh repo list` with no owner lists only the user's own.
 pub fn list_repos() -> Result<Vec<GitHubRepo>> {
     let home = dirs::home_dir().unwrap_or_default();
-    let json = gh_output(
+    let ndjson = gh_output(
         &[
-            "repo",
-            "list",
-            "--json",
-            "name,nameWithOwner,description,isPrivate,isFork,url,sshUrl",
-            "--limit",
-            "100",
-            "--no-archived",
+            "api",
+            "--paginate",
+            "user/repos?per_page=100&affiliation=owner,collaborator,organization_member&sort=pushed",
+            "--jq",
+            ".[] | select(.archived | not) | {name, nameWithOwner: .full_name, description, isPrivate: .private, isFork: .fork, url: .html_url, sshUrl: .ssh_url}",
         ],
         &home.to_string_lossy(),
-        GH_READ_TIMEOUT,
+        GH_LIST_TIMEOUT,
     )?;
-    serde_json::from_str(&json).map_err(|e| {
-        anyhow::anyhow!(
-            "Failed to parse repo list: {e}\nResponse: {}",
-            crate::text::truncate_bytes(&json, 500)
-        )
-    })
+    parse_repo_lines(&ndjson)
+}
+
+fn parse_repo_lines(ndjson: &str) -> Result<Vec<GitHubRepo>> {
+    ndjson
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            serde_json::from_str(line).map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to parse repo list: {e}\nResponse: {}",
+                    crate::text::truncate_bytes(line, 500)
+                )
+            })
+        })
+        .collect()
 }
 
 pub fn checkout_pr(path: &str, pr_number: u64) -> Result<()> {
@@ -687,6 +699,21 @@ pub fn fetch_pr_branch(path: &str, number: u64, branch: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_repo_lines_reads_each_repo_and_skips_blanks() {
+        let ndjson = concat!(
+            r#"{"description":null,"isFork":false,"isPrivate":true,"name":"app","nameWithOwner":"acme/app","sshUrl":"git@github.com:acme/app.git","url":"https://github.com/acme/app"}"#,
+            "\n\n",
+            r#"{"description":"mine","isFork":true,"isPrivate":false,"name":"dots","nameWithOwner":"me/dots","sshUrl":"git@github.com:me/dots.git","url":"https://github.com/me/dots"}"#,
+            "\n",
+        );
+        let repos = parse_repo_lines(ndjson).unwrap();
+        assert_eq!(repos.len(), 2);
+        assert_eq!(repos[0].name_with_owner, "acme/app");
+        assert_eq!(repos[0].description, None);
+        assert!(repos[1].is_fork);
+    }
 
     #[test]
     fn parse_ssh_remote() {
