@@ -242,9 +242,11 @@ impl TerminalManager {
         for (key, val) in extra_env {
             cmd.env(key, val);
         }
-        // Set on the shell, so every `claude` run in this pane uses that login.
-        if let Some(dir) = claude_config_dir {
-            cmd.env(workbench_core::claude_accounts::CONFIG_DIR_ENV, dir);
+        // Set on the shell, so every `claude` run in this pane uses that login;
+        // the default login is `~/.claude`, not the server's own inherited dir.
+        match claude_config_dir {
+            Some(dir) => cmd.env(workbench_core::claude_accounts::CONFIG_DIR_ENV, dir),
+            None => cmd.env_remove(workbench_core::claude_accounts::CONFIG_DIR_ENV),
         }
         // CommandBuilder inherits the whole server env; never hand the shell the
         // standalone server's bearer token.

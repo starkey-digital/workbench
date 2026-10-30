@@ -185,9 +185,12 @@ pub(crate) fn claude_command(account_id: Option<&str>) -> Result<std::process::C
     let mut cmd = crate::shell::tool(claude_binary());
     // A probe is no pane's: its `claude` must not attach to a chat or report hooks.
     crate::shell::without_parent_env(&mut cmd);
-    if let Some(dir) = resolve_saved(account_id)? {
-        cmd.env(CONFIG_DIR_ENV, dir);
-    }
+    // The default login is `~/.claude`, not whatever dir Workbench itself was
+    // started under.
+    match resolve_saved(account_id)? {
+        Some(dir) => cmd.env(CONFIG_DIR_ENV, dir),
+        None => cmd.env_remove(CONFIG_DIR_ENV),
+    };
     Ok(cmd)
 }
 
@@ -596,6 +599,10 @@ mod tests {
         for key in crate::shell::PARENT_ONLY_ENV {
             assert!(removed.iter().any(|k| k == key), "{key} is passed on");
         }
+        assert!(
+            removed.iter().any(|k| k == CONFIG_DIR_ENV),
+            "the default account inherits {CONFIG_DIR_ENV}"
+        );
     }
 
     fn settings_with(config_dir: &str) -> WorkbenchSettings {
