@@ -17,8 +17,17 @@ async fn another_host_copies_a_project_and_claude_config_here() {
     std::fs::create_dir_all(&config).unwrap();
     std::fs::create_dir_all(source.join("node_modules")).unwrap();
     std::fs::create_dir_all(home.join(".claude")).unwrap();
-    // Past axum's 2 MB default body limit, which must not apply here.
-    let big: Vec<u8> = (0..3_000_000u64).map(|i| (i * 7919 % 251) as u8).collect();
+    // Past axum's 2 MB default body limit, which must not apply here, and
+    // incompressible, so a refused upload outgrows every buffer on the way.
+    let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+    let big: Vec<u8> = (0..8_000_000)
+        .map(|_| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed as u8
+        })
+        .collect();
     std::fs::write(source.join("big.bin"), &big).unwrap();
     std::fs::write(source.join(".env"), "KEY=1").unwrap();
     std::env::set_var("WORKBENCH_CONFIG_DIR", &config);
@@ -102,6 +111,41 @@ async fn another_host_copies_a_project_and_claude_config_here() {
     assert_eq!(copy.project.name, "Sent");
     assert!(copy.claude.is_none());
     assert_eq!(std::fs::read(parent.join("source/big.bin")).unwrap(), big);
+    // The server's refusal, not the broken upload it causes.
     let err = copy_project(&host, request()).await.unwrap_err();
     assert!(err.to_string().contains("already exists"), "{err}");
+
+    // A pack that fails partway must not leave a partial project there.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let broken = tmp.path().join("broken");
+        std::fs::create_dir_all(&broken).unwrap();
+        std::fs::write(broken.join("a.bin"), &big).unwrap();
+        let locked = broken.join("z-locked");
+        std::fs::write(&locked, "x").unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        // Root reads it anyway, so there's nothing to fail.
+        if std::fs::read(&locked).is_err() {
+            let err = copy_project(
+                &host,
+                CopyRequest {
+                    project_path: broken.clone(),
+                    ..request()
+                },
+            )
+            .await
+            .unwrap_err();
+            assert!(err.to_string().contains("z-locked"), "{err}");
+            assert!(!parent.join("broken").exists());
+            let leftovers = std::fs::read_dir(&parent)
+                .unwrap()
+                .filter(|e| {
+                    let name = e.as_ref().unwrap().file_name();
+                    name.to_string_lossy().contains("workbench-import")
+                })
+                .count();
+            assert_eq!(leftovers, 0);
+        }
+    }
 }

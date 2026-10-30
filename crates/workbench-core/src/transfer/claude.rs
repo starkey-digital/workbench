@@ -94,8 +94,10 @@ fn pack_from(home: &Path, default: bool, accounts: bool, out: impl Write) -> Res
         source_home: home.to_string_lossy().into_owned(),
         dirs: dirs.iter().map(|(d, _, _)| d.clone()).collect(),
     };
+    // Followed: a skill linked in from a dotfiles repo comes across as files,
+    // not as a link to a path that may not exist over there.
     let mut tar = tar::Builder::new(GzEncoder::new(out, Compression::default()));
-    tar.follow_symlinks(false);
+    tar.follow_symlinks(true);
     append_bytes(
         &mut tar,
         Path::new(MANIFEST),
@@ -117,7 +119,7 @@ fn pack_from(home: &Path, default: bool, accounts: bool, out: impl Write) -> Res
             let path = dir.join(sub);
             if path.is_dir() {
                 tar.append_dir(prefix.join(sub), &path)?;
-                super::walk(&mut tar, &path, &prefix.join(sub), &skip)?;
+                super::walk(&mut tar, &path, &prefix.join(sub), true, &skip)?;
             }
         }
         if let Some(servers) = mcp_servers(claude_json)? {
@@ -154,9 +156,8 @@ fn mcp_servers(claude_json: &Path) -> Result<Option<Value>> {
 
 /// Merges an archive from [`pack`] into this host. Paths under the sender's
 /// home are moved under this one's, in `settings.json`, MCP servers and
-/// account dirs alike. A token holder already runs shells here, so this trusts
-/// the archive as far as that: it only refuses entries that climb out of a
-/// config dir.
+/// account dirs alike. Only directories and plain files are written, never a
+/// link, so no entry can climb out of its config dir.
 pub fn import(archive: impl Read) -> Result<ClaudeImportReport> {
     import_at(&crate::paths::home_dir(), archive)
 }
@@ -175,13 +176,7 @@ fn import_at(home: &Path, archive: impl Read) -> Result<ClaudeImportReport> {
     let manifest: Manifest = serde_json::from_slice(&manifest)?;
     let source_home = manifest.source_home.as_str();
     let target_home = home.to_string_lossy().into_owned();
-    let rehome = |text: &str| {
-        if source_home.is_empty() || source_home == target_home {
-            text.to_string()
-        } else {
-            text.replace(source_home, &target_home)
-        }
-    };
+    let rehome = |text: &str| rehome(text, source_home, &target_home);
 
     let mut targets: HashMap<String, (PathBuf, PathBuf)> = HashMap::new();
     let mut settings = crate::config::load_workbench_settings()?;
@@ -230,9 +225,13 @@ fn import_at(home: &Path, archive: impl Read) -> Result<ClaudeImportReport> {
             continue;
         }
         let target = dir.join(&rel);
-        if entry.header().entry_type().is_dir() {
+        let kind = entry.header().entry_type();
+        if kind.is_dir() {
             fs::create_dir_all(&target)?;
             continue;
+        }
+        if !kind.is_file() {
+            bail!("unsupported entry {}", path.display());
         }
         if target.symlink_metadata().is_ok() {
             report
@@ -253,6 +252,17 @@ fn import_at(home: &Path, archive: impl Read) -> Result<ClaudeImportReport> {
         report.written += 1;
     }
     Ok(report)
+}
+
+/// `text` (JSON) with each path under the sender's home moved under this
+/// one's: the home itself as a whole string, or followed by `/`, so
+/// `/Users/jakeb` is left alone when the home is `/Users/jake`.
+fn rehome(text: &str, from: &str, to: &str) -> String {
+    if from.is_empty() || from == to {
+        return text.to_string();
+    }
+    text.replace(&format!("{from}/"), &format!("{to}/"))
+        .replace(&format!("\"{from}\""), &format!("\"{to}\""))
 }
 
 /// Where `account` lives on this host: the same place relative to home, else
@@ -460,6 +470,70 @@ mod tests {
         assert_eq!(report.written, 2);
         assert_eq!(report.mcp_servers_added, vec!["fs"]);
         assert_eq!(report.skipped.len(), 1);
+    }
+
+    #[test]
+    fn rehome_moves_only_whole_home_paths() {
+        let text = r#"{"a":"/Users/jake/x","b":"/Users/jakeb/y","c":"/Users/jake"}"#;
+        assert_eq!(
+            rehome(text, "/Users/jake", "/home/j"),
+            r#"{"a":"/home/j/x","b":"/Users/jakeb/y","c":"/home/j"}"#
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pack_copies_what_a_linked_skill_points_to() {
+        crate::paths::test_config_dir();
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        let real = tmp.path().join("dotfiles/skill");
+        fs::create_dir_all(&real).unwrap();
+        fs::write(real.join("SKILL.md"), "linked").unwrap();
+        fs::create_dir_all(src.join(".claude/skills")).unwrap();
+        std::os::unix::fs::symlink(&real, src.join(".claude/skills/mine")).unwrap();
+        let mut bytes = Vec::new();
+        pack_from(&src, true, false, &mut bytes).unwrap();
+
+        let dst = tmp.path().join("dst");
+        import_at(&dst, &bytes[..]).unwrap();
+        let copied = dst.join(".claude/skills/mine");
+        assert!(!copied.symlink_metadata().unwrap().is_symlink());
+        assert_eq!(
+            fs::read_to_string(copied.join("SKILL.md")).unwrap(),
+            "linked"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn import_refuses_a_link_entry() {
+        crate::paths::test_config_dir();
+        let manifest = Manifest {
+            source_home: String::new(),
+            dirs: vec![ConfigDir {
+                key: "default".into(),
+                account: None,
+            }],
+        };
+        let mut tar = tar::Builder::new(GzEncoder::new(Vec::new(), Compression::fast()));
+        append_bytes(
+            &mut tar,
+            Path::new(MANIFEST),
+            &serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        let mut header = tar::Header::new_gnu();
+        header.set_entry_type(tar::EntryType::Symlink);
+        header.set_size(0);
+        tar.append_link(&mut header, "default/skills", "/etc")
+            .unwrap();
+        let bytes = tar.into_inner().unwrap().finish().unwrap();
+
+        let home = tempfile::tempdir().unwrap();
+        let err = import_at(home.path(), &bytes[..]).unwrap_err();
+        assert!(err.to_string().contains("unsupported entry"), "{err}");
+        assert!(!home.path().join(".claude/skills").exists());
     }
 
     #[test]

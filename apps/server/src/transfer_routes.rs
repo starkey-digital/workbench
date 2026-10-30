@@ -3,6 +3,7 @@
 //! a gzipped tar, unpacked as it streams in, so a large repo never sits in memory.
 
 use std::io::{self, Read};
+use std::time::Duration;
 
 use axum::body::{Body, Bytes};
 use axum::extract::{Query, State};
@@ -15,6 +16,8 @@ use tokio::sync::mpsc;
 use crate::error::ApiResult;
 use crate::routes::blocking;
 use crate::state::AppState;
+
+const IDLE_LIMIT: Duration = Duration::from_secs(120);
 
 /// The request body as a blocking `Read`, fed chunk by chunk from the async side.
 struct BodyReader {
@@ -51,8 +54,19 @@ where
     };
     let pump = async move {
         let mut stream = body.into_data_stream();
-        while let Some(chunk) = stream.next().await {
-            if tx.send(chunk).await.is_err() {
+        loop {
+            // A client that went quiet without closing would otherwise hold the
+            // blocking thread and its half-unpacked folder until a restart.
+            let chunk = match tokio::time::timeout(IDLE_LIMIT, stream.next()).await {
+                Ok(Some(chunk)) => chunk,
+                Ok(None) => break,
+                Err(_) => Err(axum::Error::new(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "upload stalled",
+                ))),
+            };
+            let stalled = chunk.is_err();
+            if tx.send(chunk).await.is_err() || stalled {
                 break;
             }
         }

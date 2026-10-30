@@ -5,7 +5,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 
 use crate::projects::invalid;
@@ -37,6 +37,12 @@ const REBUILDABLE: &[&str] = &[
 const WORKTREES: &str = ".worktrees";
 
 pub fn pack(root: &Path, out: impl Write) -> Result<()> {
+    if root.join(".git").is_file() {
+        bail!(
+            "{} is a linked worktree, whose history lives in another checkout; copy that main checkout instead",
+            root.display()
+        );
+    }
     let git = root.join(".git").exists();
     let root_str = root.to_string_lossy().into_owned();
     let skip = |dir: &Path| {
@@ -54,7 +60,7 @@ pub fn pack(root: &Path, out: impl Write) -> Result<()> {
     };
     let mut tar = tar::Builder::new(GzEncoder::new(out, Compression::fast()));
     tar.follow_symlinks(false);
-    super::walk(&mut tar, root, Path::new(""), &skip)?;
+    super::walk(&mut tar, root, Path::new(""), false, &skip)?;
     tar.into_inner()?.finish()?;
     Ok(())
 }
@@ -75,8 +81,15 @@ pub fn import(
         return invalid(format!("not a folder name: {folder}"));
     }
     let parent = match parent.filter(|p| !p.trim().is_empty()) {
-        Some(p) if Path::new(p).is_absolute() => PathBuf::from(p),
-        Some(p) => return invalid(format!("not an absolute path: {p}")),
+        Some(p)
+            if Path::new(p).is_absolute()
+                && !Path::new(p)
+                    .components()
+                    .any(|c| matches!(c, Component::ParentDir | Component::CurDir)) =>
+        {
+            PathBuf::from(p)
+        }
+        Some(p) => return invalid(format!("not a plain absolute path: {p}")),
         None => crate::config::load_workbench_settings()?
             .clone_base_dir
             .filter(|d| Path::new(d).is_absolute())
@@ -88,24 +101,33 @@ pub fn import(
         return invalid(format!("{} already exists on this host", dest.display()));
     }
     fs::create_dir_all(&parent)?;
-    let staging = parent.join(format!(".{folder}.workbench-import"));
-    let _ = fs::remove_dir_all(&staging);
-    if let Err(e) = unpack(archive, &staging) {
+    // Its own per import, so two copies of one folder never share it.
+    let staging = parent.join(format!(
+        ".{folder}.workbench-import-{}",
+        uuid::Uuid::new_v4()
+    ));
+    // A rename onto a folder that appeared meanwhile fails rather than merging.
+    if let Err(e) = unpack(archive, &staging).and_then(|()| Ok(fs::rename(&staging, &dest)?)) {
         let _ = fs::remove_dir_all(&staging);
         return Err(e);
     }
-    fs::rename(&staging, &dest)?;
-    let dest = dest.to_string_lossy().into_owned();
-    if Path::new(&dest).join(".git").is_dir() {
+    let path = dest.to_string_lossy().into_owned();
+    if dest.join(".git").is_dir() {
         // The source's other worktrees didn't come along.
-        let _ = crate::git::git_output(&["worktree", "prune"], &dest);
+        let _ = crate::git::git_output(&["worktree", "prune"], &path);
     }
-    crate::projects::add(ProjectEdit {
-        path: dest,
+    let added = crate::projects::add(ProjectEdit {
+        path,
         name: name.to_string(),
         group: None,
         claude_account_id: None,
-    })
+    });
+    if added.is_err() {
+        // Made by this import a moment ago, so nothing of the user's is lost,
+        // and a retry isn't refused as "already exists".
+        let _ = fs::remove_dir_all(&dest);
+    }
+    added
 }
 
 fn unpack(archive: impl Read, dest: &Path) -> Result<()> {

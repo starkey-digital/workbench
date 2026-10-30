@@ -82,18 +82,26 @@ async fn upload<T: DeserializeOwned>(
     pack: impl FnOnce(&mut BufWriter<ChunkWriter>) -> Result<()> + Send + 'static,
 ) -> Result<T> {
     let (tx, mut rx) = mpsc::channel::<io::Result<Vec<u8>>>(8);
+    let abort = tx.clone();
     let packing = tokio::task::spawn_blocking(move || {
         let mut out = BufWriter::with_capacity(256 * 1024, ChunkWriter(tx));
-        pack(&mut out)?;
-        out.flush()?;
-        Ok::<_, anyhow::Error>(())
+        let packed = pack(&mut out).and_then(|()| Ok(out.flush()?));
+        if let Err(e) = &packed {
+            // Dropping the tar and gzip writers finishes the archive, so a pack
+            // that failed partway would still reach the server as a valid,
+            // partial one; failing the body makes the upload abort instead.
+            let _ = abort.blocking_send(Err(io::Error::other(e.to_string())));
+        }
+        packed
     });
     let body = futures_util::stream::poll_fn(move |cx| rx.poll_recv(cx));
 
+    // No overall or read timeout: the response comes only once the whole body
+    // is unpacked, which for a large repo over a slow link takes as long as it
+    // takes. Keepalive still notices a peer that went away.
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
-        // No overall limit: a large repo over a slow link takes as long as it takes.
-        .read_timeout(Duration::from_secs(120))
+        .tcp_keepalive(Duration::from_secs(30))
         .build()?;
     let mut req = client
         .post(format!("{}{route}", host.base_url.trim_end_matches('/')))
@@ -103,11 +111,14 @@ async fn upload<T: DeserializeOwned>(
         req = req.bearer_auth(token);
     }
     let sent = req.send().await;
-    // A pack error is the real cause of a broken upload, so it wins.
-    packing
-        .await
-        .map_err(|e| anyhow!("packing failed: {e}"))??;
-    let res = sent?;
+    let packed = packing.await.map_err(|e| anyhow!("packing failed: {e}"))?;
+    // A server that answered (a refusal stops it reading, which breaks the
+    // pack) says what went wrong; without an answer, a pack error is the cause.
+    let res = match (sent, packed) {
+        (Ok(res), _) => res,
+        (Err(_), Err(e)) => return Err(e),
+        (Err(e), Ok(())) => return Err(e.into()),
+    };
     let status = res.status();
     if status == reqwest::StatusCode::NOT_FOUND {
         bail!("that server's Workbench can't receive copies yet; update it first");
