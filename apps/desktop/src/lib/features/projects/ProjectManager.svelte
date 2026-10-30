@@ -3,6 +3,7 @@
 	import { Button } from '@workbench/ui/button';
 	import * as Dialog from '@workbench/ui/dialog';
 	import { Input } from '@workbench/ui/input';
+	import CopyProjectDialog from './CopyProjectDialog.svelte';
 	import ProjectDialog from './ProjectDialog.svelte';
 	import { getProjectManager } from '$stores/context';
 
@@ -17,6 +18,8 @@
 	onSave={() => manager.save()}
 	onPickFolder={() => manager.pickFolder()}
 />
+
+<CopyProjectDialog />
 
 <ConfirmDialog
 	bind:open={manager.removal.open}

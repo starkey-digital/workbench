@@ -1,0 +1,125 @@
+//! The sending side: packs on a blocking thread straight into the upload, so a
+//! large repo is never staged on disk or held in memory.
+
+use std::io::{self, BufWriter, Write};
+use std::path::PathBuf;
+use std::time::Duration;
+
+use anyhow::{anyhow, bail, Context, Result};
+use serde::de::DeserializeOwned;
+use tokio::sync::mpsc;
+
+use crate::types::{ClaudeImportReport, ProjectCopy};
+
+/// Another Workbench host's control plane.
+pub struct Host {
+    pub base_url: String,
+    pub token: Option<String>,
+}
+
+pub struct CopyRequest {
+    pub project_path: PathBuf,
+    pub project_name: String,
+    /// The folder to copy into there; `None`: its clone folder, else home.
+    pub parent: Option<String>,
+    pub claude_config: bool,
+    pub claude_accounts: bool,
+}
+
+/// Copies the project, then (if asked) the Claude config. A refused project
+/// (its folder already exists there) sends no config.
+pub async fn copy_project(host: &Host, request: CopyRequest) -> Result<ProjectCopy> {
+    let folder = request
+        .project_path
+        .file_name()
+        .context("project has no folder name")?
+        .to_string_lossy()
+        .into_owned();
+    let mut query = vec![("folder", folder), ("name", request.project_name)];
+    if let Some(parent) = request.parent.filter(|p| !p.trim().is_empty()) {
+        query.push(("parent", parent));
+    }
+    let path = request.project_path;
+    let project = upload(host, "/transfer/project", &query, move |out| {
+        super::project::pack(&path, out)
+    })
+    .await?;
+
+    let claude = if request.claude_config || request.claude_accounts {
+        let (default, accounts) = (request.claude_config, request.claude_accounts);
+        Some(
+            upload::<ClaudeImportReport>(host, "/transfer/claude", &[], move |out| {
+                super::claude::pack(default, accounts, out)
+            })
+            .await?,
+        )
+    } else {
+        None
+    };
+    Ok(ProjectCopy { project, claude })
+}
+
+/// Hands each buffered chunk to the request body; fails once the upload stops.
+struct ChunkWriter(mpsc::Sender<io::Result<Vec<u8>>>);
+
+impl Write for ChunkWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0
+            .blocking_send(Ok(buf.to_vec()))
+            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "upload stopped"))?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+async fn upload<T: DeserializeOwned>(
+    host: &Host,
+    route: &str,
+    query: &[(&str, String)],
+    pack: impl FnOnce(&mut BufWriter<ChunkWriter>) -> Result<()> + Send + 'static,
+) -> Result<T> {
+    let (tx, mut rx) = mpsc::channel::<io::Result<Vec<u8>>>(8);
+    let packing = tokio::task::spawn_blocking(move || {
+        let mut out = BufWriter::with_capacity(256 * 1024, ChunkWriter(tx));
+        pack(&mut out)?;
+        out.flush()?;
+        Ok::<_, anyhow::Error>(())
+    });
+    let body = futures_util::stream::poll_fn(move |cx| rx.poll_recv(cx));
+
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        // No overall limit: a large repo over a slow link takes as long as it takes.
+        .read_timeout(Duration::from_secs(120))
+        .build()?;
+    let mut req = client
+        .post(format!("{}{route}", host.base_url.trim_end_matches('/')))
+        .query(query)
+        .body(reqwest::Body::wrap_stream(body));
+    if let Some(token) = &host.token {
+        req = req.bearer_auth(token);
+    }
+    let sent = req.send().await;
+    // A pack error is the real cause of a broken upload, so it wins.
+    packing
+        .await
+        .map_err(|e| anyhow!("packing failed: {e}"))??;
+    let res = sent?;
+    let status = res.status();
+    if status == reqwest::StatusCode::NOT_FOUND {
+        bail!("that server's Workbench can't receive copies yet; update it first");
+    }
+    if !status.is_success() {
+        let message = res
+            .json::<serde_json::Value>()
+            .await
+            .ok()
+            .and_then(|v| v["error"].as_str().map(String::from))
+            .unwrap_or_else(|| status.to_string());
+        bail!("{message}");
+    }
+    Ok(res.json().await?)
+}

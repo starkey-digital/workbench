@@ -2,6 +2,7 @@
 	import { AgentIcon } from '@workbench/ui/agent-icon';
 	import type { Component } from 'svelte';
 	import CodeIcon from '@lucide/svelte/icons/code';
+	import CopyIcon from '@lucide/svelte/icons/copy';
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 	import FolderIcon from '@lucide/svelte/icons/folder';
 	import GitBranchIcon from '@lucide/svelte/icons/git-branch';
@@ -17,6 +18,7 @@
 		getClaudeSessionStore,
 		getGitHubStore,
 		getGitStore,
+		getInstancesStore,
 		getProjectManager,
 		getProjectStore,
 		getWorkbenchSettingsStore,
@@ -54,6 +56,7 @@
 	const projectManager = getProjectManager();
 	const worktreeManager = getWorktreeManager();
 	const workbenchSettingsStore = getWorkbenchSettingsStore();
+	const instancesStore = getInstancesStore();
 
 	let runnableActions = $derived(workbenchSettingsStore.runnableActions);
 
@@ -137,6 +140,12 @@
 	<CodeIcon class="size-3.5" />
 	Open in VS Code
 </Item>
+{#if instancesStore.remotes.length > 0}
+	<Item onclick={() => projectManager.copy.start(project, instancesStore.remotes)}>
+		<CopyIcon class="size-3.5" />
+		Copy to Server…
+	</Item>
+{/if}
 {#if githubStore.getRemoteUrl(project.path)}
 	<Item onclick={() => openUrl(githubStore.getRemoteUrl(project.path)!)}>
 		<GithubIcon class="size-3.5" />

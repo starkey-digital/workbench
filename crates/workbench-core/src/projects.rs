@@ -22,7 +22,7 @@ impl std::fmt::Display for Invalid {
 
 impl std::error::Error for Invalid {}
 
-fn invalid<T>(message: impl Into<String>) -> Result<T> {
+pub(crate) fn invalid<T>(message: impl Into<String>) -> Result<T> {
     Err(Invalid(message.into()).into())
 }
 

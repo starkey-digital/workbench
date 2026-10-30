@@ -24,6 +24,14 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/fs/folders", get(list_folders))
         .route(
+            "/transfer/project",
+            post(crate::transfer_routes::import_project),
+        )
+        .route(
+            "/transfer/claude",
+            post(crate::transfer_routes::import_claude),
+        )
+        .route(
             "/projects/worktrees",
             get(list_worktrees)
                 .post(create_worktree)

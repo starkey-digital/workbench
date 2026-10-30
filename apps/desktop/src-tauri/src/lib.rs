@@ -4,7 +4,7 @@
 pub use workbench_core::{
     claude_accounts, claude_plugin, claude_sessions, codex_config, codex_sessions, config, git,
     github, net, package_scripts, paths, sandbox_runtime, session_utils, settings, shell,
-    shell_integration, text, trello, trello_automation, types, workspace, worktrees,
+    shell_integration, text, transfer, trello, trello_automation, types, workspace, worktrees,
 };
 
 // The e2e WebDriver server is unauthenticated control of the webview (and so of
@@ -34,6 +34,7 @@ mod native_terminal_commands;
 mod observability;
 mod refresh_dispatcher;
 mod server_control;
+mod transfer_commands;
 mod trello_commands;
 
 use git_watcher::GitWatcher;
@@ -128,6 +129,7 @@ macro_rules! build_invoke_handler {
             git_commands::git_revert,
             git_commands::git_create_branch,
             git_commands::git_commit_amend,
+            transfer_commands::copy_project_to_server,
             trello_commands::trello_validate_auth,
             trello_commands::trello_list_boards,
             trello_commands::trello_fetch_board_data,
