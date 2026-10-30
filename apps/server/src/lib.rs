@@ -17,6 +17,7 @@ pub mod mod_routes;
 pub mod routes;
 pub mod state;
 pub mod terminal;
+pub mod transfer_routes;
 pub mod usage;
 pub mod watchdog;
 pub mod workspace;

@@ -1,6 +1,7 @@
 import { selectFolder } from '$lib/utils/dialog';
 import { ConfirmAction } from '$lib/utils/confirm-action.svelte';
 import { baseName } from '$lib/utils/path';
+import { CopyProjectFlow } from './copy-project.svelte';
 import type { GitStore } from '$stores/git.svelte';
 import type { ProjectStore } from '$stores/projects.svelte';
 import type { ProjectConfig, ProjectFormState } from '$types/workbench';
@@ -19,6 +20,7 @@ export class ProjectManagerStore {
 	});
 	formError = $state('');
 	readonly removal = new ConfirmAction<string>();
+	readonly copy = new CopyProjectFlow();
 
 	private editingProjectPath: string | null = null;
 	private projectStore: ProjectStore;

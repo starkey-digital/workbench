@@ -490,6 +490,24 @@ export interface ClaudeAccount {
 	configDir: string;
 }
 
+/** What `POST /transfer/claude` merged into a host's Claude config. */
+export interface ClaudeImportReport {
+	/** Files written; one that already existed there is never overwritten. */
+	written: number;
+	/** Files and MCP servers left as they were. */
+	skipped: string[];
+	accountsAdded: string[];
+	mcpServersAdded: string[];
+}
+
+/** A project copied to another host (`copy_project_to_server`). */
+export interface ProjectCopy {
+	project: ProjectConfig;
+	claude: ClaudeImportReport | null;
+	/** The Claude config failed to copy; the project is there regardless. */
+	claudeError: string | null;
+}
+
 /** `claude auth status --json`, trimmed to what the UI shows. */
 export interface ClaudeAuthStatus {
 	loggedIn: boolean;

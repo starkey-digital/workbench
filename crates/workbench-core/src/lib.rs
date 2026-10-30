@@ -38,6 +38,7 @@ pub mod shell_integration;
 pub mod task_output;
 pub mod text;
 pub mod token;
+pub mod transfer;
 pub mod trello;
 pub mod trello_automation;
 pub mod types;

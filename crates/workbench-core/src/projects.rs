@@ -22,7 +22,7 @@ impl std::fmt::Display for Invalid {
 
 impl std::error::Error for Invalid {}
 
-fn invalid<T>(message: impl Into<String>) -> Result<T> {
+pub(crate) fn invalid<T>(message: impl Into<String>) -> Result<T> {
     Err(Invalid(message.into()).into())
 }
 
@@ -82,12 +82,23 @@ pub fn remove(path: &str, then: impl FnOnce() -> Result<()>) -> Result<()> {
 
 /// An absolute folder path with no `.`/`..` steps, so it names one spelling of
 /// the folder and its parent is really the one above.
-fn plain_dir(path: &Path) -> Result<()> {
-    let plain = path.is_absolute()
+/// Absolute, with no `.` or `..` in it.
+pub(crate) fn is_plain_absolute(path: &Path) -> bool {
+    path.is_absolute()
         && !path
             .components()
-            .any(|c| matches!(c, Component::CurDir | Component::ParentDir));
-    if !plain || !path.is_dir() {
+            .any(|c| matches!(c, Component::CurDir | Component::ParentDir))
+}
+
+/// Whether `path` is already a registered project.
+pub(crate) fn is_registered(path: &str) -> Result<bool> {
+    Ok(crate::config::load_projects()?
+        .iter()
+        .any(|p| same_folder(&p.path, path)))
+}
+
+fn plain_dir(path: &Path) -> Result<()> {
+    if !is_plain_absolute(path) || !path.is_dir() {
         return invalid(format!("not a folder on this machine: {}", path.display()));
     }
     Ok(())

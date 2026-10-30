@@ -10,8 +10,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 dirs = { workspace = true }
-reqwest = { workspace = true }
-tokio = { workspace = true, features = ["rt", "macros", "time", "net"] }
+reqwest = { workspace = true, features = ["stream"] }
+tokio = { workspace = true, features = ["rt", "macros", "time", "net", "sync"] }
+futures-util = "0.3"
 log = "0.4"
 getrandom = "0.4"
 if-addrs = "0.15"
@@ -21,6 +22,8 @@ portable-pty = { workspace = true }
 toml_edit = "0.20"
 uuid = { workspace = true }
 gix = { version = "0.89", default-features = false, features = ["sha1"] }
+tar = "0.4"
+flate2 = "1"
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }

@@ -381,6 +381,29 @@ pub struct ClaudeAccount {
     pub config_dir: String,
 }
 
+/// What `POST /transfer/claude` merged into this host's Claude config.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeImportReport {
+    /// Files written; one that already existed here is never overwritten.
+    pub written: usize,
+    /// Files and MCP servers left as they were, as `<config dir>/<path>`.
+    pub skipped: Vec<String>,
+    pub accounts_added: Vec<String>,
+    pub mcp_servers_added: Vec<String>,
+}
+
+/// A project copied to another host: as registered there, and what of the
+/// Claude config merged (`None` when none was sent, or when sending it failed,
+/// which `claude_error` says).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectCopy {
+    pub project: ProjectConfig,
+    pub claude: Option<ClaudeImportReport>,
+    pub claude_error: Option<String>,
+}
+
 fn default_server_port() -> u16 {
     4317
 }
