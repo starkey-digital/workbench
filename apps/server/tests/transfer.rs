@@ -138,14 +138,25 @@ async fn another_host_copies_a_project_and_claude_config_here() {
             .unwrap_err();
             assert!(err.to_string().contains("z-locked"), "{err}");
             assert!(!parent.join("broken").exists());
-            let leftovers = std::fs::read_dir(&parent)
-                .unwrap()
-                .filter(|e| {
-                    let name = e.as_ref().unwrap().file_name();
-                    name.to_string_lossy().contains("workbench-import")
-                })
-                .count();
-            assert_eq!(leftovers, 0);
+            // The sender's error comes as it aborts the upload; the server
+            // notices and removes its staging folder a moment later.
+            let leftovers = || {
+                std::fs::read_dir(&parent)
+                    .unwrap()
+                    .filter(|e| {
+                        let name = e.as_ref().unwrap().file_name();
+                        name.to_string_lossy().contains("workbench-import")
+                    })
+                    .count()
+            };
+            for _ in 0..100 {
+                if leftovers() == 0 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+            assert_eq!(leftovers(), 0);
+            assert!(!parent.join("broken").exists());
         }
     }
 }
