@@ -504,6 +504,8 @@ export interface ClaudeImportReport {
 export interface ProjectCopy {
 	project: ProjectConfig;
 	claude: ClaudeImportReport | null;
+	/** The Claude config failed to copy; the project is there regardless. */
+	claudeError: string | null;
 }
 
 /** `claude auth status --json`, trimmed to what the UI shows. */

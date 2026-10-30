@@ -34,7 +34,11 @@ describe('CopyProjectFlow', () => {
 
 	it('sends the picked server, folder and Claude options, then refreshes that server', async () => {
 		const mini = remote('mini', 'online', 'secret');
-		const copied = { project: { name: 'App', path: '/Users/me/app' }, claude: null };
+		const copied = {
+			project: { name: 'App', path: '/Users/me/app' },
+			claude: null,
+			claudeError: null
+		};
 		mockInvoke('copy_project_to_server', () => copied);
 		flow.start(project, [mini]);
 		flow.parent = '  /Users/me/Repos ';

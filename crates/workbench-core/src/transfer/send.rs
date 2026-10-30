@@ -27,7 +27,8 @@ pub struct CopyRequest {
 }
 
 /// Copies the project, then (if asked) the Claude config. A refused project
-/// (its folder already exists there) sends no config.
+/// (its folder already exists there) sends no config; a failed config copy
+/// still reports the project, which is there by then.
 pub async fn copy_project(host: &Host, request: CopyRequest) -> Result<ProjectCopy> {
     let folder = request
         .project_path
@@ -45,18 +46,31 @@ pub async fn copy_project(host: &Host, request: CopyRequest) -> Result<ProjectCo
     })
     .await?;
 
-    let claude = if request.claude_config || request.claude_accounts {
-        let (default, accounts) = (request.claude_config, request.claude_accounts);
-        Some(
-            upload::<ClaudeImportReport>(host, "/transfer/claude", &[], move |out| {
-                super::claude::pack(default, accounts, out)
-            })
-            .await?,
-        )
-    } else {
-        None
+    let mut copy = ProjectCopy {
+        project,
+        claude: None,
+        claude_error: None,
     };
-    Ok(ProjectCopy { project, claude })
+    if request.claude_config || request.claude_accounts {
+        let (default, accounts) = (request.claude_config, request.claude_accounts);
+        match upload::<ClaudeImportReport>(host, "/transfer/claude", &[], move |out| {
+            super::claude::pack(default, accounts, out)
+        })
+        .await
+        {
+            Ok(report) => copy.claude = Some(report),
+            Err(e) => copy.claude_error = Some(e.to_string()),
+        }
+    }
+    Ok(copy)
+}
+
+/// Packing failed only because the request stopped taking the body (no file
+/// read fails with a broken pipe).
+fn is_upload_stopped(e: &anyhow::Error) -> bool {
+    e.root_cause()
+        .downcast_ref::<io::Error>()
+        .is_some_and(|e| e.kind() == io::ErrorKind::BrokenPipe)
 }
 
 /// Hands each buffered chunk to the request body; fails once the upload stops.
@@ -116,7 +130,9 @@ async fn upload<T: DeserializeOwned>(
     // pack) says what went wrong; without an answer, a pack error is the cause.
     let res = match (sent, packed) {
         (Ok(res), _) => res,
-        (Err(_), Err(e)) => return Err(e),
+        // The pack failed only because the request stopped taking the body.
+        (Err(e), Err(pack)) if is_upload_stopped(&pack) => return Err(e.into()),
+        (Err(_), Err(pack)) => return Err(pack),
         (Err(e), Ok(())) => return Err(e.into()),
     };
     let status = res.status();

@@ -34,6 +34,11 @@
 		{#if flow.result}
 			<div class="space-y-2 text-sm">
 				<p>Copied to <span class="font-mono text-xs">{flow.result.project.path}</span>.</p>
+				{#if flow.result.claudeError}
+					<p class="text-xs text-destructive">
+						The Claude config didn't copy: {flow.result.claudeError}
+					</p>
+				{/if}
 				{#if claude}
 					<p>
 						Claude config: {claude.written} files written{#if claude.mcpServersAdded.length}, MCP

@@ -190,7 +190,7 @@ fn import_at(home: &Path, archive: impl Read) -> Result<ClaudeImportReport> {
                     source_home,
                     home,
                     &mut report,
-                );
+                )?;
                 let claude_json = config_dir.join(".claude.json");
                 (config_dir, claude_json)
             }
@@ -202,7 +202,7 @@ fn import_at(home: &Path, archive: impl Read) -> Result<ClaudeImportReport> {
         crate::config::save_workbench_settings(&settings)?;
     }
 
-    for entry in entries {
+    for entry in &mut entries {
         let mut entry = entry?;
         let path = entry.path()?.into_owned();
         let mut parts = path.components();
@@ -247,10 +247,22 @@ fn import_at(home: &Path, archive: impl Read) -> Result<ClaudeImportReport> {
             entry.read_to_string(&mut text)?;
             crate::paths::atomic_write(&target, &rehome(&text))?;
         } else {
-            entry.unpack(&target)?;
+            // Through a temp file, so an upload cut off mid-file never leaves a
+            // truncated one that later imports would skip as already there.
+            let name = target.file_name().unwrap_or_default().to_string_lossy();
+            let tmp = target.with_file_name(format!(".{name}.{}.tmp", uuid::Uuid::new_v4()));
+            if let Err(e) = entry
+                .unpack(&tmp)
+                .map_err(anyhow::Error::from)
+                .and_then(|_| Ok(fs::rename(&tmp, &target)?))
+            {
+                let _ = fs::remove_file(&tmp);
+                return Err(e);
+            }
         }
         report.written += 1;
     }
+    super::read_to_end(archive.into_inner())?;
     Ok(report)
 }
 
@@ -274,7 +286,16 @@ fn add_account(
     source_home: &str,
     home: &Path,
     report: &mut ClaudeImportReport,
-) -> PathBuf {
+) -> Result<PathBuf> {
+    // It becomes a folder name below and an id in settings.
+    if account.id.is_empty()
+        || !account
+            .id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        bail!("not an account id: {:?}", account.id);
+    }
     let source = Path::new(&account.config_dir);
     let dir = match source.strip_prefix(source_home) {
         Ok(rel)
@@ -292,7 +313,7 @@ fn add_account(
         .iter()
         .find(|a| a.id == account.id || Path::new(&a.config_dir) == dir)
     {
-        return PathBuf::from(&existing.config_dir);
+        return Ok(PathBuf::from(&existing.config_dir));
     }
     accounts.push(ClaudeAccount {
         id: account.id.clone(),
@@ -300,7 +321,7 @@ fn add_account(
         config_dir: dir.to_string_lossy().into_owned(),
     });
     report.accounts_added.push(account.name.clone());
-    dir
+    Ok(dir)
 }
 
 /// Adds the servers `claude_json` lacks; one it has keeps its own definition.
@@ -395,12 +416,12 @@ mod tests {
             name: "Work".into(),
             config_dir: "/Users/old/.claude-work".into(),
         };
-        let dir = add_account(&mut accounts, &account, "/Users/old", home, &mut report);
+        let dir = add_account(&mut accounts, &account, "/Users/old", home, &mut report).unwrap();
         assert_eq!(dir, Path::new("/Users/new/.claude-work"));
         assert_eq!(accounts[0].config_dir, "/Users/new/.claude-work");
         assert_eq!(report.accounts_added, vec!["Work"]);
 
-        let again = add_account(&mut accounts, &account, "/Users/old", home, &mut report);
+        let again = add_account(&mut accounts, &account, "/Users/old", home, &mut report).unwrap();
         assert_eq!(again, dir);
         assert_eq!(accounts.len(), 1);
 
@@ -409,7 +430,7 @@ mod tests {
             name: "Ext".into(),
             config_dir: "/Volumes/x/claude-ext".into(),
         };
-        let dir = add_account(&mut accounts, &outside, "/Users/old", home, &mut report);
+        let dir = add_account(&mut accounts, &outside, "/Users/old", home, &mut report).unwrap();
         assert_eq!(dir, Path::new("/Users/new/claude-ext"));
     }
 
@@ -470,6 +491,43 @@ mod tests {
         assert_eq!(report.written, 2);
         assert_eq!(report.mcp_servers_added, vec!["fs"]);
         assert_eq!(report.skipped.len(), 1);
+    }
+
+    #[test]
+    fn add_account_refuses_an_id_that_is_a_path() {
+        let account = ClaudeAccount {
+            id: "../../../tmp/evil".into(),
+            name: "Evil".into(),
+            config_dir: "/x/.claude".into(),
+        };
+        let mut accounts = Vec::new();
+        let mut report = ClaudeImportReport::default();
+        assert!(add_account(
+            &mut accounts,
+            &account,
+            "/Users/old",
+            Path::new("/h"),
+            &mut report
+        )
+        .is_err());
+        assert!(accounts.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pack_survives_a_link_back_to_an_ancestor() {
+        crate::paths::test_config_dir();
+        let tmp = tempfile::tempdir().unwrap();
+        let skills = tmp.path().join(".claude/skills");
+        fs::create_dir_all(skills.join("a")).unwrap();
+        fs::write(skills.join("a/SKILL.md"), "a").unwrap();
+        std::os::unix::fs::symlink(&skills, skills.join("a/loop")).unwrap();
+        let mut bytes = Vec::new();
+        pack_from(tmp.path(), true, false, &mut bytes).unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        import_at(dst.path(), &bytes[..]).unwrap();
+        assert!(dst.path().join(".claude/skills/a/SKILL.md").is_file());
+        assert!(!dst.path().join(".claude/skills/a/loop").exists());
     }
 
     #[test]

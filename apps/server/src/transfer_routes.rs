@@ -10,8 +10,8 @@ use axum::extract::{Query, State};
 use axum::Json;
 use futures_util::StreamExt;
 use serde::Deserialize;
-use serde_json::Value;
 use tokio::sync::mpsc;
+use workbench_core::types::{ClaudeImportReport, ProjectConfig};
 
 use crate::error::ApiResult;
 use crate::routes::blocking;
@@ -88,7 +88,7 @@ pub(crate) async fn import_project(
     State(state): State<AppState>,
     Query(query): Query<ProjectQuery>,
     body: Body,
-) -> ApiResult<Json<Value>> {
+) -> ApiResult<Json<ProjectConfig>> {
     let project = import_body(body, move |reader| {
         workbench_core::transfer::project::import(
             query.parent.as_deref(),
@@ -99,16 +99,16 @@ pub(crate) async fn import_project(
     })
     .await?;
     state.projects.notify();
-    Ok(Json(serde_json::to_value(project)?))
+    Ok(Json(project))
 }
 
 pub(crate) async fn import_claude(
     State(state): State<AppState>,
     body: Body,
-) -> ApiResult<Json<Value>> {
+) -> ApiResult<Json<ClaudeImportReport>> {
     let report = import_body(body, workbench_core::transfer::claude::import).await?;
     if !report.accounts_added.is_empty() {
         state.settings.notify();
     }
-    Ok(Json(serde_json::to_value(report)?))
+    Ok(Json(report))
 }

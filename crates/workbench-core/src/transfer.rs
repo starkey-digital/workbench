@@ -13,6 +13,16 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use tar::Builder;
 
+/// Reads past the tar's end marker to the end of the body. A sender whose pack
+/// failed still finishes the archive as its writers drop, then fails the
+/// upload: without this the receiver stops at the marker, never sees that
+/// failure, and keeps a partial copy.
+fn read_to_end<R: io::Read>(mut gz: flate2::read::GzDecoder<R>) -> Result<()> {
+    io::copy(&mut gz, &mut io::sink())?;
+    io::copy(gz.get_mut(), &mut io::sink())?;
+    Ok(())
+}
+
 /// Appends everything under `dir` as `archived/...`, without descending into a
 /// directory `skip` names. With `follow`, a symlink is copied as what it points
 /// to (the builder must follow symlinks too); without, as a link. A file that
@@ -37,7 +47,7 @@ fn walk<W: Write>(
         };
         let appended = match ty {
             Ok(ty) if ty.is_dir() => {
-                if skip(&path) {
+                if skip(&path) || (follow && links_to_an_ancestor(&entry, dir)) {
                     continue;
                 }
                 tar.append_dir(&name, &path)
@@ -61,4 +71,14 @@ fn walk<W: Write>(
         }
     }
     Ok(())
+}
+
+/// A linked directory that resolves to `dir` or one of its parents: following
+/// it would walk the same files forever.
+fn links_to_an_ancestor(entry: &fs::DirEntry, dir: &Path) -> bool {
+    entry.file_type().is_ok_and(|t| t.is_symlink())
+        && matches!(
+            (fs::canonicalize(dir), fs::canonicalize(entry.path())),
+            (Ok(dir), Ok(target)) if dir.starts_with(&target)
+        )
 }
