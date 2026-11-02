@@ -829,7 +829,7 @@ impl AgentManager {
                     resume,
                     resume_at: resume_at.clone(),
                     permission_mode: permission_mode.clone(),
-                    prompt: None,
+                    ..Default::default()
                 }),
                 cols: 120,
                 rows: 40,

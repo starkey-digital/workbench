@@ -44,6 +44,10 @@ pub struct ClaudeSessionLaunch {
     /// A new session's first prompt, submitted as Claude starts (an agent action).
     #[serde(default)]
     pub prompt: Option<String>,
+    /// The account's `CLAUDE_CONFIG_DIR` (`None`: the default login), set by
+    /// the host from the account id; a client never sends a path.
+    #[serde(skip)]
+    pub config_dir: Option<std::path::PathBuf>,
 }
 
 /// What a new terminal types once its shell starts: `command`, or Claude on
@@ -97,7 +101,7 @@ pub fn terminal_command(
     if !is_uuid(&session.id) {
         bail!("session id must be a UUID");
     }
-    let mut cmd = String::new();
+    let mut cmd = account_env(session.config_dir.as_deref())?;
     if sandboxed(settings) {
         // Fail closed: launching unwrapped would silently drop the sandbox.
         if !sandbox_settings.is_file() {
@@ -142,6 +146,27 @@ pub fn terminal_command(
         cmd.push_str(&arg);
     }
     Ok(cmd)
+}
+
+/// The account, set on the command itself: the terminal's env alone loses to a
+/// login shell's profile exporting `CLAUDE_CONFIG_DIR`, which ran every session
+/// under that login and hid its transcripts from the `--resume` check. `env`
+/// reads the same in every Unix shell (fish included). Windows keeps the
+/// terminal's env.
+fn account_env(config_dir: Option<&Path>) -> Result<String> {
+    if cfg!(windows) {
+        return Ok(String::new());
+    }
+    let var = crate::claude_accounts::CONFIG_DIR_ENV;
+    Ok(match config_dir {
+        Some(dir) => {
+            let dir = dir
+                .to_str()
+                .context("the Claude account's config dir is not UTF-8")?;
+            format!("env {var}={} ", launch_prompt::shell_quote(dir))
+        }
+        None => format!("env -u {var} "),
+    })
 }
 
 /// Why a new session's prompt was left out of its command, to tell the person.
@@ -201,6 +226,12 @@ mod tests {
     use super::*;
 
     const SID: &str = "7b3c54f4-ba22-4654-9af9-037d1cd8e555";
+    /// What every command starts with for the default login.
+    const ENV: &str = if cfg!(windows) {
+        ""
+    } else {
+        "env -u CLAUDE_CONFIG_DIR "
+    };
 
     /// The dialog as Claude Code 2.1.291 drew it in a PTY.
     const TRUST_DIALOG: &str = "\x1b[2G\x1b[1mQuick\x1b[8Gsafety\x1b[15Gcheck\x1b[22m\r\r\n\x1b[2G\x1b[38;2;177;185;249m\u{276f}\x1b[4GNo,\x1b[8Gexit\x1b[39m\r\r\n\x1b[4GYes,\x1b[9GI\x1b[11Gtrust\x1b[17Gthis\x1b[22Gfolder\r\r\n\x1b]0;claude\x07";
@@ -276,7 +307,21 @@ mod tests {
     #[test]
     fn default_mode_adds_no_flag() {
         let cmd = command(&launch(true), "default");
-        assert_eq!(cmd.unwrap(), format!("claude --resume {SID}"));
+        assert_eq!(cmd.unwrap(), format!("{ENV}claude --resume {SID}"));
+    }
+
+    #[test]
+    fn the_account_is_set_on_the_command_over_any_shell_profile() {
+        let session = ClaudeSessionLaunch {
+            config_dir: Some("/Users/me/.claude-it's".into()),
+            ..launch(true)
+        };
+        let expected = if cfg!(windows) {
+            format!("claude --resume {SID}")
+        } else {
+            format!("env CLAUDE_CONFIG_DIR='/Users/me/.claude-it'\"'\"'s' claude --resume {SID}")
+        };
+        assert_eq!(command(&session, "default").unwrap(), expected);
     }
 
     #[test]
@@ -284,10 +329,10 @@ mod tests {
         let cmd = command(&launch(false), "acceptEdits");
         assert_eq!(
             cmd.unwrap(),
-            format!("claude --permission-mode acceptEdits --session-id {SID}")
+            format!("{ENV}claude --permission-mode acceptEdits --session-id {SID}")
         );
         let cmd = command(&launch(true), "rm -rf /");
-        assert_eq!(cmd.unwrap(), format!("claude --resume {SID}"));
+        assert_eq!(cmd.unwrap(), format!("{ENV}claude --resume {SID}"));
     }
 
     #[test]
@@ -308,7 +353,7 @@ mod tests {
         };
         assert_eq!(
             command(&session, "default").unwrap(),
-            format!("claude --session-id {SID} -- 'it'\"'\"'s $(broken)\nfix it'")
+            format!("{ENV}claude --session-id {SID} -- 'it'\"'\"'s $(broken)\nfix it'")
         );
         assert_eq!(prompt_notice(&session), None);
     }
@@ -338,7 +383,7 @@ mod tests {
         };
         assert_eq!(
             command(&resume, "default").unwrap(),
-            format!("claude --resume {SID}")
+            format!("{ENV}claude --resume {SID}")
         );
         let blank = ClaudeSessionLaunch {
             prompt: Some(" \n ".into()),
@@ -346,7 +391,7 @@ mod tests {
         };
         assert_eq!(
             command(&blank, "default").unwrap(),
-            format!("claude --session-id {SID}")
+            format!("{ENV}claude --session-id {SID}")
         );
     }
 
@@ -367,7 +412,7 @@ mod tests {
             };
             assert_eq!(
                 command(&session, "default").unwrap(),
-                format!("claude --session-id {SID}"),
+                format!("{ENV}claude --session-id {SID}"),
                 "{bad}"
             );
             assert!(prompt_notice(&session).is_some(), "{bad}");
@@ -385,7 +430,7 @@ mod tests {
         assert_eq!(
             cmd,
             format!(
-                "npx --yes {SANDBOX_RUNTIME_PACKAGE} --settings '{quoted}' -- claude --permission-mode plan --resume {SID}"
+                "{ENV}npx --yes {SANDBOX_RUNTIME_PACKAGE} --settings '{quoted}' -- claude --permission-mode plan --resume {SID}"
             )
         );
     }

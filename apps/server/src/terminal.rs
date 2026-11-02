@@ -578,6 +578,8 @@ fn create(
     if let Some(session) = body.claude_session.as_mut() {
         session.resume =
             crate::agent::claude_history_exists(claude_config_dir.as_deref(), &session.id);
+        // On the command too, so the `--resume` check and the CLI read one folder.
+        session.config_dir = claude_config_dir.clone();
     }
     // A thread nobody wrote to yet has nothing to resume.
     if let Some(codex) = body.codex_session.as_mut() {
