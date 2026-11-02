@@ -42,16 +42,25 @@ export class RemoteSession {
 	/** The host's account for new Claude sessions; `undefined` is its default login. */
 	activeAccountId = $state<string | undefined>();
 	accountError = $state<string | null>(null);
+	/** Every login on the host, the default one first with id `''` (as `ProjectConfig.claudeAccountId`). */
+	readonly accountChoices = $derived([
+		{ id: '', name: this.defaultAccountName },
+		...this.claudeAccounts.map((a) => ({ id: a.id, name: a.name }))
+	]);
+	readonly activeAccountName = $derived(
+		this.accountChoices.find((a) => a.id === (this.activeAccountId ?? ''))?.name ??
+			this.defaultAccountName
+	);
 	private readonly uiKey: string;
 
 	private readonly transport: ControlPlaneTransport;
-	private readonly control: Pick<ControlPlaneStore, 'projects'>;
+	private readonly control: Pick<ControlPlaneStore, 'projects' | 'updateProject'>;
 
 	constructor(
 		id: string,
 		address: { baseUrl: string; token?: string },
 		transport: ControlPlaneTransport,
-		control: Pick<ControlPlaneStore, 'projects'>,
+		control: Pick<ControlPlaneStore, 'projects' | 'updateProject'>,
 		deps: RemoteSessionDeps
 	) {
 		this.transport = transport;
@@ -104,6 +113,21 @@ export class RemoteSession {
 			this.accountError = null;
 		} catch (e) {
 			this.accountError = `Couldn't switch the account: ${e instanceof Error ? e.message : String(e)}`;
+		}
+	}
+
+	/** The account new Claude sessions in the project start under; `undefined` follows the host's. */
+	async setProjectAccount(project: ProjectConfig, accountId: string | undefined): Promise<void> {
+		try {
+			await this.control.updateProject({
+				path: project.path,
+				name: project.name,
+				group: project.group,
+				claudeAccountId: accountId
+			});
+			this.accountError = null;
+		} catch (e) {
+			this.accountError = `Couldn't set ${project.name}'s account: ${e instanceof Error ? e.message : String(e)}`;
 		}
 	}
 

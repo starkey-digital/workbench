@@ -13,6 +13,7 @@
 	import SessionBadges from '$features/projects/SessionBadges.svelte';
 	import SessionItem from '$features/projects/SessionItem.svelte';
 	import type { ActiveClaudeSession, ProjectConfig } from '$types/workbench';
+	import RemoteProjectAccount from './RemoteProjectAccount.svelte';
 	import type { RemoteSession } from './remote-session.svelte';
 	import { projectBranches, type BranchRow } from './remote-tree';
 
@@ -182,6 +183,7 @@
 				{project.name}
 			</button>
 			<SessionBadges sessions={sessionsFor(project.path)} />
+			<RemoteProjectAccount {project} {session} />
 			{@render newSessionButton(project.name, () => void session.newSession(project))}
 		</div>
 		{#if expanded}
