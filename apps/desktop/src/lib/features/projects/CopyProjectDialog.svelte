@@ -82,6 +82,7 @@
 							type="single"
 							bind:value={flow.serverId}
 							onValueChange={() => (flow.browser = null)}
+							disabled={flow.copying}
 						>
 							<Select.Trigger class="w-full" aria-label="Server">
 								{server ? `${server.config.name} (${server.status})` : 'Choose a server'}
@@ -161,10 +162,11 @@
 								bind:value={flow.parent}
 								placeholder="Its clone folder, else home"
 								class="font-mono text-xs"
+								disabled={flow.copying}
 							/>
 							<Button
 								variant="secondary"
-								disabled={!server || server.status !== 'online'}
+								disabled={!server || server.status !== 'online' || flow.copying}
 								onclick={() => flow.browse(instances.remotes)}
 							>
 								Browse…
@@ -241,7 +243,11 @@
 				<Button variant="ghost" disabled={flow.copying} onclick={() => (flow.open = false)}>
 					Cancel
 				</Button>
-				<Button disabled={!server || flow.copying} onclick={() => flow.copy(instances.remotes)}>
+				<Button
+					disabled={!server || flow.copying || !!flow.browser}
+					title={flow.browser ? 'Pick a folder first' : undefined}
+					onclick={() => flow.copy(instances.remotes)}
+				>
 					{#if flow.copying}
 						<LoaderIcon class="size-3.5 animate-spin" />
 						Copying…

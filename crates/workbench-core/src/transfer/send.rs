@@ -47,18 +47,24 @@ pub async fn copy_project(host: &Host, request: CopyRequest) -> Result<ProjectCo
     let path = request.project_path;
     let progress = request.progress;
     let project = upload(host, "/transfer/project", &query, move |out| {
-        let total = super::project::measure(&path)?;
-        progress(TransferProgress { sent: 0, total });
-        let mut last = Instant::now();
-        let mut sent = 0;
-        super::project::pack_counted(&path, out, |n| {
-            sent = n;
-            if last.elapsed() >= PROGRESS_EVERY {
-                last = Instant::now();
-                progress(TransferProgress { sent, total });
+        let mut last: Option<Instant> = None;
+        let (mut sent, mut total) = (0, 0);
+        super::project::pack_counted(&path, out, |n, of| {
+            (sent, total) = (n, of);
+            if last.is_none_or(|t| t.elapsed() >= PROGRESS_EVERY) {
+                last = Some(Instant::now());
+                progress(TransferProgress {
+                    sent,
+                    total,
+                    done: false,
+                });
             }
         })?;
-        progress(TransferProgress { sent, total });
+        progress(TransferProgress {
+            sent,
+            total,
+            done: true,
+        });
         Ok(())
     })
     .await?;

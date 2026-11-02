@@ -12,6 +12,9 @@ import { log } from '$lib/log';
 
 export type InstanceStatus = 'connecting' | 'online' | 'offline';
 
+/** How often a connected host's update status is re-read. */
+const UPDATE_RECHECK_MS = 10 * 60_000;
+
 export interface RemoteInstanceConfig {
 	id: string;
 	name: string;
@@ -35,6 +38,7 @@ export class RemoteInstance {
 	readonly store: ControlPlaneStore;
 	/** The host's Workbench version, and installing its update from here. */
 	readonly hostUpdate: HostUpdate;
+	private updateCheckedAt = 0;
 	private readonly transport: ControlPlaneTransport;
 	private remoteSession: { session: RemoteSession; destroy: () => void } | null = null;
 
@@ -88,7 +92,16 @@ export class RemoteInstance {
 		}
 		if (this.status !== 'online') return;
 		// While it installs, every poll checks: the host answering on another version ends it.
-		if (prev !== 'online' || this.hostUpdate.updating) void this.hostUpdate.check();
+		// Otherwise now and then, so a release out since connecting shows up.
+		const now = Date.now();
+		if (
+			prev !== 'online' ||
+			this.hostUpdate.updating ||
+			now - this.updateCheckedAt >= UPDATE_RECHECK_MS
+		) {
+			this.updateCheckedAt = now;
+			void this.hostUpdate.check();
+		}
 		if (prev !== 'online') await this.store.refresh();
 	}
 }

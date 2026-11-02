@@ -508,10 +508,12 @@ export interface ProjectCopy {
 	claudeError: string | null;
 }
 
-/** `transfer:progress`: bytes of the folder uploaded and in all (before compression; `sent` can end slightly past `total`). */
+/** `transfer:progress`: bytes of the project's archive (before compression) uploaded and in all. */
 export interface TransferProgress {
 	sent: number;
 	total: number;
+	/** The whole archive is out; the server is finishing (then the Claude config, if asked for). */
+	done: boolean;
 }
 
 /** `claude auth status --json`, trimmed to what the UI shows. */

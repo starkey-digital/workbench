@@ -19,21 +19,27 @@ export interface CopyProgress {
 /** Below this the rate is mostly noise from the first chunks. */
 const SETTLE_MS = 1500;
 
+const UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];
+
+/** `512 B`, `9.9 MB`, `10 MB`, `3.4 GB`: one decimal below 10, judged after rounding. */
 export function formatSize(bytes: number): string {
-	const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-	let n = bytes;
 	let unit = 0;
-	while (n >= 1024 && unit < units.length - 1) {
+	let n = Math.round(bytes);
+	// Move up while the rounded figure would read 1024 or more (`1023.7 KB` is `1.0 MB`).
+	while (unit < UNITS.length - 1 && Math.round(n) >= 1024) {
 		n /= 1024;
 		unit++;
 	}
-	return unit === 0 ? `${n} B` : `${n.toFixed(n < 10 ? 1 : 0)} ${units[unit]}`;
+	if (unit === 0) return `${n} B`;
+	const tenths = Math.round(n * 10) / 10;
+	return tenths < 10 ? `${tenths.toFixed(1)} ${UNITS[unit]}` : `${Math.round(n)} ${UNITS[unit]}`;
 }
 
-function formatLeft(seconds: number): string {
-	if (seconds < 60) return `about ${Math.max(1, Math.round(seconds))}s left`;
-	const mins = Math.floor(seconds / 60);
-	if (mins < 60) return `about ${mins}m ${Math.round(seconds % 60)}s left`;
+export function formatLeft(seconds: number): string {
+	const s = Math.max(1, Math.round(seconds));
+	if (s < 60) return `about ${s}s left`;
+	const mins = Math.floor(s / 60);
+	if (mins < 60) return `about ${mins}m ${s % 60}s left`;
 	return `about ${Math.floor(mins / 60)}h ${mins % 60}m left`;
 }
 
@@ -67,7 +73,7 @@ export class CopyProjectFlow {
 	result = $state<ProjectCopy | null>(null);
 	/** The project upload's progress while copying; null until the folder is measured. */
 	progress = $state.raw<CopyProgress | null>(null);
-	/** The project is up; the Claude config is going. */
+	/** The whole project is up; the server is finishing (then the Claude config). */
 	uploaded = $state(false);
 	private startedAt = 0;
 
@@ -75,7 +81,7 @@ export class CopyProjectFlow {
 	onProgress(p: TransferProgress, now = Date.now()) {
 		if (p.sent === 0) this.startedAt = now;
 		this.progress = copyProgress(p, now - this.startedAt);
-		this.uploaded = p.total > 0 && p.sent >= p.total;
+		this.uploaded = p.done;
 	}
 
 	start(project: ProjectConfig, remotes: RemoteInstance[]) {
@@ -107,15 +113,17 @@ export class CopyProjectFlow {
 
 	async copy(remotes: RemoteInstance[]) {
 		const remote = remotes.find((r) => r.config.id === this.serverId);
-		if (!this.project || !remote || this.copying) return;
+		// While browsing, the folder shown isn't `parent` until it's picked.
+		if (!this.project || !remote || this.copying || this.browser) return;
 		this.copying = true;
 		this.error = '';
 		this.progress = null;
 		this.uploaded = false;
-		const unlisten = await listen<TransferProgress>('transfer:progress', (e) =>
-			this.onProgress(e.payload)
-		);
+		let unlisten: (() => void) | undefined;
 		try {
+			unlisten = await listen<TransferProgress>('transfer:progress', (e) =>
+				this.onProgress(e.payload)
+			);
 			this.result = await invoke<ProjectCopy>('copy_project_to_server', {
 				serverUrl: remote.base,
 				token: remote.config.token ?? null,
@@ -129,7 +137,7 @@ export class CopyProjectFlow {
 		} catch (e) {
 			this.error = String(e);
 		} finally {
-			unlisten();
+			unlisten?.();
 			this.copying = false;
 		}
 	}

@@ -157,6 +157,7 @@ describe('RemoteInstance.checkHealth', () => {
 			vi.fn(() => Promise.resolve({ ok: true }))
 		);
 
+		vi.useFakeTimers();
 		await inst.checkHealth();
 		await inst.checkHealth();
 		expect(check).toHaveBeenCalledTimes(1);
@@ -164,5 +165,12 @@ describe('RemoteInstance.checkHealth', () => {
 		inst.hostUpdate.target = '1.1.0';
 		await inst.checkHealth();
 		expect(check).toHaveBeenCalledTimes(2);
+
+		// A release out since connecting shows up within ten minutes.
+		inst.hostUpdate.target = null;
+		vi.advanceTimersByTime(10 * 60_000);
+		await inst.checkHealth();
+		expect(check).toHaveBeenCalledTimes(3);
+		vi.useRealTimers();
 	});
 });
