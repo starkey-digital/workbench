@@ -6,6 +6,34 @@ use tokio::sync::broadcast::error::TryRecvError;
 use super::*;
 
 #[test]
+fn a_claude_command_runs_under_its_account_whatever_the_profile_exports() {
+    let line = |scoped: bool, shell: &str, dir: Option<&str>| {
+        under_account(
+            Some("claude".into()),
+            scoped,
+            Some(shell),
+            dir.map(std::path::Path::new),
+        )
+        .unwrap()
+    };
+    assert_eq!(
+        line(true, "/bin/zsh", None),
+        "unset CLAUDE_CONFIG_DIR; claude"
+    );
+    assert_eq!(
+        line(true, "/bin/zsh", Some("/Users/me/.claude-work")),
+        "export CLAUDE_CONFIG_DIR='/Users/me/.claude-work'; claude"
+    );
+    assert_eq!(
+        line(true, "/usr/bin/fish", Some("/w")),
+        "set -gx CLAUDE_CONFIG_DIR '/w'; claude"
+    );
+    // A shell or script with no account or Claude session is left as typed.
+    assert_eq!(line(false, "/bin/zsh", None), "claude");
+    assert_eq!(under_account(None, true, Some("/bin/zsh"), None), None);
+}
+
+#[test]
 fn a_replay_the_ring_cut_starts_at_a_line() {
     let short: VecDeque<u8> = b"half a line\r\nnext\r\n".iter().copied().collect();
     assert_eq!(replay_of(&short), b"half a line\r\nnext\r\n", "nothing cut");
