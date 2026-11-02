@@ -36,43 +36,112 @@ const REBUILDABLE: &[&str] = &[
 /// The "inside" worktree layout's folder: each worktree is a checkout of its own.
 const WORKTREES: &str = ".worktrees";
 
-pub fn pack(root: &Path, out: impl Write) -> Result<()> {
-    if root.join(".git").is_file() {
-        bail!(
-            "{} is a linked worktree, whose history lives in another checkout; copy that main checkout instead",
-            root.display()
-        );
+/// Which folders of a project stay behind.
+struct LeftOut<'a> {
+    root: &'a Path,
+    git_dir: PathBuf,
+    git: bool,
+}
+
+impl<'a> LeftOut<'a> {
+    fn new(root: &'a Path) -> Result<Self> {
+        if root.join(".git").is_file() {
+            bail!(
+                "{} is a linked worktree, whose history lives in another checkout; copy that main checkout instead",
+                root.display()
+            );
+        }
+        let git_dir = root.join(".git");
+        let git = git_dir.exists();
+        Ok(Self { root, git_dir, git })
     }
-    let git_dir = root.join(".git");
-    let git = git_dir.exists();
-    let root_str = root.to_string_lossy().into_owned();
-    let git_says = |args: &[&str]| crate::git::git_output(args, &root_str);
-    let skip = |dir: &Path| {
+
+    fn skip(&self, dir: &Path) -> bool {
         // `.gitignore` patterns also match ref dirs (`refs/heads/build`), which
         // are local branches, never output.
-        if dir.starts_with(&git_dir) {
+        if dir.starts_with(&self.git_dir) {
             return false;
         }
         let name = dir.file_name().unwrap_or_default().to_string_lossy();
-        if dir.parent() == Some(root) && name == WORKTREES {
+        if dir.parent() == Some(self.root) && name == WORKTREES {
             return true;
         }
         if !REBUILDABLE.contains(&name.as_ref()) {
             return false;
         }
-        if !git {
+        if !self.git {
             return true;
         }
+        let root = self.root.to_string_lossy();
+        let git_says = |args: &[&str]| crate::git::git_output(args, &root);
         let dir = dir.to_string_lossy();
         // Ignored, and holding no file forced into the index with `git add -f`.
         git_says(&["check-ignore", "-q", "--", &dir]).is_ok()
             && git_says(&["ls-files", "--", &dir]).is_ok_and(|tracked| tracked.trim().is_empty())
+    }
+}
+
+pub fn pack(root: &Path, out: impl Write) -> Result<()> {
+    pack_counted(root, out, |_| {})
+}
+
+/// `pack`, telling `written` how many bytes of the tar (before compression)
+/// are out so far, to set against `measure`.
+pub fn pack_counted(root: &Path, out: impl Write, written: impl FnMut(u64)) -> Result<()> {
+    let left_out = LeftOut::new(root)?;
+    let counted = Counted {
+        inner: GzEncoder::new(out, Compression::fast()),
+        total: 0,
+        written,
     };
-    let mut tar = tar::Builder::new(GzEncoder::new(out, Compression::fast()));
+    let mut tar = tar::Builder::new(counted);
     tar.follow_symlinks(false);
-    super::walk(&mut tar, root, Path::new(""), false, &skip)?;
-    tar.into_inner()?.finish()?;
+    super::walk(&mut tar, root, Path::new(""), false, &|dir| {
+        left_out.skip(dir)
+    })?;
+    tar.into_inner()?.inner.finish()?;
     Ok(())
+}
+
+/// The bytes of the files `pack` would send. Its tar adds headers and padding,
+/// so its count ends slightly past this.
+pub fn measure(root: &Path) -> Result<u64> {
+    fn sum(dir: &Path, left_out: &LeftOut) -> u64 {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return 0;
+        };
+        entries
+            .flatten()
+            .map(|entry| match entry.file_type() {
+                Ok(t) if t.is_dir() && !left_out.skip(&entry.path()) => {
+                    sum(&entry.path(), left_out)
+                }
+                Ok(t) if t.is_file() => entry.metadata().map_or(0, |m| m.len()),
+                _ => 0,
+            })
+            .sum()
+    }
+    let left_out = LeftOut::new(root)?;
+    Ok(sum(root, &left_out))
+}
+
+struct Counted<W, F> {
+    inner: W,
+    total: u64,
+    written: F,
+}
+
+impl<W: Write, F: FnMut(u64)> Write for Counted<W, F> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let n = self.inner.write(buf)?;
+        self.total += n as u64;
+        (self.written)(self.total);
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
 }
 
 /// Unpacks into `<parent>/<folder>` (the host's clone folder, else home, when
@@ -151,6 +220,28 @@ mod tests {
 
     fn git(dir: &Path, args: &[&str]) {
         crate::git::git_output(args, &dir.to_string_lossy()).unwrap();
+    }
+
+    #[test]
+    fn measure_counts_what_pack_sends() {
+        let src = tempfile::tempdir().unwrap();
+        let root = src.path();
+        fs::write(root.join("a.bin"), vec![0u8; 50_000]).unwrap();
+        fs::create_dir_all(root.join("node_modules/dep")).unwrap();
+        fs::write(root.join("node_modules/dep/big.js"), vec![0u8; 900_000]).unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("src/main.rs"), vec![b'x'; 10_000]).unwrap();
+
+        let total = measure(root).unwrap();
+        assert_eq!(total, 60_000);
+        let mut last = 0;
+        pack_counted(root, std::io::sink(), |n| {
+            assert!(n >= last);
+            last = n;
+        })
+        .unwrap();
+        // The tar's headers and padding: past the files, never by much.
+        assert!(last >= total && last < total + 20_000, "{last} vs {total}");
     }
 
     #[test]

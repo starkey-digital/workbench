@@ -3,13 +3,13 @@
 
 use std::io::{self, BufWriter, Write};
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::de::DeserializeOwned;
 use tokio::sync::mpsc;
 
-use crate::types::{ClaudeImportReport, ProjectCopy};
+use crate::types::{ClaudeImportReport, ProjectCopy, TransferProgress};
 
 /// Another Workbench host's control plane.
 pub struct Host {
@@ -24,7 +24,11 @@ pub struct CopyRequest {
     pub parent: Option<String>,
     pub claude_config: bool,
     pub claude_accounts: bool,
+    /// Told how far the project upload is, at most every `PROGRESS_EVERY` and once at the end.
+    pub progress: Box<dyn Fn(TransferProgress) + Send>,
 }
+
+const PROGRESS_EVERY: Duration = Duration::from_millis(100);
 
 /// Copies the project, then (if asked) the Claude config. A refused project
 /// (its folder already exists there) sends no config; a failed config copy
@@ -41,8 +45,21 @@ pub async fn copy_project(host: &Host, request: CopyRequest) -> Result<ProjectCo
         query.push(("parent", parent));
     }
     let path = request.project_path;
+    let progress = request.progress;
     let project = upload(host, "/transfer/project", &query, move |out| {
-        super::project::pack(&path, out)
+        let total = super::project::measure(&path)?;
+        progress(TransferProgress { sent: 0, total });
+        let mut last = Instant::now();
+        let mut sent = 0;
+        super::project::pack_counted(&path, out, |n| {
+            sent = n;
+            if last.elapsed() >= PROGRESS_EVERY {
+                last = Instant::now();
+                progress(TransferProgress { sent, total });
+            }
+        })?;
+        progress(TransferProgress { sent, total });
+        Ok(())
     })
     .await?;
 

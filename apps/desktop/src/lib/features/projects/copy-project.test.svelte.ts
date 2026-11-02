@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { clearInvokeMocks, invokeSpy, mockInvoke } from '../../../test/tauri-mocks';
-import { CopyProjectFlow } from './copy-project.svelte';
+import { CopyProjectFlow, copyProgress, formatSize } from './copy-project.svelte';
 import type { RemoteInstance } from '$features/instances/instances.svelte';
 import type { ProjectConfig } from '$types/workbench';
 
@@ -100,5 +100,43 @@ describe('CopyProjectFlow', () => {
 		expect(flow.result).toBeNull();
 		expect(flow.open).toBe(true);
 		expect(flow.copying).toBe(false);
+	});
+});
+
+describe('copy progress', () => {
+	const MB = 1024 * 1024;
+
+	it('formats sizes from bytes to GB', () => {
+		expect(formatSize(512)).toBe('512 B');
+		expect(formatSize(1.5 * MB)).toBe('1.5 MB');
+		expect(formatSize(340 * MB)).toBe('340 MB');
+		expect(formatSize(3.4 * 1024 * MB)).toBe('3.4 GB');
+	});
+
+	it('holds back the rate and ETA until it has settled', () => {
+		const early = copyProgress({ sent: 5 * MB, total: 100 * MB }, 500);
+		expect(early.fraction).toBe(0.05);
+		expect(early.rate).toBeNull();
+		expect(early.eta).toBeNull();
+	});
+
+	it('estimates time left at the average rate so far', () => {
+		// 20 MB in 4s is 5 MB/s; 80 MB to go is 16s.
+		const p = copyProgress({ sent: 20 * MB, total: 100 * MB }, 4000);
+		expect(p.amount).toBe('20 MB of 100 MB');
+		expect(p.rate).toBe('5.0 MB/s');
+		expect(p.eta).toBe('about 16s left');
+		expect(copyProgress({ sent: 10 * MB, total: 1000 * MB }, 2000).eta).toBe('about 3m 18s left');
+	});
+
+	it("caps at the total (tar headers run past it) and says when it's all up", () => {
+		const flow = new CopyProjectFlow();
+		flow.onProgress({ sent: 0, total: 100 }, 1000);
+		expect(flow.progress?.fraction).toBe(0);
+		expect(flow.uploaded).toBe(false);
+		flow.onProgress({ sent: 120, total: 100 }, 5000);
+		expect(flow.progress?.fraction).toBe(1);
+		expect(flow.progress?.eta).toBeNull();
+		expect(flow.uploaded).toBe(true);
 	});
 });

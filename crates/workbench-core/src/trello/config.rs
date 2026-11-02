@@ -70,7 +70,11 @@ pub fn put_board(
     keep_existing: bool,
 ) -> Result<TrelloProjectConfig> {
     update_project_config(project_path, |config| {
-        match config.boards.iter_mut().find(|b| b.board_id == board.board_id) {
+        match config
+            .boards
+            .iter_mut()
+            .find(|b| b.board_id == board.board_id)
+        {
             Some(saved) if !keep_existing => *saved = board,
             Some(_) => {}
             None => config.boards.push(board),

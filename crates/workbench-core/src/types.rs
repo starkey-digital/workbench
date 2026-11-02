@@ -404,6 +404,15 @@ pub struct ProjectCopy {
     pub claude_error: Option<String>,
 }
 
+/// How far a project copy's upload is: bytes of the folder sent and in all
+/// (before compression). `sent` can end slightly past `total` (tar headers).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferProgress {
+    pub sent: u64,
+    pub total: u64,
+}
+
 fn default_server_port() -> u16 {
     4317
 }

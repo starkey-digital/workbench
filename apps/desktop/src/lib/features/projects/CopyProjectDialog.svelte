@@ -202,6 +202,37 @@
 						can hold secrets and travel as plain HTTP, so use a Tailscale address.
 					</p>
 				</div>
+				{#if flow.copying}
+					{@const progress = flow.progress}
+					<div class="space-y-1.5" role="status" aria-live="polite">
+						<div
+							class="h-1.5 overflow-hidden rounded-full bg-wb-panel2"
+							role="progressbar"
+							aria-valuemin={0}
+							aria-valuemax={100}
+							aria-valuenow={Math.round((progress?.fraction ?? 0) * 100)}
+						>
+							<div
+								class="h-full rounded-full bg-wb-accent transition-[width] duration-200"
+								style:width="{(progress?.fraction ?? 0) * 100}%"
+							></div>
+						</div>
+						<p class="flex justify-between gap-2 font-mono text-[11px] text-wb-ink-soft">
+							{#if !progress}
+								<span>Measuring the folder…</span>
+							{:else if flow.uploaded}
+								<span
+									>Finishing up on the server{flow.claudeConfig || flow.claudeAccounts
+										? ', then the Claude config'
+										: ''}…</span
+								>
+							{:else}
+								<span>{progress.amount}{progress.rate ? ` · ${progress.rate}` : ''}</span>
+								{#if progress.eta}<span>{progress.eta}</span>{/if}
+							{/if}
+						</p>
+					</div>
+				{/if}
 				{#if flow.error}
 					<p class="text-xs text-destructive">{flow.error}</p>
 				{/if}
