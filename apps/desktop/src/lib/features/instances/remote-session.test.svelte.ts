@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
+import type { ProjectConfig, ProjectEdit } from '$types/workbench';
 import { flushSync } from 'svelte';
 import { createMockTransport, type MockTransport } from '@workbench/transport';
 import type { ServerWorkspace, WorkspaceSnapshot } from '$types/workspace';
@@ -54,8 +55,10 @@ function workspace(id: string, over: Partial<ServerWorkspace> = {}): ServerWorks
 describe('RemoteSession', () => {
 	let transport: MockTransport;
 	let session: RemoteSession;
+	let updateProject: Mock<(edit: ProjectEdit) => Promise<ProjectConfig>>;
 
 	beforeEach(() => {
+		updateProject = vi.fn(async (edit: ProjectEdit) => edit);
 		storage = {};
 		vi.stubGlobal('localStorage', {
 			getItem: (k: string) => storage[k] ?? null,
@@ -72,7 +75,7 @@ describe('RemoteSession', () => {
 			'box',
 			{ baseUrl: 'http://box:4317', token: 't' },
 			transport,
-			{ projects: [project] },
+			{ projects: [project], updateProject },
 			{ settings }
 		);
 	});
@@ -111,6 +114,30 @@ describe('RemoteSession', () => {
 		});
 		await session.setActiveAccount(undefined);
 		expect(session.activeAccountId).toBe('work');
+		expect(session.accountError).toContain('unknown account');
+	});
+
+	it("lists the host's logins, its default as ''", async () => {
+		await vi.waitFor(() => expect(session.claudeAccounts).toHaveLength(1));
+		expect(session.accountChoices).toEqual([
+			{ id: '', name: 'Personal' },
+			{ id: 'work', name: 'Work' }
+		]);
+	});
+
+	it("sets a project's account on the host, keeping its name and group", async () => {
+		const grouped = { ...project, group: 'Clients' };
+		await session.setProjectAccount(grouped, 'work');
+		await session.setProjectAccount(grouped, undefined);
+		expect(updateProject.mock.calls).toEqual([
+			[{ path: '/srv/repo', name: 'Repo', group: 'Clients', claudeAccountId: 'work' }],
+			[{ path: '/srv/repo', name: 'Repo', group: 'Clients', claudeAccountId: undefined }]
+		]);
+	});
+
+	it('says why when the host refuses a project account', async () => {
+		updateProject.mockRejectedValueOnce(new Error('unknown account'));
+		await session.setProjectAccount(project, 'gone');
 		expect(session.accountError).toContain('unknown account');
 	});
 

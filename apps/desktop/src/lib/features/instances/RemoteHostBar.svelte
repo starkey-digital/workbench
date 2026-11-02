@@ -13,11 +13,7 @@
 
 	let confirming = $state(false);
 
-	const accounts = $derived([
-		{ id: undefined, name: session.defaultAccountName },
-		...session.claudeAccounts.map((a) => ({ id: a.id as string | undefined, name: a.name }))
-	]);
-	const active = $derived(accounts.find((a) => a.id === session.activeAccountId) ?? accounts[0]);
+	const accounts = $derived(session.accountChoices.map((a) => ({ ...a, id: a.id || undefined })));
 	const available = $derived(update.updating ? undefined : update.status?.available);
 </script>
 
@@ -55,7 +51,7 @@
 				title="Claude account for new sessions on this host"
 			>
 				<AgentIcon agent="claude" class="size-3 shrink-0" />
-				<span class="truncate">{active.name}</span>
+				<span class="truncate">{session.activeAccountName}</span>
 				<ChevronUpIcon class="size-2.5 shrink-0" />
 			</DropdownMenu.Trigger>
 			<DropdownMenu.Content class="min-w-52" align="start" side="top">
