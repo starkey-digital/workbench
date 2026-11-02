@@ -147,4 +147,22 @@ describe('RemoteInstance.checkHealth', () => {
 		expect(inst.status).toBe('online');
 		expect(refresh).toHaveBeenCalledTimes(2);
 	});
+
+	it("checks the host's update on connect, and on every poll while one installs", async () => {
+		const inst = new RemoteInstance({ id: '1', name: 'box', url: 'http://box:4317' });
+		vi.spyOn(inst.store, 'refresh').mockResolvedValue(undefined);
+		const check = vi.spyOn(inst.hostUpdate, 'check').mockResolvedValue(undefined);
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(() => Promise.resolve({ ok: true }))
+		);
+
+		await inst.checkHealth();
+		await inst.checkHealth();
+		expect(check).toHaveBeenCalledTimes(1);
+
+		inst.hostUpdate.target = '1.1.0';
+		await inst.checkHealth();
+		expect(check).toHaveBeenCalledTimes(2);
+	});
 });

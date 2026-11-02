@@ -4,7 +4,7 @@ import {
 	withTimeout,
 	type ControlPlaneTransport
 } from '@workbench/transport';
-import { ControlPlaneStore } from '@workbench/control-plane-ui';
+import { ControlPlaneStore, HostUpdate } from '@workbench/control-plane-ui';
 import { owned } from '@workbench/chat-ui';
 import { RemoteSession, type RemoteSessionDeps } from './remote-session.svelte';
 import { uid } from '$lib/utils/uid';
@@ -33,6 +33,8 @@ export class RemoteInstance {
 	readonly config: RemoteInstanceConfig;
 	status = $state<InstanceStatus>('connecting');
 	readonly store: ControlPlaneStore;
+	/** The host's Workbench version, and installing its update from here. */
+	readonly hostUpdate: HostUpdate;
 	private readonly transport: ControlPlaneTransport;
 	private remoteSession: { session: RemoteSession; destroy: () => void } | null = null;
 
@@ -40,6 +42,7 @@ export class RemoteInstance {
 		this.config = config;
 		this.transport = createHttpTransport({ baseUrl: config.url, token: config.token });
 		this.store = new ControlPlaneStore(this.transport);
+		this.hostUpdate = new HostUpdate(this.transport);
 	}
 
 	get base(): string {
@@ -83,9 +86,10 @@ export class RemoteInstance {
 		} catch {
 			this.status = 'offline';
 		}
-		if (this.status === 'online' && prev !== 'online') {
-			await this.store.refresh();
-		}
+		if (this.status !== 'online') return;
+		// While it installs, every poll checks: the host answering on another version ends it.
+		if (prev !== 'online' || this.hostUpdate.updating) void this.hostUpdate.check();
+		if (prev !== 'online') await this.store.refresh();
 	}
 }
 

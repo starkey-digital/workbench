@@ -11,9 +11,9 @@
 		accountOption,
 		DEFAULT_LOGIN,
 		FOLLOW_ACTIVE,
-		FolderBrowser,
 		unknownAccount
 	} from './project-sheet.svelte';
+	import { FolderBrowser } from '@workbench/control-plane-ui';
 	import Sheet from './Sheet.svelte';
 
 	/** Adds a project (pick a host folder, then name it) or edits `project`. */

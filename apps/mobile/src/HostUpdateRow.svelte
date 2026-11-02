@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { HostUpdate } from './host-update.svelte.ts';
+	import type { HostUpdate } from '@workbench/control-plane-ui';
 
 	/** The connected host's Workbench version, with Update (after a confirm) when one is available. */
 	let { update }: { update: HostUpdate } = $props();

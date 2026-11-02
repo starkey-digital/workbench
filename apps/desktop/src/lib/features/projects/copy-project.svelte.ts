@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { FolderBrowser } from '@workbench/control-plane-ui';
 import type { RemoteInstance } from '$features/instances/instances.svelte';
 import type { ProjectConfig, ProjectCopy } from '$types/workbench';
 
@@ -9,6 +10,8 @@ export class CopyProjectFlow {
 	serverId = $state('');
 	/** Blank: the server's clone folder, else its home. */
 	parent = $state('');
+	/** The server's folders while picking `parent`; null when not picking. */
+	browser = $state.raw<FolderBrowser | null>(null);
 	claudeConfig = $state(false);
 	claudeAccounts = $state(false);
 	copying = $state(false);
@@ -19,11 +22,27 @@ export class CopyProjectFlow {
 		this.project = project;
 		this.serverId = (remotes.find((r) => r.status === 'online') ?? remotes[0])?.config.id ?? '';
 		this.parent = '';
+		this.browser = null;
 		this.claudeConfig = false;
 		this.claudeAccounts = false;
 		this.error = '';
 		this.result = null;
 		this.open = true;
+	}
+
+	/** Browse the chosen server's folders, from the typed folder (else its home). */
+	browse(remotes: RemoteInstance[]) {
+		const remote = remotes.find((r) => r.config.id === this.serverId);
+		if (!remote) return;
+		this.browser = new FolderBrowser((path) => remote.store.listFolders(path));
+		void this.browser.open(this.parent.trim() || undefined);
+	}
+
+	/** Copy into the folder being browsed. */
+	pick() {
+		const listing = this.browser?.listing;
+		if (listing) this.parent = listing.path;
+		this.browser = null;
 	}
 
 	async copy(remotes: RemoteInstance[]) {

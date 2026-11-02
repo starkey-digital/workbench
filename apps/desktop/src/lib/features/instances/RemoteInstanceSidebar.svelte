@@ -4,6 +4,7 @@
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import { ControlPlaneSidebar } from '@workbench/control-plane-ui';
 	import InstanceSwitcher from './InstanceSwitcher.svelte';
+	import RemoteHostUpdate from './RemoteHostUpdate.svelte';
 	import type { RemoteInstance } from './instances.svelte';
 	import { remoteSession } from './remote-session.svelte';
 
@@ -56,6 +57,8 @@
 	</div>
 
 	{#if !sidebarCollapsed}
+		<!-- Above the status: a host restarting into its update is offline for a while. -->
+		<RemoteHostUpdate update={instance.hostUpdate} />
 		{#if instance.status === 'offline'}
 			<div class="px-3 py-8 text-center">
 				<p class="font-mono text-[11px] text-wb-err">Offline</p>

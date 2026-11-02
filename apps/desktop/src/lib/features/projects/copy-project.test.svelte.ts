@@ -11,7 +11,14 @@ function remote(id: string, status: RemoteInstance['status'], token?: string) {
 		config: { id, name: id, url: `http://${id}:4317/`, token },
 		status,
 		base: `http://${id}:4317`,
-		store: { refresh: vi.fn() }
+		store: {
+			refresh: vi.fn(),
+			listFolders: vi.fn(async (path?: string) => ({
+				path: path ?? '/home/me',
+				parent: path ? '/home/me' : null,
+				folders: []
+			}))
+		}
 	} as unknown as RemoteInstance;
 }
 
@@ -30,6 +37,26 @@ describe('CopyProjectFlow', () => {
 		expect(flow.serverId).toBe('mini');
 		expect(flow.claudeConfig).toBe(false);
 		expect(flow.result).toBeNull();
+	});
+
+	it("picks the folder to copy into from the server's own folders", async () => {
+		const mini = remote('mini', 'online');
+		flow.start(project, [mini]);
+		flow.browse([mini]);
+		await vi.waitFor(() => expect(flow.browser?.listing?.path).toBe('/home/me'));
+		await flow.browser?.open('/home/me/Repos');
+		flow.pick();
+		expect(flow.parent).toBe('/home/me/Repos');
+		expect(flow.browser).toBeNull();
+		expect(mini.store.listFolders).toHaveBeenCalledWith(undefined);
+	});
+
+	it('browses from the folder already typed', () => {
+		const mini = remote('mini', 'online');
+		flow.start(project, [mini]);
+		flow.parent = ' /srv ';
+		flow.browse([mini]);
+		expect(mini.store.listFolders).toHaveBeenCalledWith('/srv');
 	});
 
 	it('sends the picked server, folder and Claude options, then refreshes that server', async () => {
