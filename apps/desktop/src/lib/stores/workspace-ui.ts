@@ -18,9 +18,9 @@ export const UI_KEY = 'workbench.workspace-ui';
 const empty = (): WorkspaceUi => ({ selectedId: null, activeTabs: {}, chatPanes: [] });
 
 /** This device saved its state before (never throws). */
-export function hasSavedUi(): boolean {
+export function hasSavedUi(key = UI_KEY): boolean {
 	try {
-		return localStorage.getItem(UI_KEY) !== null;
+		return localStorage.getItem(key) !== null;
 	} catch {
 		return false;
 	}
@@ -36,9 +36,9 @@ export function seededUi(local: WorkspaceLocalSeed): WorkspaceUi {
 }
 
 /** Never throws: storage can be missing, blocked or hold anything. */
-export function loadUi(): WorkspaceUi {
+export function loadUi(key = UI_KEY): WorkspaceUi {
 	try {
-		const raw = JSON.parse(localStorage.getItem(UI_KEY) ?? 'null');
+		const raw = JSON.parse(localStorage.getItem(key) ?? 'null');
 		if (!raw || typeof raw !== 'object') return empty();
 		return {
 			selectedId: typeof raw.selectedId === 'string' ? raw.selectedId : null,
@@ -59,9 +59,9 @@ export function loadUi(): WorkspaceUi {
 	}
 }
 
-export function saveUi(ui: WorkspaceUi): void {
+export function saveUi(ui: WorkspaceUi, key = UI_KEY): void {
 	try {
-		localStorage.setItem(UI_KEY, JSON.stringify(ui));
+		localStorage.setItem(key, JSON.stringify(ui));
 	} catch {
 		/* a per-device convenience: losing it is fine */
 	}

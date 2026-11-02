@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { log } from '$lib/log';
 	import { setExtendedDiagnostics } from '@workbench/telemetry';
-	import EmptyState from '$components/EmptyState.svelte';
 	import ActivityRail from '$features/chrome/ActivityRail.svelte';
 	import StatusBar from '$features/chrome/StatusBar.svelte';
 	import IntegrationApprovalDialog from '$components/IntegrationApprovalDialog.svelte';
@@ -11,14 +10,10 @@
 	import RemoteInstanceSidebar from '$features/instances/RemoteInstanceSidebar.svelte';
 	import ConnectInstanceDialog from '$features/instances/ConnectInstanceDialog.svelte';
 	import { InstancesStore } from '$features/instances/instances.svelte';
-	import NativeTerminalGrid from '$features/terminal/NativeTerminalGrid.svelte';
-	import TerminalGrid from '$features/terminal/TerminalGrid.svelte';
-	import TerminalTabs from '$features/terminal/TerminalTabs.svelte';
-	import { splitInset, visibleSplit } from '$features/terminal/split-view';
-	import WorkspaceLanding from '$features/workspaces/WorkspaceLanding.svelte';
-	import PersistenceBanner from '$features/workspaces/PersistenceBanner.svelte';
+	import RemoteWorkspaceArea from '$features/instances/RemoteWorkspaceArea.svelte';
+	import { loopbackWorkbench } from '$features/chat/agent-api';
 	import RightSidebar from '$features/sidebar/RightSidebar.svelte';
-	import WorkspaceTabs from '$features/workspaces/WorkspaceTabs.svelte';
+	import WorkspaceArea from '$features/workspaces/WorkspaceArea.svelte';
 	import WorktreeManager from '$features/worktrees/WorktreeManager.svelte';
 	import { WorktreeManagerStore } from '$features/worktrees/worktree-manager.svelte';
 	import * as Resizable from '@workbench/ui/resizable';
@@ -41,6 +36,7 @@
 		setUpdaterStore,
 		setWorkbenchSettingsStore,
 		setWorktreeManager,
+		setWorkbenchServer,
 		setWorkspaceStore
 	} from '$stores/context';
 	import { GitHubStore } from '$stores/github.svelte';
@@ -58,7 +54,6 @@
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { startServer } from '$lib/server-mode';
 	import { onDestroy, onMount } from 'svelte';
-	import { effectivePath } from '$lib/utils/path';
 	import { watch } from 'runed';
 	import { themePrefs } from '@workbench/chat-ui';
 	import { Toaster, toast } from 'svelte-sonner';
@@ -82,6 +77,10 @@
 	);
 	setSidebarStore(new SidebarStore());
 	const instancesStore = setInstancesStore(new InstancesStore());
+	setWorkbenchServer(loopbackWorkbench);
+	/** The remote server the main area shows, or none for this machine's. */
+	const remote = $derived(instancesStore.activeIsLocal ? undefined : instancesStore.activeRemote);
+	const local = $derived(!remote);
 	new NotificationStore(workspaceStore, claudeSessionStore);
 
 	let sidebarCollapsed = $state(false);
@@ -179,14 +178,15 @@
 		void githubStore.refreshProject(projectPath);
 	});
 
-	// Sync githubStore.sidebarOpen → pane expand/collapse (imperative DOM API)
+	// Sync githubStore.sidebarOpen → pane expand/collapse (imperative DOM API).
+	// The pane too: it remounts collapsed after a remote instance was shown.
 	watch(
-		() => githubStore.sidebarOpen,
-		(open) => {
+		() => [githubStore.sidebarOpen, githubSidebarPane] as const,
+		([open, pane]) => {
 			if (open) {
-				githubSidebarPane?.expand();
+				pane?.expand();
 			} else {
-				githubSidebarPane?.collapse();
+				pane?.collapse();
 			}
 		}
 	);
@@ -283,15 +283,17 @@
 						onExpand={() => (sidebarCollapsed = false)}
 						class="h-full"
 					>
-						{#if instancesStore.activeIsLocal || !instancesStore.activeRemote}
-							<ProjectSidebar
-								{sidebarCollapsed}
-								onToggleSidebar={toggleSidebar}
-								onConnect={() => (connectOpen = true)}
-							/>
+						{#if remote}
+							{#key remote}
+								<RemoteInstanceSidebar
+									instance={remote}
+									{sidebarCollapsed}
+									onToggleSidebar={toggleSidebar}
+									onConnect={() => (connectOpen = true)}
+								/>
+							{/key}
 						{:else}
-							<RemoteInstanceSidebar
-								instance={instancesStore.activeRemote}
+							<ProjectSidebar
 								{sidebarCollapsed}
 								onToggleSidebar={toggleSidebar}
 								onConnect={() => (connectOpen = true)}
@@ -301,67 +303,20 @@
 					<Resizable.Handle withHandle class="cursor-col-resize" />
 					<Resizable.Pane defaultSize={83} minSize={50} class="h-full">
 						<main class="flex h-full min-w-0 flex-1 flex-col">
-							<PersistenceBanner />
-							{#if workspaceStore.workspaces.length === 0}
-								<EmptyState />
-							{:else}
-								<WorkspaceTabs />
-
-								{#each workspaceStore.workspaces as ws (ws.id)}
-									{@const isActiveWs = ws.id === workspaceStore.activeWorkspaceId}
-									{@const activeTab =
-										ws.terminalTabs.find((t) => t.id === ws.activeTerminalTabId) ??
-										ws.terminalTabs[0]}
-									{@const wsProject = projectStore.getByPath(ws.projectPath)}
-									{@const split = visibleSplit(ws)}
-									<div class="flex min-h-0 flex-1 flex-col" class:hidden={!isActiveWs}>
-										{#if activeTab && wsProject}
-											<TerminalTabs workspace={ws} />
-
-											<div class="relative min-h-0 flex-1">
-												{#each ws.terminalTabs as tab (tab.id)}
-													{@const isActiveTab = tab.id === ws.activeTerminalTabId}
-													{@const inSplit = split?.tabs.some((t) => t.id === tab.id) ?? false}
-													{@const isShown = (isActiveTab || inSplit) && isActiveWs}
-													<!-- Clicking into a split half makes its tab the active one. -->
-													<div
-														class={[
-															'absolute flex',
-															isShown ? 'z-10' : 'invisible z-0',
-															split?.tabs[1].id === tab.id &&
-																(split.direction === 'horizontal'
-																	? 'border-l border-wb-hair'
-																	: 'border-t border-wb-hair')
-														]}
-														style:inset={splitInset(split, tab.id)}
-														onfocusin={() => {
-															if (inSplit && !isActiveTab)
-																workspaceStore.setActiveTab(ws.id, tab.id);
-														}}
-													>
-														{#if ws.renderer === 'native'}
-															<NativeTerminalGrid {tab} active={isShown} cwd={effectivePath(ws)} />
-														{:else}
-															<TerminalGrid
-																workspaceId={ws.id}
-																{tab}
-																active={isShown}
-																project={wsProject}
-																cwd={ws.worktreePath}
-															/>
-														{/if}
-													</div>
-												{/each}
-											</div>
-										{:else}
-											<WorkspaceLanding workspace={ws} />
-										{/if}
+							<!-- Hidden, not unmounted: local terminals stay attached while a remote is shown. -->
+							<div class="flex min-h-0 flex-1 flex-col" class:hidden={!!remote}>
+								<WorkspaceArea projectFor={(ws) => projectStore.getByPath(ws.projectPath)} />
+							</div>
+							{#if remote}
+								{#key remote}
+									<div class="flex min-h-0 flex-1 flex-col">
+										<RemoteWorkspaceArea instance={remote} />
 									</div>
-								{/each}
+								{/key}
 							{/if}
 						</main>
 					</Resizable.Pane>
-					{#if workspaceStore.workspaces.length > 0}
+					{#if local && workspaceStore.workspaces.length > 0}
 						<Resizable.Handle withHandle class="cursor-col-resize" />
 						<Resizable.Pane
 							bind:this={githubSidebarPane}

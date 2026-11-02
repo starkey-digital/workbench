@@ -4,7 +4,9 @@
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import { ControlPlaneSidebar } from '@workbench/control-plane-ui';
 	import InstanceSwitcher from './InstanceSwitcher.svelte';
+	import RemoteHostUpdate from './RemoteHostUpdate.svelte';
 	import type { RemoteInstance } from './instances.svelte';
+	import { remoteSession } from './remote-session.svelte';
 
 	let {
 		instance,
@@ -17,6 +19,10 @@
 		onToggleSidebar: () => void;
 		onConnect: () => void;
 	} = $props();
+
+	// Keyed by the instance in App, so this is its session for the component's life.
+	// svelte-ignore state_referenced_locally
+	const session = remoteSession(instance);
 </script>
 
 <aside class="flex h-full w-full flex-col overflow-hidden border-r border-wb-hair bg-wb-panel">
@@ -51,6 +57,8 @@
 	</div>
 
 	{#if !sidebarCollapsed}
+		<!-- Above the status: a host restarting into its update is offline for a while. -->
+		<RemoteHostUpdate update={instance.hostUpdate} />
 		{#if instance.status === 'offline'}
 			<div class="px-3 py-8 text-center">
 				<p class="font-mono text-[11px] text-wb-err">Offline</p>
@@ -62,7 +70,11 @@
 			<p class="px-3 py-8 text-center font-mono text-[11px] text-wb-ink-soft">Connecting…</p>
 		{:else}
 			<div class="min-h-0 flex-1 overflow-y-auto">
-				<ControlPlaneSidebar store={instance.store} />
+				<ControlPlaneSidebar
+					store={instance.store}
+					onOpen={(project, worktree) => void session.open(project, worktree)}
+					sessionCounts={session.sessionCounts}
+				/>
 			</div>
 		{/if}
 	{/if}

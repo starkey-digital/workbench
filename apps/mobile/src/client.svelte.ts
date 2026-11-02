@@ -1,5 +1,5 @@
 import { agentClient, agentName, commandTabLabel } from '@workbench/chat-ui';
-import { ControlPlaneStore } from '@workbench/control-plane-ui';
+import { ControlPlaneStore, HostUpdate } from '@workbench/control-plane-ui';
 import { setExtendedDiagnostics } from '@workbench/telemetry';
 import { createHttpTransport, type OpenEventSource } from '@workbench/transport';
 import type {
@@ -13,7 +13,6 @@ import type {
 	WorkspacePane
 } from '@workbench/types';
 import { defaultAccountName, paneNotices } from '@workbench/types';
-import { HostUpdate } from './host-update.svelte.ts';
 import { hostOf, normalizeUrl, SavedMachines } from './machines.svelte.ts';
 import { findPane, paneEntries, paneTitle, type PaneEntry } from './panes.ts';
 import { PaneScreens } from './pane-screens.svelte.ts';

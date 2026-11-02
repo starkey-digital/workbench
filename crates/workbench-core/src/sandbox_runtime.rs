@@ -343,7 +343,11 @@ pub fn build_config(
                     continue;
                 }
                 let dir = resolved(&root.join(dir));
-                deny_write.extend(PROJECT_DENY_WRITE.iter().map(|rel| format!("{dir}/**/{rel}")));
+                deny_write.extend(
+                    PROJECT_DENY_WRITE
+                        .iter()
+                        .map(|rel| format!("{dir}/**/{rel}")),
+                );
             }
         }
     }
@@ -1077,11 +1081,7 @@ mod tests {
             "allowedDomains",
         );
         assert_contains(&written.filesystem.allow_write, "/repos/a", "allowWrite");
-        assert_contains(
-            &written.filesystem.deny_write,
-            "/repos/a/.git",
-            "denyWrite",
-        );
+        assert_contains(&written.filesystem.deny_write, "/repos/a/.git", "denyWrite");
         assert_contains(
             &written.filesystem.deny_write,
             &resolved(dir.path()),

@@ -569,4 +569,39 @@ describe('WorkspaceStore', () => {
 			expect(store.selectedId).toBe('w7');
 		});
 	});
+
+	describe('a remote server', () => {
+		const project = { name: 'Repo', path: '/repo' };
+		const settings = { ...mockSettings, terminalRenderer: 'native' as const };
+
+		function remoteStore() {
+			return new WorkspaceStore(transport, {
+				uiKey: 'workbench.workspace-ui.box',
+				remote: true,
+				settings: settings as never,
+				git: mockGitStore as never
+			});
+		}
+
+		it('opens workspaces in xterm, whatever this machine renders with', async () => {
+			const remote = remoteStore();
+			await remote.open(project);
+			await remote.openWorktree(project, '/repo-wt', 'feat');
+			expect(transport.workspaceCommands.map((c) => 'renderer' in c && c.renderer)).toEqual([
+				'xterm',
+				'xterm'
+			]);
+		});
+
+		it('keeps its selection apart from the local one', async () => {
+			const remote = remoteStore();
+			const ready = remote.load();
+			transport.emitWorkspace(snap(1, [ws('r1', [tab('t1', [pane('p1')])])]), true);
+			await ready;
+			remote.selectedId = 'r1';
+			remote.dispose();
+			expect(JSON.parse(storage['workbench.workspace-ui.box']).selectedId).toBe('r1');
+			expect(storage[UI_KEY]).toBeUndefined();
+		});
+	});
 });

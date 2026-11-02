@@ -1,9 +1,19 @@
-import { createHttpTransport, DEFAULT_TIMEOUT_MS, withTimeout } from '@workbench/transport';
-import { ControlPlaneStore } from '@workbench/control-plane-ui';
+import {
+	createHttpTransport,
+	DEFAULT_TIMEOUT_MS,
+	withTimeout,
+	type ControlPlaneTransport
+} from '@workbench/transport';
+import { ControlPlaneStore, HostUpdate } from '@workbench/control-plane-ui';
+import { owned } from '@workbench/chat-ui';
+import { RemoteSession, type RemoteSessionDeps } from './remote-session.svelte';
 import { uid } from '$lib/utils/uid';
 import { log } from '$lib/log';
 
 export type InstanceStatus = 'connecting' | 'online' | 'offline';
+
+/** How often a connected host's update status is re-read. */
+const UPDATE_RECHECK_MS = 10 * 60_000;
 
 export interface RemoteInstanceConfig {
 	id: string;
@@ -26,16 +36,47 @@ export class RemoteInstance {
 	readonly config: RemoteInstanceConfig;
 	status = $state<InstanceStatus>('connecting');
 	readonly store: ControlPlaneStore;
+	/** The host's Workbench version, and installing its update from here. */
+	readonly hostUpdate: HostUpdate;
+	private updateCheckedAt = 0;
+	private readonly transport: ControlPlaneTransport;
+	private remoteSession: { session: RemoteSession; destroy: () => void } | null = null;
 
 	constructor(config: RemoteInstanceConfig) {
 		this.config = config;
-		this.store = new ControlPlaneStore(
-			createHttpTransport({ baseUrl: config.url, token: config.token })
-		);
+		this.transport = createHttpTransport({ baseUrl: config.url, token: config.token });
+		this.store = new ControlPlaneStore(this.transport);
+		this.hostUpdate = new HostUpdate(this.transport);
 	}
 
 	get base(): string {
 		return this.config.url.replace(/\/$/, '');
+	}
+
+	/** Its workspaces, made on first use. */
+	session(deps: RemoteSessionDeps): RemoteSession {
+		if (!this.remoteSession) {
+			// Its own reactive root: it outlives the component that first asks for it.
+			const [session, destroy] = owned(
+				() =>
+					new RemoteSession(
+						this.config.id,
+						{ baseUrl: this.base, token: this.config.token },
+						this.transport,
+						this.store,
+						deps
+					)
+			);
+			this.remoteSession = { session, destroy };
+		}
+		return this.remoteSession.session;
+	}
+
+	/** The server was removed. */
+	dispose(): void {
+		this.remoteSession?.session.dispose();
+		this.remoteSession?.destroy();
+		this.remoteSession = null;
 	}
 
 	/** Ping /health; (re)load its projects on any transition into online —
@@ -49,9 +90,19 @@ export class RemoteInstance {
 		} catch {
 			this.status = 'offline';
 		}
-		if (this.status === 'online' && prev !== 'online') {
-			await this.store.refresh();
+		if (this.status !== 'online') return;
+		// While it installs, every poll checks: the host answering on another version ends it.
+		// Otherwise now and then, so a release out since connecting shows up.
+		const now = Date.now();
+		if (
+			prev !== 'online' ||
+			this.hostUpdate.updating ||
+			now - this.updateCheckedAt >= UPDATE_RECHECK_MS
+		) {
+			this.updateCheckedAt = now;
+			void this.hostUpdate.check();
 		}
+		if (prev !== 'online') await this.store.refresh();
 	}
 }
 
@@ -122,6 +173,7 @@ export class InstancesStore {
 	}
 
 	remove(id: string): void {
+		this.remotes.find((r) => r.config.id === id)?.dispose();
 		this.remotes = this.remotes.filter((r) => r.config.id !== id);
 		if (this.activeId === id) this.activeId = this.localId;
 		this.persist();

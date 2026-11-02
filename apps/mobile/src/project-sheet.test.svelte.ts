@@ -5,9 +5,9 @@ import {
 	accountOption,
 	DEFAULT_LOGIN,
 	FOLLOW_ACTIVE,
-	FolderBrowser,
 	unknownAccount
 } from './project-sheet.svelte';
+import { FolderBrowser } from '@workbench/control-plane-ui';
 
 it("maps a project's account to an option and back", () => {
 	const accounts = [{ id: 'work' }];
