@@ -83,6 +83,20 @@
 			updatePerms({ disableBypassPermissionsMode: v ? 'disable' : undefined })}
 	/>
 
+	<SettingsToggle
+		label="Block reads outside the project"
+		description="Claude can't read files beyond the project and additional directories. Sandboxed shell commands then ask first."
+		checked={perms.blockReadsOutsideWorkingDirectories === true}
+		onCheckedChange={(v) => updatePerms({ blockReadsOutsideWorkingDirectories: v || undefined })}
+	/>
+
+	<SettingsToggle
+		label="Block writes outside the project"
+		description="Write, Edit and NotebookEdit refuse paths beyond the project and additional directories, in every permission mode. Needs Claude Code 2.1.314 or later."
+		checked={perms.blockWritesOutsideWorkingDirectories === true}
+		onCheckedChange={(v) => updatePerms({ blockWritesOutsideWorkingDirectories: v || undefined })}
+	/>
+
 	<SettingsRow
 		label="Additional directories"
 		description="Folders Claude may use beyond the project root."

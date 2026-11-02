@@ -195,3 +195,30 @@ export function taskNotification(
 	const status = tag('status');
 	return id && status ? { id, status: taskStatus(status), summary: tag('summary') } : undefined;
 }
+
+/** The keyword that raises a turn's effort (CLI 2.1.311+), as the TUI matches it: a word, not quoted or in a path. */
+export function raisesEffort(text: string): boolean {
+	return /(^|[\s(])ultrathink(?=$|[\s.,!?;:)])/i.test(text);
+}
+
+/**
+ * The effort a main-thread request runs with, given the chat's pick
+ * (`chosen`), what the engine resolved for this request (`engine`), the
+ * engine's value when the pick was first applied (`base`), and whether this
+ * turn was raised with `ultrathink`. `cleared`: the engine moved off `base`
+ * for another reason (a pick in the TUI, an admin's effort cap), so the pick
+ * gives way for good. A raised turn keeps the pick for later turns but runs
+ * at the engine's level.
+ */
+export function effortFor<E>(
+	chosen: E | undefined,
+	engine: E,
+	base: { value: E } | undefined,
+	raised: boolean
+): { sent: E | undefined; base: { value: E } | undefined; cleared: boolean } {
+	if (chosen === undefined) return { sent: engine, base, cleared: false };
+	if (!base) return { sent: chosen, base: { value: engine }, cleared: false };
+	if (engine === base.value) return { sent: chosen, base, cleared: false };
+	if (raised) return { sent: engine, base, cleared: false };
+	return { sent: engine, base: undefined, cleared: true };
+}
