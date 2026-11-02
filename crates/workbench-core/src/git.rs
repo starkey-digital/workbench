@@ -521,7 +521,10 @@ pub fn remove_worktree(repo_path: &str, worktree_path: &str, force: bool) -> Res
 /// refuses a squash-merged branch; this deletes it without risking a commit,
 /// since the ref goes only if it still equals the commit that was merged.
 pub fn delete_merged_branch(repo_path: &str, branch: &str, heads: &[String]) -> Result<bool> {
-    if list_worktrees(repo_path)?.iter().any(|w| w.branch == branch) {
+    if list_worktrees(repo_path)?
+        .iter()
+        .any(|w| w.branch == branch)
+    {
         return Ok(false);
     }
     let reference = format!("refs/heads/{branch}");
@@ -1114,7 +1117,10 @@ mod tests {
             fetch_before_create: Some(false),
         })
         .unwrap();
-        assert_eq!(Path::new(&clash).file_name().unwrap(), "repo-feature-login-2");
+        assert_eq!(
+            Path::new(&clash).file_name().unwrap(),
+            "repo-feature-login-2"
+        );
     }
 
     #[test]

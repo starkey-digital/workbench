@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHttpTransport } from '@workbench/transport';
 import type { HostUpdateStatus } from '@workbench/types';
-import { HostUpdate } from './host-update.svelte.ts';
+import { HostUpdate } from '@workbench/control-plane-ui';
 import { jsonResponse, routeFetch, TOKEN } from './test-helpers.ts';
 
 const BASE = 'http://box:4317';

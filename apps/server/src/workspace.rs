@@ -242,7 +242,8 @@ impl WorkspaceService {
             return self.command(cmd);
         };
         // A slot still being applied is never dropped, or its retry would apply again.
-        let applying = |slot: &RequestSlot| matches!(slot.try_lock(), Err(TryLockError::WouldBlock));
+        let applying =
+            |slot: &RequestSlot| matches!(slot.try_lock(), Err(TryLockError::WouldBlock));
         let mut requests = lock(&self.0.requests);
         requests.retain(|(_, at, slot)| at.elapsed() < REQUEST_TTL || applying(slot));
         let (slot, fresh) = match requests.iter().find(|(id, ..)| *id == request_id) {
