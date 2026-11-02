@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { PendingAsks } from '../hooks/asks';
-import { attachedFiles, midTurn, withAttachments } from '../hooks/lines';
+import { attachedFiles, effortFor, midTurn, raisesEffort, withAttachments } from '../hooks/lines';
 
 test('identical calls asked in parallel are each found, oldest first', () => {
 	const asks = new PendingAsks();
@@ -56,4 +56,30 @@ test('without a list from the server every mention counts, as before', () => {
 test("a prompt line's attachments", () => {
 	expect(attachedFiles({ type: 'user' })).toBeUndefined();
 	expect(attachedFiles({ type: 'user', workbench_attachments: ['/a', 3, ''] })).toEqual(['/a']);
+});
+
+test('ultrathink raises a turn only as a word, not quoted or in a path', () => {
+	expect(raisesEffort('ultrathink about the cache')).toBe(true);
+	expect(raisesEffort('please Ultrathink.')).toBe(true);
+	expect(raisesEffort('(ultrathink) then fix it')).toBe(true);
+	expect(raisesEffort('what does "ultrathink" do')).toBe(false);
+	expect(raisesEffort('read docs/ultrathink.md')).toBe(false);
+	expect(raisesEffort('ultrathinking')).toBe(false);
+});
+
+test("the chat's effort pick survives an ultrathink turn but gives way to a TUI pick", () => {
+	// First request: the pick applies; the engine's own level is the base.
+	let r = effortFor<string>('low', 'medium', undefined, false);
+	expect(r).toEqual({ sent: 'low', base: { value: 'medium' }, cleared: false });
+	// An ultrathink turn: the engine raised it, so it runs raised and the pick stays.
+	r = effortFor('low', 'xhigh', r.base, true);
+	expect(r).toEqual({ sent: 'xhigh', base: { value: 'medium' }, cleared: false });
+	// The next turn is back to the pick.
+	r = effortFor('low', 'medium', r.base, false);
+	expect(r.sent).toBe('low');
+	// A pick in the TUI (or an admin cap) moves the engine off its base: the pick goes.
+	r = effortFor('low', 'high', r.base, false);
+	expect(r).toEqual({ sent: 'high', base: undefined, cleared: true });
+	// No chat pick: the engine's level, untouched.
+	expect(effortFor<string>(undefined, 'high', undefined, true).sent).toBe('high');
 });
