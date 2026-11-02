@@ -1,4 +1,7 @@
 <script lang="ts">
+	import ArrowUpIcon from '@lucide/svelte/icons/arrow-up';
+	import FolderIcon from '@lucide/svelte/icons/folder';
+	import FolderGitIcon from '@lucide/svelte/icons/folder-git-2';
 	import LoaderIcon from '@lucide/svelte/icons/loader';
 	import * as Dialog from '@workbench/ui/dialog';
 	import * as Select from '@workbench/ui/select';
@@ -75,7 +78,12 @@
 							Connect a server first (activity rail → Remote server).
 						</p>
 					{:else}
-						<Select.Root type="single" bind:value={flow.serverId}>
+						<Select.Root
+							type="single"
+							bind:value={flow.serverId}
+							onValueChange={() => (flow.browser = null)}
+							disabled={flow.copying}
+						>
 							<Select.Trigger class="w-full" aria-label="Server">
 								{server ? `${server.config.name} (${server.status})` : 'Choose a server'}
 							</Select.Trigger>
@@ -91,12 +99,80 @@
 				</div>
 				<div class="space-y-1.5">
 					<Label for="copy-parent">Into folder on the server</Label>
-					<Input
-						id="copy-parent"
-						bind:value={flow.parent}
-						placeholder="Its clone folder, else home"
-						class="font-mono text-xs"
-					/>
+					{#if flow.browser}
+						{@const browser = flow.browser}
+						{@const listing = browser.listing}
+						<div class="overflow-hidden rounded-md border border-wb-hair">
+							<div class="flex items-center gap-1.5 border-b border-wb-hair px-1.5 py-1">
+								<Button
+									variant="ghost"
+									size="icon-sm"
+									aria-label="Up one folder"
+									disabled={!listing?.parent || browser.loading}
+									onclick={() => browser.open(listing?.parent ?? undefined)}
+								>
+									<ArrowUpIcon class="size-3.5" />
+								</Button>
+								<span class="min-w-0 flex-1 truncate font-mono text-xs text-wb-ink-soft">
+									{listing?.path ?? '…'}
+								</span>
+							</div>
+							<ul class="max-h-48 overflow-y-auto">
+								{#each listing?.folders ?? [] as folder (folder.path)}
+									<li>
+										<button
+											type="button"
+											class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm hover:bg-wb-panel2"
+											onclick={() => browser.open(folder.path)}
+										>
+											{#if folder.git}
+												<FolderGitIcon class="size-3.5 shrink-0 text-wb-accent" />
+											{:else}
+												<FolderIcon class="size-3.5 shrink-0 text-wb-ink-soft" />
+											{/if}
+											<span class="truncate">{folder.name}</span>
+										</button>
+									</li>
+								{:else}
+									<li class="px-2.5 py-2 text-xs text-wb-ink-soft" role="status">
+										{browser.loading ? 'Loading…' : 'No folders here.'}
+									</li>
+								{/each}
+							</ul>
+						</div>
+						{#if browser.error}
+							<p class="text-xs text-destructive" role="alert">{browser.error}</p>
+						{/if}
+						<div class="flex justify-end gap-1">
+							<Button variant="ghost" size="sm" onclick={() => (flow.browser = null)}>Cancel</Button
+							>
+							<Button
+								variant="secondary"
+								size="sm"
+								disabled={!listing || browser.loading}
+								onclick={() => flow.pick()}
+							>
+								Use this folder
+							</Button>
+						</div>
+					{:else}
+						<div class="flex gap-1.5">
+							<Input
+								id="copy-parent"
+								bind:value={flow.parent}
+								placeholder="Its clone folder, else home"
+								class="font-mono text-xs"
+								disabled={flow.copying}
+							/>
+							<Button
+								variant="secondary"
+								disabled={!server || server.status !== 'online' || flow.copying}
+								onclick={() => flow.browse(instances.remotes)}
+							>
+								Browse…
+							</Button>
+						</div>
+					{/if}
 				</div>
 				<div class="space-y-2">
 					<label class="flex items-start gap-2 text-sm">
@@ -128,6 +204,37 @@
 						can hold secrets and travel as plain HTTP, so use a Tailscale address.
 					</p>
 				</div>
+				{#if flow.copying}
+					{@const progress = flow.progress}
+					<div class="space-y-1.5" role="status" aria-live="polite">
+						<div
+							class="h-1.5 overflow-hidden rounded-full bg-wb-panel2"
+							role="progressbar"
+							aria-valuemin={0}
+							aria-valuemax={100}
+							aria-valuenow={Math.round((progress?.fraction ?? 0) * 100)}
+						>
+							<div
+								class="h-full rounded-full bg-wb-accent transition-[width] duration-200"
+								style:width="{(progress?.fraction ?? 0) * 100}%"
+							></div>
+						</div>
+						<p class="flex justify-between gap-2 font-mono text-[11px] text-wb-ink-soft">
+							{#if !progress}
+								<span>Measuring the folder…</span>
+							{:else if flow.uploaded}
+								<span
+									>Finishing up on the server{flow.claudeConfig || flow.claudeAccounts
+										? ', then the Claude config'
+										: ''}…</span
+								>
+							{:else}
+								<span>{progress.amount}{progress.rate ? ` · ${progress.rate}` : ''}</span>
+								{#if progress.eta}<span>{progress.eta}</span>{/if}
+							{/if}
+						</p>
+					</div>
+				{/if}
 				{#if flow.error}
 					<p class="text-xs text-destructive">{flow.error}</p>
 				{/if}
@@ -136,7 +243,11 @@
 				<Button variant="ghost" disabled={flow.copying} onclick={() => (flow.open = false)}>
 					Cancel
 				</Button>
-				<Button disabled={!server || flow.copying} onclick={() => flow.copy(instances.remotes)}>
+				<Button
+					disabled={!server || flow.copying || !!flow.browser}
+					title={flow.browser ? 'Pick a folder first' : undefined}
+					onclick={() => flow.copy(instances.remotes)}
+				>
 					{#if flow.copying}
 						<LoaderIcon class="size-3.5 animate-spin" />
 						Copying…

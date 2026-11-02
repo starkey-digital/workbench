@@ -17,7 +17,11 @@
 	import { installTextareaResidueGuard } from './textarea-residue';
 	import { isLayoutDisabled } from './layout-guard';
 	import { WebglRenderer } from './webgl-atlas';
-	import { getClaudeSessionStore, getWorkbenchSettingsStore } from '$stores/context';
+	import {
+		getClaudeSessionStore,
+		getWorkbenchServer,
+		getWorkbenchSettingsStore
+	} from '$stores/context';
 	import { fontPrefs, TERMINAL_PALETTES, terminalFont, themePrefs } from '@workbench/chat-ui';
 
 	let {
@@ -54,6 +58,7 @@
 	let perfLogInterval: ReturnType<typeof setInterval> | null = null;
 	const claudeSessionStore = getClaudeSessionStore();
 	const workbenchSettingsStore = getWorkbenchSettingsStore();
+	const server = getWorkbenchServer();
 	let inputDedup: TerminalInputDedup;
 
 	// VS Code-style split-axis resize debouncing:
@@ -512,7 +517,8 @@
 					offscreenQueue = null;
 					clearFlushSchedule();
 					terminal?.reset();
-				}
+				},
+				server.address
 			);
 
 			await conn.connect(terminal.cols, terminal.rows);

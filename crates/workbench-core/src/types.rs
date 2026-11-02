@@ -404,6 +404,17 @@ pub struct ProjectCopy {
     pub claude_error: Option<String>,
 }
 
+/// How far a project copy's upload is: bytes of its archive (before
+/// compression) sent and in all. `done`: the whole archive is out; the server
+/// is finishing (and the Claude config, if asked for, goes next).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferProgress {
+    pub sent: u64,
+    pub total: u64,
+    pub done: bool,
+}
+
 fn default_server_port() -> u16 {
     4317
 }

@@ -34,12 +34,12 @@
 	import {
 		getClaudeSessionStore,
 		getGitHubStore,
+		getWorkbenchServer,
 		getWorkbenchSettingsStore,
 		getWorkspaceStore
 	} from '$stores/context';
 	import PRStatusBadge from '$features/projects/PRStatusBadge.svelte';
 	import { openUrl } from '$lib/utils/open-url';
-	import { planUsage } from './agent-api';
 	import { acquireChat, followPane } from './chat-registry.svelte';
 	import { desktopChatPlatform } from './chat-platform';
 	import ChatResumePicker from './ChatResumePicker.svelte';
@@ -81,6 +81,9 @@
 	const workspaceStore = getWorkspaceStore();
 	const githubStore = getGitHubStore();
 	const settingsStore = getWorkbenchSettingsStore();
+	const server = getWorkbenchServer();
+	/** Where the session's Claude logins live: a remote host's are its own. */
+	const accountHost = server.accounts ?? settingsStore;
 	// svelte-ignore state_referenced_locally
 	const agentLabel = agentName(agent);
 	// svelte-ignore state_referenced_locally
@@ -93,7 +96,8 @@
 			sessionId,
 			paneId
 		},
-		{ status, generation }
+		{ status, generation },
+		server.agents
 	);
 	// Shown again (a workspace switch): catch up on anything the view missed.
 	if (!created) chat.resync();
@@ -112,7 +116,10 @@
 				command
 			});
 	});
-	const pr = $derived(branch ? githubStore.getBranchStatus(project.path, branch)?.pr : null);
+	// GitHub status is polled for this machine's checkouts only.
+	const pr = $derived(
+		branch && !server.remote ? githubStore.getBranchStatus(project.path, branch)?.pr : null
+	);
 
 	// The chat's Restart is the pane's: the server restarts it, then the chat re-attaches.
 	chat.onRestart = () => void claudeSessionStore.restartSession('', tabId, agent);
@@ -166,9 +173,9 @@
 	const planLimits =
 		agent === 'claude'
 			? useAccountPlanUsage(
-					'loopback',
+					server.id,
 					() => chat.accountId,
-					(account, fresh) => planUsage(account, fresh),
+					(account, fresh) => server.agents.usage(account, fresh),
 					() => chat.meta
 				)
 			: null;
@@ -323,8 +330,8 @@
 				<ChatDock
 					{chat}
 					id="chat-draft-{paneId}"
-					accounts={settingsStore.claudeAccounts}
-					defaultAccountName={settingsStore.defaultAccountName}
+					accounts={accountHost.claudeAccounts}
+					defaultAccountName={accountHost.defaultAccountName}
 					answerHint="Answer {agentLabel} above first"
 					onResume={() => (resumeOpen = true)}
 					onThread={(id, label) => {

@@ -1,5 +1,5 @@
 import type { ChatTarget } from '$types/workbench';
-import { AgentChat, ChatDraft, owned, type PaneProcess } from '@workbench/chat-ui';
+import { AgentChat, ChatDraft, owned, type AgentApi, type PaneProcess } from '@workbench/chat-ui';
 import { chatBreadcrumb } from '@workbench/telemetry';
 import { loopbackAgentApi } from './agent-api';
 import { desktopChatPlatform } from './chat-platform';
@@ -32,12 +32,13 @@ const drafts = new Map<string, ChatDraft>();
 
 /**
  * The pane's chat, created on first use or when the pane moved to another
- * session. `pane` is the process it attaches to.
+ * session. `pane` is the process it attaches to, on the server `api` reaches.
  */
 export function acquireChat(
 	paneId: string,
 	body: ChatTarget,
-	pane: Partial<PaneProcess> = {}
+	pane: Partial<PaneProcess> = {},
+	api: AgentApi = loopbackAgentApi
 ): { chat: AgentChat; created: boolean } {
 	const existing = chats.get(paneId);
 	// `/clear` re-keys the same chat; any other new id is a different conversation.
@@ -52,7 +53,7 @@ export function acquireChat(
 	// Its own root: it outlives the `SessionChat` that first asks for it.
 	const [chat, destroy] = owned(
 		() =>
-			new AgentChat(body, loopbackAgentApi, {
+			new AgentChat(body, api, {
 				draft,
 				pane: () => processOf(paneId),
 				report: desktopChatPlatform.report,

@@ -13,6 +13,7 @@ import type { IntegrationApprovalStore } from './integration-approval.svelte';
 import type { SidebarStore } from './sidebar.svelte';
 import type { WorkbenchSettingsStore } from './workbench-settings.svelte';
 import type { InstancesStore } from '$features/instances/instances.svelte';
+import type { WorkbenchServer } from '$features/chat/agent-api';
 
 export const [getProjectStore, setProjectStore] = createContext<ProjectStore>();
 export const [getWorkspaceStore, setWorkspaceStore] = createContext<WorkspaceStore>();
@@ -31,3 +32,5 @@ export const [getIntegrationApprovalStore, setIntegrationApprovalStore] =
 	createContext<IntegrationApprovalStore>();
 export const [getSidebarStore, setSidebarStore] = createContext<SidebarStore>();
 export const [getInstancesStore, setInstancesStore] = createContext<InstancesStore>();
+/** The server the workspaces below run on: the loopback one, or a remote instance's. */
+export const [getWorkbenchServer, setWorkbenchServer] = createContext<WorkbenchServer>();

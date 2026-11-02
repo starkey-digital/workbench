@@ -106,6 +106,7 @@ async fn another_host_copies_a_project_and_claude_config_here() {
         parent: Some(parent.to_string_lossy().into_owned()),
         claude_config: false,
         claude_accounts: false,
+        progress: Box::new(|_| {}),
     };
     let copy = copy_project(&host, request()).await.unwrap();
     assert_eq!(copy.project.name, "Sent");

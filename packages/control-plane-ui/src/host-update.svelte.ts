@@ -1,15 +1,15 @@
 import type { ControlPlaneTransport } from '@workbench/transport';
 import type { HostUpdateStatus } from '@workbench/types';
 
-/** The connected host's Workbench version, and installing its update from the phone. */
+/** The connected host's Workbench version, and installing its update from this client (phone or desktop). */
 export class HostUpdate {
 	/** Null until the host answers, and for good on one that can't update itself (501). */
 	status = $state.raw<HostUpdateStatus | null>(null);
-	/** The version this phone asked the host to install; the host restarts on it. */
+	/** The version this client asked the host to install; the host restarts on it. */
 	target = $state<string | null>(null);
 	error = $state<string | null>(null);
 
-	/** Also an install started elsewhere (the desktop itself, another phone). */
+	/** Also an install started elsewhere (the host itself, another client). */
 	updating = $derived(this.target !== null || this.status?.installing === true);
 
 	/** The host's version when the install started: any other version is success. */
