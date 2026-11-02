@@ -1,10 +1,9 @@
 <script lang="ts">
-	import PanelLeftCloseIcon from '@lucide/svelte/icons/panel-left-close';
 	import PanelLeftOpenIcon from '@lucide/svelte/icons/panel-left-open';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
-	import { ControlPlaneSidebar } from '@workbench/control-plane-ui';
 	import InstanceSwitcher from './InstanceSwitcher.svelte';
-	import RemoteHostUpdate from './RemoteHostUpdate.svelte';
+	import RemoteHostBar from './RemoteHostBar.svelte';
+	import RemoteProjectTree from './RemoteProjectTree.svelte';
 	import type { RemoteInstance } from './instances.svelte';
 	import { remoteSession } from './remote-session.svelte';
 
@@ -26,56 +25,44 @@
 </script>
 
 <aside class="flex h-full w-full flex-col overflow-hidden border-r border-wb-hair bg-wb-panel">
-	<div class="flex h-[38px] shrink-0 items-center gap-1 border-b border-wb-hair px-2.5">
-		{#if !sidebarCollapsed}
-			<InstanceSwitcher {onConnect} />
-			<div class="ml-auto flex items-center gap-0.5">
-				<button
-					class="flex size-[22px] items-center justify-center rounded text-wb-ink-mute transition-colors hover:bg-wb-panel2 hover:text-wb-ink"
-					title="Refresh"
-					onclick={() => instance.store.refresh()}
-				>
-					<RefreshCwIcon class="size-3" />
-				</button>
-				<button
-					class="flex size-[22px] items-center justify-center rounded text-wb-ink-mute transition-colors hover:bg-wb-panel2 hover:text-wb-ink"
-					title="Collapse"
-					onclick={onToggleSidebar}
-				>
-					<PanelLeftCloseIcon class="size-3" />
-				</button>
-			</div>
-		{:else}
+	<div class="flex h-[38px] shrink-0 items-center border-b border-wb-hair pr-2 pl-3">
+		{#if sidebarCollapsed}
 			<button
 				class="mx-auto flex size-[22px] items-center justify-center rounded text-wb-ink-mute transition-colors hover:bg-wb-panel2 hover:text-wb-ink"
-				title="Expand"
+				type="button"
+				aria-label="Expand sidebar"
 				onclick={onToggleSidebar}
 			>
 				<PanelLeftOpenIcon class="size-3" />
+			</button>
+		{:else}
+			<InstanceSwitcher {onConnect} />
+			<button
+				class="ml-auto flex h-6 items-center gap-1 rounded-md border border-wb-hair px-2 font-mono text-[11px] text-wb-ink-mute transition-colors hover:bg-wb-panel2 hover:text-wb-ink"
+				type="button"
+				onclick={() => instance.store.refresh()}
+			>
+				<RefreshCwIcon class={['size-3', instance.store.loading && 'animate-spin']} />
+				Refresh
 			</button>
 		{/if}
 	</div>
 
 	{#if !sidebarCollapsed}
-		<!-- Above the status: a host restarting into its update is offline for a while. -->
-		<RemoteHostUpdate update={instance.hostUpdate} />
-		{#if instance.status === 'offline'}
-			<div class="px-3 py-8 text-center">
+		{#if instance.status === 'offline' && !instance.hostUpdate.updating}
+			<div class="flex-1 px-3 py-8 text-center">
 				<p class="font-mono text-[11px] text-wb-err">Offline</p>
-				<p class="mt-1 font-mono text-[10.5px] text-wb-ink-soft">
+				<p class="mt-1 font-mono text-[10.5px] break-all text-wb-ink-mute">
 					Can't reach {instance.config.url}
 				</p>
 			</div>
-		{:else if instance.status === 'connecting'}
-			<p class="px-3 py-8 text-center font-mono text-[11px] text-wb-ink-soft">Connecting…</p>
+		{:else if instance.status !== 'online'}
+			<p class="flex-1 px-3 py-8 text-center font-mono text-[11px] text-wb-ink-mute">
+				{instance.hostUpdate.updating ? 'Host restarting into its update…' : 'Connecting…'}
+			</p>
 		{:else}
-			<div class="min-h-0 flex-1 overflow-y-auto">
-				<ControlPlaneSidebar
-					store={instance.store}
-					onOpen={(project, worktree) => void session.open(project, worktree)}
-					sessionCounts={session.sessionCounts}
-				/>
-			</div>
+			<RemoteProjectTree store={instance.store} {session} />
 		{/if}
+		<RemoteHostBar {session} update={instance.hostUpdate} />
 	{/if}
 </aside>

@@ -1,12 +1,6 @@
 import type { ControlPlaneTransport } from '@workbench/transport';
 import type { FolderListing, ProjectConfig, ProjectEdit, WorktreeInfo } from '@workbench/types';
 
-/** A project's running agent sessions, as the sidebar badges them. */
-export interface SessionCounts {
-	claude: number;
-	codex: number;
-}
-
 /**
  * Transport-driven control-plane state for the shared sidebar. Works against any
  * {@link ControlPlaneTransport} — the desktop app's local Tauri transport or a
