@@ -2,7 +2,7 @@ import type { ControlPlaneTransport } from '@workbench/transport';
 import type { FolderListing, ProjectConfig, ProjectEdit, WorktreeInfo } from '@workbench/types';
 
 /**
- * Transport-driven control-plane state for the shared sidebar. Works against any
+ * Transport-driven control-plane state for a remote client's sidebar. Works against any
  * {@link ControlPlaneTransport} — the desktop app's local Tauri transport or a
  * remote `workbench-server` over HTTP. Covers the operations a remote client
  * needs: list, add, edit and remove projects, view/create worktrees and their
@@ -21,6 +21,8 @@ export class ControlPlaneStore {
 
 	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- internal bookkeeping only
 	private githubUrlsInFlight = new Set<string>();
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- internal bookkeeping only
+	private worktreesRequested = new Set<string>();
 	/** Calls started so far, and how many had started when `error` was set. */
 	private runs = 0;
 	private errorAt = 0;
@@ -47,7 +49,8 @@ export class ControlPlaneStore {
 		this.loading = true;
 		await Promise.all([
 			this.loadProjects(),
-			...Object.keys(this.githubUrls).map((path) => this.fetchGithubUrl(path))
+			...Object.keys(this.githubUrls).map((path) => this.fetchGithubUrl(path)),
+			...Object.keys(this.worktrees).map((path) => this.fetchWorktrees(path))
 		]);
 		this.loading = false;
 	}
@@ -85,6 +88,24 @@ export class ControlPlaneStore {
 			this.transport.invoke('list_worktrees', { path: projectPath })
 		);
 		if (list) this.worktrees = { ...this.worktrees, [projectPath]: list };
+	}
+
+	/** Loads once per path, quietly: a folder that isn't a git repo has no worktrees, not an error.
+	 *  `refresh()` re-fetches the loaded ones. */
+	async ensureWorktrees(projectPath: string) {
+		if (this.worktreesRequested.has(projectPath)) return;
+		this.worktreesRequested.add(projectPath);
+		await this.fetchWorktrees(projectPath);
+	}
+
+	private async fetchWorktrees(projectPath: string) {
+		let list: WorktreeInfo[];
+		try {
+			list = await this.transport.invoke('list_worktrees', { path: projectPath });
+		} catch {
+			list = this.worktrees[projectPath] ?? [];
+		}
+		this.worktrees = { ...this.worktrees, [projectPath]: list };
 	}
 
 	/** Loads once per path; `refresh()` re-fetches the loaded ones. */

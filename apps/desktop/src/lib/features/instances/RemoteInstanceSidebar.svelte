@@ -40,7 +40,10 @@
 			<button
 				class="ml-auto flex h-6 items-center gap-1 rounded-md border border-wb-hair px-2 font-mono text-[11px] text-wb-ink-mute transition-colors hover:bg-wb-panel2 hover:text-wb-ink"
 				type="button"
-				onclick={() => instance.store.refresh()}
+				onclick={() => {
+					void instance.store.refresh();
+					void session.loadAccounts();
+				}}
 			>
 				<RefreshCwIcon class={['size-3', instance.store.loading && 'animate-spin']} />
 				Refresh

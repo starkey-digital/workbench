@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { AgentIcon } from '@workbench/ui/agent-icon';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import GitBranchIcon from '@lucide/svelte/icons/git-branch';
@@ -11,9 +10,11 @@
 	import { ScrollArea } from '@workbench/ui/scroll-area';
 	import { watch } from 'runed';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+	import SessionBadges from '$features/projects/SessionBadges.svelte';
 	import SessionItem from '$features/projects/SessionItem.svelte';
-	import type { ActiveClaudeSession, ProjectConfig, WorktreeInfo } from '$types/workbench';
+	import type { ActiveClaudeSession, ProjectConfig } from '$types/workbench';
 	import type { RemoteSession } from './remote-session.svelte';
+	import { projectBranches, type BranchRow } from './remote-tree';
 
 	/** A remote server's projects, branches and sessions, laid out like `ProjectSidebar`. */
 	let { store, session }: { store: ControlPlaneStore; session: RemoteSession } = $props();
@@ -48,20 +49,20 @@
 		else expandedProjects.set(path, next);
 	}
 
-	// Branches load when a project first shows expanded, however it got there.
+	// Branches load when a project first shows expanded, however it got there (once per path).
 	watch(
 		() => store.projects.filter((p) => isExpanded(p.path)).map((p) => p.path),
 		(paths) => {
-			for (const path of paths) if (!store.worktrees[path]) void store.loadWorktrees(path);
+			for (const path of paths) void store.ensureWorktrees(path);
 		}
 	);
 
+	// The typed name stays when the host refuses it, so it can be fixed.
 	async function createWorktree(project: ProjectConfig) {
 		const branch = newBranch.trim();
-		if (!branch) return;
+		if (!branch || (await store.createWorktree(project.path, branch)) === undefined) return;
 		creatingIn = null;
 		newBranch = '';
-		await store.createWorktree(project.path, branch);
 	}
 </script>
 
@@ -180,7 +181,7 @@
 			>
 				{project.name}
 			</button>
-			{@render sessionBadges(sessionsFor(project.path))}
+			<SessionBadges sessions={sessionsFor(project.path)} />
 			{@render newSessionButton(project.name, () => void session.newSession(project))}
 		</div>
 		{#if expanded}
@@ -191,23 +192,22 @@
 
 <!-- main checkout first, then each worktree; sessions nest under the branch they run on -->
 {#snippet branchTree(project: ProjectConfig)}
-	{@const worktrees = store.worktrees[project.path]}
-	{@const main = worktrees?.find((w) => w.isMain)}
-	{@const sessions = sessionsFor(project.path)}
+	{@const branches = projectBranches(
+		store.worktrees[project.path],
+		sessionsFor(project.path),
+		(path) => session.workspaces.getByWorktreePath(path)?.branch
+	)}
 	<div class="mb-1 ml-[15px] border-l border-wb-hair">
 		<!-- no main worktree = not a git repo (or not loaded yet): sessions only -->
-		{#if main}
-			{@render branchRow(project, main)}
+		{#if branches.main}
+			{@render branchRow(project, branches.main)}
 		{:else}
-			{@render sessionList(
-				project,
-				sessions.filter((s) => !s.worktreePath)
-			)}
+			{@render sessionList(project, branches.loose)}
 		{/if}
-		{#each (worktrees ?? []).filter((w) => !w.isMain) as wt (wt.path)}
-			{@render branchRow(project, wt)}
+		{#each branches.worktrees as row (row.path)}
+			{@render branchRow(project, row)}
 		{/each}
-		{#if main}
+		{#if branches.main}
 			{#if creatingIn === project.path}
 				<form
 					class="flex h-6 items-center gap-1.5 px-2.5"
@@ -248,14 +248,10 @@
 	</div>
 {/snippet}
 
-{#snippet branchRow(project: ProjectConfig, wt: WorktreeInfo)}
-	{@const worktree = wt.isMain ? undefined : wt}
+{#snippet branchRow(project: ProjectConfig, row: BranchRow)}
+	{@const { worktree, branch } = row}
 	{@const isActive =
 		active?.projectPath === project.path && (active.worktreePath ?? undefined) === worktree?.path}
-	{@const sessions = sessionsFor(project.path).filter(
-		(s) => (s.worktreePath ?? undefined) === worktree?.path
-	)}
-	{@const branch = wt.branch || '(detached)'}
 	<div
 		class={[
 			'group flex h-[26px] items-center gap-1.5 pr-1.5 pl-2.5 font-mono text-[11.5px] transition-colors',
@@ -268,15 +264,15 @@
 		<button
 			class="min-w-0 flex-1 truncate text-left"
 			type="button"
-			title={wt.path}
+			title={row.path}
 			onclick={() => void session.open(project, worktree)}
 		>
 			{branch}
 		</button>
-		{@render sessionBadges(sessions)}
+		<SessionBadges sessions={row.sessions} />
 		{@render newSessionButton(branch, () => void session.newSession(project, worktree))}
 	</div>
-	{@render sessionList(project, sessions)}
+	{@render sessionList(project, row.sessions)}
 {/snippet}
 
 {#snippet sessionList(project: ProjectConfig, sessions: ActiveClaudeSession[])}
@@ -303,21 +299,4 @@
 	>
 		<PlusIcon class="size-3" />
 	</button>
-{/snippet}
-
-{#snippet sessionBadges(sessions: ActiveClaudeSession[])}
-	{#each ['claude', 'codex'] as const as agent (agent)}
-		{@const count = sessions.filter((s) => s.sessionType === agent).length}
-		{#if count > 0}
-			<span
-				class={[
-					'inline-flex shrink-0 items-center gap-1 rounded px-1 py-px font-mono text-[9.5px] font-semibold',
-					agent === 'claude' ? 'bg-wb-claude/20 text-wb-claude' : 'bg-wb-codex/20 text-wb-codex'
-				]}
-				><AgentIcon {agent} class="size-2.5" /><span class="sr-only"
-					>{agent === 'claude' ? 'Claude' : 'Codex'}:</span
-				>{count}</span
-			>
-		{/if}
-	{/each}
 {/snippet}

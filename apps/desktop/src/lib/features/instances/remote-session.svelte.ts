@@ -77,7 +77,8 @@ export class RemoteSession {
 		void this.loadAccounts();
 	}
 
-	private async loadAccounts(): Promise<void> {
+	/** The host's logins and its pick for new sessions; re-read on reconnect and Refresh. */
+	async loadAccounts(): Promise<void> {
 		try {
 			const settings = (await this.transport.invoke(
 				'load_workbench_settings',
@@ -89,6 +90,7 @@ export class RemoteSession {
 			this.activeAccountId = this.claudeAccounts.some((a) => a.id === active)
 				? (active ?? undefined)
 				: undefined;
+			this.accountError = null;
 		} catch {
 			/* An unreachable host keeps its default account only. */
 		}
