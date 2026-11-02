@@ -1,5 +1,5 @@
 import type { ControlPlaneTransport } from '@workbench/transport';
-import type { ControlPlaneStore, SessionCounts } from '@workbench/control-plane-ui';
+import type { ControlPlaneStore } from '@workbench/control-plane-ui';
 import type {
 	ClaudeAccount,
 	ProjectConfig,
@@ -39,8 +39,9 @@ export class RemoteSession {
 	/** The host's Claude logins: a chat switches to one of these, never this machine's. */
 	claudeAccounts = $state<ClaudeAccount[]>([]);
 	defaultAccountName = $state(defaultAccountName(null));
-	/** Running Claude and Codex sessions by project path. */
-	readonly sessionCounts: Record<string, SessionCounts>;
+	/** The host's account for new Claude sessions; `undefined` is its default login. */
+	activeAccountId = $state<string | undefined>();
+	accountError = $state<string | null>(null);
 	private readonly uiKey: string;
 
 	private readonly transport: ControlPlaneTransport;
@@ -72,22 +73,12 @@ export class RemoteSession {
 			transport,
 			false
 		);
-		this.sessionCounts = $derived(
-			Object.fromEntries(
-				Object.entries(this.sessions.activeSessionsByProject).map(([path, list]) => [
-					path,
-					{
-						claude: list.filter((s) => s.sessionType === 'claude').length,
-						codex: list.filter((s) => s.sessionType === 'codex').length
-					}
-				])
-			)
-		);
 		void this.workspaces.load();
 		void this.loadAccounts();
 	}
 
-	private async loadAccounts(): Promise<void> {
+	/** The host's logins and its pick for new sessions; re-read on reconnect and Refresh. */
+	async loadAccounts(): Promise<void> {
 		try {
 			const settings = (await this.transport.invoke(
 				'load_workbench_settings',
@@ -95,8 +86,24 @@ export class RemoteSession {
 			)) as WorkbenchSettings;
 			this.claudeAccounts = settings.claudeAccounts ?? [];
 			this.defaultAccountName = defaultAccountName(settings);
+			const active = settings.activeClaudeAccount;
+			this.activeAccountId = this.claudeAccounts.some((a) => a.id === active)
+				? (active ?? undefined)
+				: undefined;
+			this.accountError = null;
 		} catch {
 			/* An unreachable host keeps its default account only. */
+		}
+	}
+
+	/** Sets the host's account for new Claude sessions; running ones keep theirs. */
+	async setActiveAccount(id: string | undefined): Promise<void> {
+		try {
+			await this.transport.invoke('set_active_claude_account', { id: id ?? null });
+			this.activeAccountId = id;
+			this.accountError = null;
+		} catch (e) {
+			this.accountError = `Couldn't switch the account: ${e instanceof Error ? e.message : String(e)}`;
 		}
 	}
 
@@ -121,6 +128,15 @@ export class RemoteSession {
 		return worktree
 			? this.workspaces.openWorktree(project, worktree.path, worktree.branch)
 			: this.workspaces.open(project);
+	}
+
+	/** A new Claude session on the project's main checkout, or on the worktree. */
+	async newSession(project: ProjectConfig, worktree?: WorktreeInfo): Promise<void> {
+		if (!worktree) return this.sessions.startSessionByProject(project.path);
+		const id =
+			this.workspaces.getByWorktreePath(worktree.path)?.id ??
+			(await this.workspaces.openWorktree(project, worktree.path, worktree.branch))?.workspaceId;
+		if (id) await this.sessions.startSession(id);
 	}
 
 	/** The server was removed: stop following it and forget this device's state for it. */

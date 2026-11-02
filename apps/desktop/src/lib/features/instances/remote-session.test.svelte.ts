@@ -65,7 +65,8 @@ describe('RemoteSession', () => {
 		transport = createMockTransport();
 		transport.mockInvoke('load_workbench_settings', () => ({
 			claudeAccounts: [{ id: 'work', name: 'Work' }],
-			defaultClaudeAccountName: 'Personal'
+			defaultClaudeAccountName: 'Personal',
+			activeClaudeAccount: 'work'
 		}));
 		session = new RemoteSession(
 			'box',
@@ -94,6 +95,34 @@ describe('RemoteSession', () => {
 		expect(session.server.remote).toBe(true);
 	});
 
+	it("switches the host's account for new sessions", async () => {
+		await vi.waitFor(() => expect(session.activeAccountId).toBe('work'));
+		const sent: unknown[] = [];
+		transport.mockInvoke('set_active_claude_account', (args) => void sent.push(args));
+		await session.setActiveAccount(undefined);
+		expect(sent).toEqual([{ id: null }]);
+		expect(session.activeAccountId).toBeUndefined();
+	});
+
+	it('keeps the account when the host refuses the switch', async () => {
+		await vi.waitFor(() => expect(session.activeAccountId).toBe('work'));
+		transport.mockInvoke('set_active_claude_account', () => {
+			throw new Error('unknown account');
+		});
+		await session.setActiveAccount(undefined);
+		expect(session.activeAccountId).toBe('work');
+		expect(session.accountError).toContain('unknown account');
+	});
+
+	it('starts a session in a worktree, opening its workspace first', async () => {
+		transport.mockWorkspaceCommand((cmd) =>
+			cmd.type === 'openWorkspace' ? { rev: 1, workspaceId: 'w9' } : { rev: 2 }
+		);
+		await session.newSession(project, { path: '/srv/repo-wt', branch: 'feat' } as never);
+		expect(transport.workspaceCommands.map((c) => c.type)).toEqual(['openWorkspace', 'newSession']);
+		expect(transport.workspaceCommands[1]).toMatchObject({ workspaceId: 'w9' });
+	});
+
 	it('opens a project on the host in xterm', async () => {
 		await session.open(project);
 		expect(transport.workspaceCommands).toEqual([
@@ -112,11 +141,6 @@ describe('RemoteSession', () => {
 		await session.open(project);
 		expect(session.workspaces.selectedId).toBe('w1');
 		expect(transport.workspaceCommands).toEqual([]);
-	});
-
-	it('counts running sessions by agent', () => {
-		emit([workspace('w1')]);
-		expect(session.sessionCounts['/srv/repo']).toEqual({ claude: 1, codex: 0 });
 	});
 
 	it('names a workspace whose project the list lacks yet', () => {

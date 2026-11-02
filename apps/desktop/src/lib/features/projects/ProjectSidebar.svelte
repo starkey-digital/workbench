@@ -37,6 +37,7 @@
 	import CIStatusBadge from './CIStatusBadge.svelte';
 	import PRStatusBadge from './PRStatusBadge.svelte';
 	import ProjectMenuItems from './ProjectMenuItems.svelte';
+	import SessionBadges from './SessionBadges.svelte';
 	import SessionItem from './SessionItem.svelte';
 	import CloneRepoDialog from './CloneRepoDialog.svelte';
 
@@ -95,10 +96,6 @@
 	async function startSessionInWorktree(projectPath: string, worktreePath: string, branch: string) {
 		const workspaceId = await worktreeManager.open(projectPath, worktreePath, branch);
 		if (workspaceId) await claudeSessionStore.startSession(workspaceId);
-	}
-
-	function sessionCount(sessions: ActiveClaudeSession[], type: 'claude' | 'codex'): number {
-		return sessions.filter((s) => s.sessionType === type).length;
 	}
 </script>
 
@@ -289,7 +286,7 @@
 							]}
 						/>
 					{/if}
-					{@render sessionBadges(sessions)}
+					<SessionBadges {sessions} />
 					<button
 						class="grid size-5 shrink-0 place-items-center rounded text-wb-ink-mute opacity-0 transition-opacity group-hover:opacity-100 hover:bg-wb-panel2 hover:text-wb-ink focus-visible:opacity-100"
 						type="button"
@@ -432,7 +429,7 @@
 						onclick={() => githubStore.showBranch(row.project.path, row.branch)}
 					/>
 				{/if}
-				{@render sessionBadges(row.sessions)}
+				<SessionBadges sessions={row.sessions} />
 				<button
 					class="grid size-5 shrink-0 place-items-center rounded text-wb-ink-mute opacity-0 transition-opacity group-hover:opacity-100 hover:bg-wb-panel2 hover:text-wb-ink focus-visible:opacity-100"
 					type="button"
@@ -484,24 +481,6 @@
 			<Trash2Icon class="size-3.5" />
 			Remove Worktree
 		</Item>
-	{/if}
-{/snippet}
-
-{#snippet sessionBadges(sessions: ActiveClaudeSession[])}
-	{@const claude = sessionCount(sessions, 'claude')}
-	{@const codex = sessionCount(sessions, 'codex')}
-	{#if claude > 0}
-		<span
-			class="inline-flex shrink-0 items-center gap-1 rounded bg-wb-claude/20 px-1 py-px font-mono text-[9.5px] font-semibold text-wb-claude"
-			><AgentIcon agent="claude" class="size-2.5" /><span class="sr-only">Claude:</span
-			>{claude}</span
-		>
-	{/if}
-	{#if codex > 0}
-		<span
-			class="inline-flex shrink-0 items-center gap-1 rounded bg-wb-codex/20 px-1 py-px font-mono text-[9.5px] font-semibold text-wb-codex"
-			><AgentIcon agent="codex" class="size-2.5" /><span class="sr-only">Codex:</span>{codex}</span
-		>
 	{/if}
 {/snippet}
 

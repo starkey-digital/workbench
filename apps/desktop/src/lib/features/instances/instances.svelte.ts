@@ -102,7 +102,8 @@ export class RemoteInstance {
 			this.updateCheckedAt = now;
 			void this.hostUpdate.check();
 		}
-		if (prev !== 'online') await this.store.refresh();
+		if (prev !== 'online')
+			await Promise.all([this.store.refresh(), this.remoteSession?.session.loadAccounts()]);
 	}
 }
 

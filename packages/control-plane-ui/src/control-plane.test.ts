@@ -47,6 +47,39 @@ describe('ControlPlaneStore', () => {
 		expect(store.worktrees['/a']).toHaveLength(1);
 	});
 
+	describe('ensureWorktrees', () => {
+		it('loads once per path, even while the first load is in flight', async () => {
+			let calls = 0;
+			transport.mockInvoke('list_worktrees', () => {
+				calls++;
+				return [{ path: '/a', branch: 'main', isMain: true }];
+			});
+			await Promise.all([store.ensureWorktrees('/a'), store.ensureWorktrees('/a')]);
+			await store.ensureWorktrees('/a');
+			expect(calls).toBe(1);
+			expect(store.worktrees['/a']).toHaveLength(1);
+		});
+
+		it('treats a folder git refuses as having no worktrees, without an error', async () => {
+			transport.mockInvoke('list_worktrees', () => {
+				throw new Error('not a git repository');
+			});
+			await store.ensureWorktrees('/plain');
+			expect(store.worktrees['/plain']).toEqual([]);
+			expect(store.error).toBeNull();
+		});
+
+		it('refresh re-fetches the loaded paths', async () => {
+			transport.mockInvoke('list_projects', () => []);
+			let branch = 'main';
+			transport.mockInvoke('list_worktrees', () => [{ path: '/a', branch, isMain: true }]);
+			await store.ensureWorktrees('/a');
+			branch = 'next';
+			await store.refresh();
+			expect(store.worktrees['/a'][0].branch).toBe('next');
+		});
+	});
+
 	describe('loadGithubUrl', () => {
 		let calls: number;
 		const remote = (result: unknown) =>
