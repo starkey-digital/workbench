@@ -35,8 +35,10 @@ export interface WorkspaceStoreOptions {
 	/** Another machine's server. */
 	remote?: boolean;
 	settings?: WorkbenchSettingsStore;
-	git?: GitStore;
+	git?: GitState;
 }
+
+type GitState = Pick<GitStore, 'statusByProject' | 'branchByProject'>;
 
 /** Boot doesn't wait longer than this for the server's first snapshot. */
 const FIRST_SNAPSHOT_MS = 5000;
@@ -73,7 +75,7 @@ export class WorkspaceStore {
 	private shownNotices: Record<string, true> = {};
 	private unsubscribe: (() => void) | null = null;
 	private settingsStore: WorkbenchSettingsStore;
-	private gitStore: GitStore;
+	private gitStore: GitState;
 	private switchCallbacks: Array<(projectPath: string) => void> = [];
 
 	private readonly api: WorkspaceApi;

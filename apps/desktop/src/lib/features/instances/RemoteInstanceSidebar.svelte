@@ -4,9 +4,8 @@
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import { ControlPlaneSidebar } from '@workbench/control-plane-ui';
 	import InstanceSwitcher from './InstanceSwitcher.svelte';
-	import type { ProjectConfig, WorktreeInfo } from '$types/workbench';
 	import type { RemoteInstance } from './instances.svelte';
-	import { remoteSession } from './remote-session';
+	import { remoteSession } from './remote-session.svelte';
 
 	let {
 		instance,
@@ -23,21 +22,6 @@
 	// Keyed by the instance in App, so this is its session for the component's life.
 	// svelte-ignore state_referenced_locally
 	const session = remoteSession(instance);
-	const sessionCounts = $derived(
-		Object.fromEntries(
-			Object.entries(session.sessions.activeSessionsByProject).map(([path, s]) => [path, s.length])
-		)
-	);
-
-	function open(project: ProjectConfig, worktree?: WorktreeInfo) {
-		const ws = worktree
-			? session.workspaces.getByWorktreePath(worktree.path)
-			: session.workspaces.getByProjectPath(project.path);
-		if (ws) session.workspaces.selectedId = ws.id;
-		else if (worktree)
-			void session.workspaces.openWorktree(project, worktree.path, worktree.branch);
-		else void session.workspaces.open(project);
-	}
 </script>
 
 <aside class="flex h-full w-full flex-col overflow-hidden border-r border-wb-hair bg-wb-panel">
@@ -83,7 +67,11 @@
 			<p class="px-3 py-8 text-center font-mono text-[11px] text-wb-ink-soft">Connecting…</p>
 		{:else}
 			<div class="min-h-0 flex-1 overflow-y-auto">
-				<ControlPlaneSidebar store={instance.store} onOpen={open} {sessionCounts} />
+				<ControlPlaneSidebar
+					store={instance.store}
+					onOpen={(project, worktree) => void session.open(project, worktree)}
+					sessionCounts={session.sessionCounts}
+				/>
 			</div>
 		{/if}
 	{/if}

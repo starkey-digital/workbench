@@ -178,14 +178,15 @@
 		void githubStore.refreshProject(projectPath);
 	});
 
-	// Sync githubStore.sidebarOpen → pane expand/collapse (imperative DOM API)
+	// Sync githubStore.sidebarOpen → pane expand/collapse (imperative DOM API).
+	// The pane too: it remounts collapsed after a remote instance was shown.
 	watch(
-		() => githubStore.sidebarOpen,
-		(open) => {
+		() => [githubStore.sidebarOpen, githubSidebarPane] as const,
+		([open, pane]) => {
 			if (open) {
-				githubSidebarPane?.expand();
+				pane?.expand();
 			} else {
-				githubSidebarPane?.collapse();
+				pane?.collapse();
 			}
 		}
 	);
@@ -302,12 +303,16 @@
 					<Resizable.Handle withHandle class="cursor-col-resize" />
 					<Resizable.Pane defaultSize={83} minSize={50} class="h-full">
 						<main class="flex h-full min-w-0 flex-1 flex-col">
+							<!-- Hidden, not unmounted: local terminals stay attached while a remote is shown. -->
+							<div class="flex min-h-0 flex-1 flex-col" class:hidden={!!remote}>
+								<WorkspaceArea projectFor={(ws) => projectStore.getByPath(ws.projectPath)} />
+							</div>
 							{#if remote}
 								{#key remote}
-									<RemoteWorkspaceArea instance={remote} />
+									<div class="flex min-h-0 flex-1 flex-col">
+										<RemoteWorkspaceArea instance={remote} />
+									</div>
 								{/key}
-							{:else}
-								<WorkspaceArea projectFor={(ws) => projectStore.getByPath(ws.projectPath)} />
 							{/if}
 						</main>
 					</Resizable.Pane>

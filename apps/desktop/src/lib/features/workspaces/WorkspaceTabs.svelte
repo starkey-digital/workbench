@@ -57,7 +57,8 @@
 	}
 
 	let activeGitHubUrl = $derived.by(() => {
-		if (!activeWorkspace) return null;
+		// GitHub remotes are known for this machine's checkouts only.
+		if (!activeWorkspace || server.remote) return null;
 		const repoUrl = githubStore.getRemoteUrl(activeWorkspace.projectPath);
 		if (!repoUrl) return null;
 		const branch = workspaceStore.resolvedBranch(activeWorkspace);

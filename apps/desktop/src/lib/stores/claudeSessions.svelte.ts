@@ -366,13 +366,16 @@ export class ClaudeSessionStore {
 		workspaces: WorkspaceStore,
 		projects: ProjectLookup,
 		integrationApproval: IntegrationGate,
-		api: Pick<ControlPlaneTransport, 'invoke'> = transport()
+		api: Pick<ControlPlaneTransport, 'invoke'> = transport(),
+		/** This machine's agent events; a remote server's panes never get them. */
+		localEvents = true
 	) {
 		this.workspaces = workspaces;
 		this.projects = projects;
 		this.integrationApproval = integrationApproval;
 		this.api = api;
 
+		if (!localEvents) return;
 		listen<CodexNotifyEvent>('codex:notify', (event) => {
 			this.onCodexNotifyEvent(event.payload);
 		});

@@ -1,5 +1,6 @@
 import { agentClient, type AgentApi } from '@workbench/chat-ui';
 import { loopbackServer, type ServerAddress } from '@workbench/transport';
+import type { ClaudeAccount } from '$types/workbench';
 
 /** The Workbench server a set of workspaces runs on: where its terminals and chats attach. */
 export interface WorkbenchServer {
@@ -9,6 +10,8 @@ export interface WorkbenchServer {
 	agents: ReturnType<typeof agentClient>;
 	/** Another machine's server: its paths aren't on this one, and it has no native terminals. */
 	remote: boolean;
+	/** Its Claude logins, when they aren't this machine's settings. */
+	accounts?: { readonly claudeAccounts: ClaudeAccount[]; readonly defaultAccountName: string };
 }
 
 export function workbenchServer(

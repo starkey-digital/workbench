@@ -20,7 +20,12 @@
 </script>
 
 <PersistenceBanner />
-{#if workspaceStore.workspaces.length === 0}
+{#if workspaceStore.workspaces.length === 0 && server.remote}
+	<!-- EmptyState's actions add and clone on this machine. -->
+	<p class="m-auto font-mono text-[11px] text-wb-ink-soft">
+		No workspaces open on this server. Open a project from the sidebar.
+	</p>
+{:else if workspaceStore.workspaces.length === 0}
 	<EmptyState />
 {:else}
 	<WorkspaceTabs />

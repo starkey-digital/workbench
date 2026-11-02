@@ -5,7 +5,8 @@ import {
 	type ControlPlaneTransport
 } from '@workbench/transport';
 import { ControlPlaneStore } from '@workbench/control-plane-ui';
-import { RemoteSession, type RemoteSessionDeps } from './remote-session';
+import { owned } from '@workbench/chat-ui';
+import { RemoteSession, type RemoteSessionDeps } from './remote-session.svelte';
 import { uid } from '$lib/utils/uid';
 import { log } from '$lib/log';
 
@@ -33,7 +34,7 @@ export class RemoteInstance {
 	status = $state<InstanceStatus>('connecting');
 	readonly store: ControlPlaneStore;
 	private readonly transport: ControlPlaneTransport;
-	private remoteSession: RemoteSession | null = null;
+	private remoteSession: { session: RemoteSession; destroy: () => void } | null = null;
 
 	constructor(config: RemoteInstanceConfig) {
 		this.config = config;
@@ -47,18 +48,28 @@ export class RemoteInstance {
 
 	/** Its workspaces, made on first use. */
 	session(deps: RemoteSessionDeps): RemoteSession {
-		return (this.remoteSession ??= new RemoteSession(
-			this.config.id,
-			{ baseUrl: this.base, token: this.config.token },
-			this.transport,
-			this.store,
-			deps
-		));
+		if (!this.remoteSession) {
+			// Its own reactive root: it outlives the component that first asks for it.
+			const [session, destroy] = owned(
+				() =>
+					new RemoteSession(
+						this.config.id,
+						{ baseUrl: this.base, token: this.config.token },
+						this.transport,
+						this.store,
+						deps
+					)
+			);
+			this.remoteSession = { session, destroy };
+		}
+		return this.remoteSession.session;
 	}
 
-	/** Stop following its workspaces. */
+	/** The server was removed. */
 	dispose(): void {
-		this.remoteSession?.workspaces.dispose();
+		this.remoteSession?.session.dispose();
+		this.remoteSession?.destroy();
+		this.remoteSession = null;
 	}
 
 	/** Ping /health; (re)load its projects on any transition into online —
