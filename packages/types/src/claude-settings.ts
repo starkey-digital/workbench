@@ -27,6 +27,10 @@ export interface PermissionsConfig {
 	deny?: string[];
 	ask?: string[];
 	additionalDirectories?: string[];
+	/** Read tools (and sandboxed shell reads) refuse paths outside the working directories. */
+	blockReadsOutsideWorkingDirectories?: boolean;
+	/** Write, Edit and NotebookEdit refuse paths outside the working directories, in every mode (CLI 2.1.314+). */
+	blockWritesOutsideWorkingDirectories?: boolean;
 	defaultMode?: 'default' | 'acceptEdits' | 'plan' | 'dontAsk' | 'bypassPermissions';
 	disableBypassPermissionsMode?: 'disable';
 	[key: string]: unknown;

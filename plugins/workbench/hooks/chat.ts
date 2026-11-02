@@ -19,7 +19,9 @@ import {
 	promptText,
 	QUEUED_NUDGE,
 	QUEUED_PREFIX,
+	raisesEffort,
 	rateLimitLine,
+	effortFor,
 	slimResult,
 	slashCommand,
 	withAttachments,
@@ -54,6 +56,8 @@ let askSeq = 0;
 let effort: TurnStepInput['effort'];
 // The effort the engine resolved on its own when the chat's was applied first.
 let effortBase: { value: TurnStepInput['effort'] } | undefined;
+// The running turn was raised with `ultrathink`.
+let raisedTurn = false;
 // Model picked in chat, for this session only: the resolved id each
 // main-thread request names, the pick as the chat shows it, the effort levels
 // that model takes (absent: unknown), and the model the engine names on its
@@ -681,6 +685,7 @@ export const register: Register = (on) => {
 			return next(e);
 		}
 		runningTurn = e.turnId;
+		raisedTurn = raisesEffort(e.text);
 		owedResult = false;
 		// A prompt-type command's turn ends with its own `result`.
 		if (chatCommand) chatCommand.answered = true;
@@ -710,20 +715,17 @@ export const register: Register = (on) => {
 		// This request carries every row appended so far.
 		if (injected.length > 0) emit({ type: 'workbench_queued_read' });
 		injected = [];
-		// The TUI picked another effort: the chat's is dropped (and the server forgets it).
-		let effortCleared = false;
-		if (effort) {
-			if (!effortBase) effortBase = { value: e.effort };
-			else if (e.effort !== effortBase.value) {
-				effort = effortBase = undefined;
-				effortCleared = true;
-			}
-		}
+		// The TUI picked another effort (or an admin cap lowered it): the chat's is
+		// dropped and the server forgets it. An `ultrathink` turn only raises itself.
+		const resolved = effortFor(effort, e.effort, effortBase, raisedTurn);
+		effortBase = resolved.base;
+		const effortCleared = resolved.cleared;
+		if (effortCleared) effort = undefined;
 		if (modelPick && modelPick.base === undefined) modelPick.base = e.model;
 		const pick = modelPick && e.model === modelPick.base ? modelPick : undefined;
 		// What this request really runs with: the engine resolved both. A picked
 		// model that doesn't take the effort goes without.
-		let sent = effort ?? e.effort;
+		let sent = resolved.sent;
 		if (pick?.effortLevels && !(typeof sent === 'string' && pick.effortLevels.includes(sent)))
 			sent = undefined;
 		const step = { ...e, ...(pick ? { model: pick.id } : {}) };
@@ -1135,6 +1137,8 @@ export const register: Register = (on) => {
 		}
 		if (e.origin.kind === 'plugin') chatTurn = e.origin.name === $.plugin.name;
 		else if (e.origin.kind === 'composer') chatTurn = false;
+		// Typed while Claude works, it raises the rest of the running turn.
+		if (runningTurn && raisesEffort(e.text)) raisedTurn = true;
 		return next(e);
 	});
 
