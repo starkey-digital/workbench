@@ -18,6 +18,9 @@ use crate::claude_transcript::{find_transcript, model_options, ModelOption};
 use crate::paths;
 use crate::types::{ProjectConfig, WorkbenchSettings};
 
+mod preamble;
+pub use preamble::shell_preamble;
+
 pub const CONFIG_DIR_ENV: &str = "CLAUDE_CONFIG_DIR";
 
 /// Every Claude config dir Workbench manages: the default `~/.claude`, then each

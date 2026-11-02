@@ -816,36 +816,29 @@ impl AgentManager {
         if let Some(old) = &link.terminal_id {
             terminals.kill_and_wait(old);
         }
-        let open = |account_id: Option<String>, config_dir: Option<&std::path::Path>| {
-            // A session nobody has written to yet has no file to `--resume`.
-            let resume = claude_history_exists(config_dir, &session_id);
-            crate::terminal::CreateTerminalBody {
-                project_path: req.project_path.clone(),
-                worktree_path: req.worktree_path.clone(),
-                name: None,
-                command: None,
-                claude_session: Some(crate::terminal::ClaudeSessionLaunch {
-                    id: session_id.clone(),
-                    resume,
-                    resume_at: resume_at.clone(),
-                    permission_mode: permission_mode.clone(),
-                    ..Default::default()
-                }),
-                cols: 120,
-                rows: 40,
-                pane_id: req.pane_id.clone(),
-                shell: None,
-                claude_account_id: account_id,
-                codex_session: None,
-                native: false,
-            }
+        // `--resume` or not is the terminal create's call, from the account's dir.
+        let open = |account_id: Option<String>| crate::terminal::CreateTerminalBody {
+            project_path: req.project_path.clone(),
+            worktree_path: req.worktree_path.clone(),
+            name: None,
+            command: None,
+            claude_session: Some(crate::terminal::ClaudeSessionLaunch {
+                id: session_id.clone(),
+                resume: false,
+                resume_at: resume_at.clone(),
+                permission_mode: permission_mode.clone(),
+                prompt: None,
+            }),
+            cols: 120,
+            rows: 40,
+            pane_id: req.pane_id.clone(),
+            shell: None,
+            claude_account_id: account_id,
+            codex_session: None,
+            native: false,
         };
         let Some((to_id, to_dir)) = to else {
-            self.open_terminal(
-                terminals,
-                open(req.claude_account_id.clone(), config_dir.as_deref()),
-                |_| {},
-            )?;
+            self.open_terminal(terminals, open(req.claude_account_id.clone()), |_| {})?;
             return Ok(());
         };
         // The new login resumes the session once its files are in its config
@@ -858,7 +851,7 @@ impl AgentManager {
         )
         .context("the session's files couldn't move to that account")
         .and_then(|()| {
-            let body = open(to_id, to_dir.as_deref());
+            let body = open(to_id);
             self.open_terminal(terminals, body, trust_watch(terminals))
         });
         let Err(e) = switched else {
@@ -873,11 +866,7 @@ impl AgentManager {
         ) {
             tracing::warn!("moving {session_id} back after a failed account switch: {back}");
         }
-        self.open_terminal(
-            terminals,
-            open(req.claude_account_id.clone(), config_dir.as_deref()),
-            |_| {},
-        )?;
+        self.open_terminal(terminals, open(req.claude_account_id.clone()), |_| {})?;
         Err(e.context("Couldn't switch the account; the chat carries on where it was"))
     }
 

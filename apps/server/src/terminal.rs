@@ -541,6 +541,27 @@ pub struct CreateTerminalBody {
     pub native: bool,
 }
 
+/// A Claude session's command, or any command in a pane with an account (its
+/// login task), set to that account first (`claude_accounts::shell_preamble`),
+/// so the `--resume` check and the CLI read one config dir.
+fn under_account(
+    command: Option<String>,
+    account_scoped: bool,
+    shell: Option<&str>,
+    config_dir: Option<&std::path::Path>,
+) -> Option<String> {
+    let command = command?;
+    if !account_scoped {
+        return Some(command);
+    }
+    let shell = shell
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .unwrap_or_else(workbench_core::shell::default_shell);
+    let preamble = workbench_core::claude_accounts::shell_preamble(&shell, config_dir);
+    Some(preamble.unwrap_or_default() + &command)
+}
+
 pub use workbench_core::claude_launch::ClaudeSessionLaunch;
 pub use workbench_core::codex_launch::CodexSessionLaunch;
 
@@ -578,8 +599,6 @@ fn create(
     if let Some(session) = body.claude_session.as_mut() {
         session.resume =
             crate::agent::claude_history_exists(claude_config_dir.as_deref(), &session.id);
-        // On the command too, so the `--resume` check and the CLI read one folder.
-        session.config_dir = claude_config_dir.clone();
     }
     // A thread nobody wrote to yet has nothing to resume.
     if let Some(codex) = body.codex_session.as_mut() {
@@ -601,6 +620,12 @@ fn create(
             projects,
         )?,
     };
+    let command = under_account(
+        command,
+        body.claude_session.is_some() || body.claude_account_id.is_some(),
+        body.shell.as_deref(),
+        claude_config_dir.as_deref(),
+    );
     // The plugin reads no live mode until a hook reports one, so it's told the
     // one `claude` starts in rather than guessing the settings default. Read
     // before a token is granted: an error returns past the revoke below.
