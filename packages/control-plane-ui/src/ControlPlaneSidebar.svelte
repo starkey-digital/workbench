@@ -2,23 +2,20 @@
 	import { AgentIcon } from '@workbench/ui/agent-icon';
 	import { Button } from '@workbench/ui/button';
 	import { Input } from '@workbench/ui/input';
-	import type { ProjectConfig } from '@workbench/types';
+	import type { ProjectConfig, WorktreeInfo } from '@workbench/types';
 	import type { ControlPlaneStore } from './control-plane.svelte.ts';
 
 	let {
 		store,
-		onOpenTerminal
+		onOpen,
+		sessionCounts = {}
 	}: {
 		store: ControlPlaneStore;
-		/** When provided, render Terminal / Claude affordances that open a live
-		 * shell for the given cwd (mobile uses this; desktop has its own local
-		 * terminals). `command` runs once the shell starts (e.g. `claude`). */
-		onOpenTerminal?: (
-			projectPath: string,
-			worktreePath: string | undefined,
-			name: string,
-			command?: string
-		) => void;
+		/** When provided, each project and worktree gets an Open button (the
+		 * server's workspace for it, with its sessions). */
+		onOpen?: (project: ProjectConfig, worktree?: WorktreeInfo) => void;
+		/** Running Claude/Codex sessions by project path. */
+		sessionCounts?: Record<string, number>;
 	} = $props();
 
 	let expanded = $state<string | null>(null);
@@ -103,21 +100,16 @@
 								<div class="truncate text-sm font-medium text-wb-ink">{projectName(p)}</div>
 								<div class="truncate font-mono text-[11px] text-wb-ink-soft">{p.path}</div>
 							</div>
-							{#if onOpenTerminal}
-								<Button
-									variant="secondary"
-									size="sm"
-									onclick={() => onOpenTerminal(p.path, undefined, projectName(p))}
+							{#if sessionCounts[p.path]}
+								<span
+									class="flex shrink-0 items-center gap-1 font-mono text-[11px] text-wb-ink-soft"
+									title="Running sessions"
 								>
-									Term
-								</Button>
-								<Button
-									size="sm"
-									onclick={() =>
-										onOpenTerminal(p.path, undefined, `${projectName(p)} · claude`, 'claude')}
-								>
-									<AgentIcon agent="claude" class="size-3.5 text-current" />Claude
-								</Button>
+									<AgentIcon agent="claude" class="size-3 text-current" />{sessionCounts[p.path]}
+								</span>
+							{/if}
+							{#if onOpen}
+								<Button variant="secondary" size="sm" onclick={() => onOpen(p)}>Open</Button>
 							{/if}
 							<Button variant="ghost" size="sm" onclick={() => toggle(p.path)}>
 								{expanded === p.path ? '▾' : '▸'}
@@ -134,30 +126,13 @@
 												{w.path}{w.isMain ? ' · main' : ''}
 											</div>
 										</div>
-										{#if onOpenTerminal}
+										{#if onOpen}
 											<Button
 												variant="secondary"
 												size="sm"
-												onclick={() =>
-													onOpenTerminal(
-														p.path,
-														w.isMain ? undefined : w.path,
-														`${projectName(p)}:${w.branch}`
-													)}
+												onclick={() => onOpen(p, w.isMain ? undefined : w)}
 											>
-												Term
-											</Button>
-											<Button
-												size="sm"
-												onclick={() =>
-													onOpenTerminal(
-														p.path,
-														w.isMain ? undefined : w.path,
-														`${projectName(p)}:${w.branch} · claude`,
-														'claude'
-													)}
-											>
-												<AgentIcon agent="claude" class="size-3.5 text-current" />Claude
+												Open
 											</Button>
 										{/if}
 									</div>

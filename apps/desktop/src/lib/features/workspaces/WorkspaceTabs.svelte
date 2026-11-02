@@ -7,7 +7,12 @@
 	import XIcon from '@lucide/svelte/icons/x';
 	import { Button } from '@workbench/ui/button';
 	import * as Tooltip from '@workbench/ui/tooltip';
-	import { getClaudeSessionStore, getGitHubStore, getWorkspaceStore } from '$stores/context';
+	import {
+		getClaudeSessionStore,
+		getGitHubStore,
+		getWorkbenchServer,
+		getWorkspaceStore
+	} from '$stores/context';
 	import { branchUrl } from '$lib/utils/github';
 	import { openUrl } from '$lib/utils/open-url';
 	import { overlayScrollbars } from '$lib/utils/overlay-scrollbars';
@@ -20,6 +25,7 @@
 	const workspaceStore = getWorkspaceStore();
 	const githubStore = getGitHubStore();
 	const claudeSessionStore = getClaudeSessionStore();
+	const server = getWorkbenchServer();
 
 	let activeWorkspace = $derived(workspaceStore.activeWorkspace);
 	let waitingCount = $derived(claudeSessionStore.panesAwaitingInput.size);
@@ -156,23 +162,25 @@
 				<Tooltip.Content>Go to the next session with a question or approval</Tooltip.Content>
 			</Tooltip.Root>
 		{/if}
-		<Tooltip.Root>
-			<Tooltip.Trigger>
-				{#snippet child({ props })}
-					<Button
-						{...props}
-						variant="ghost"
-						size="icon-sm"
-						class="size-6 text-wb-ink-soft hover:bg-wb-panel2 hover:text-wb-ink"
-						type="button"
-						onclick={() => openInVSCode(activeWorkspace ? effectivePath(activeWorkspace) : '')}
-					>
-						<CodeIcon class="size-3.5" />
-					</Button>
-				{/snippet}
-			</Tooltip.Trigger>
-			<Tooltip.Content>Open in VS Code</Tooltip.Content>
-		</Tooltip.Root>
+		{#if !server.remote}
+			<Tooltip.Root>
+				<Tooltip.Trigger>
+					{#snippet child({ props })}
+						<Button
+							{...props}
+							variant="ghost"
+							size="icon-sm"
+							class="size-6 text-wb-ink-soft hover:bg-wb-panel2 hover:text-wb-ink"
+							type="button"
+							onclick={() => openInVSCode(activeWorkspace ? effectivePath(activeWorkspace) : '')}
+						>
+							<CodeIcon class="size-3.5" />
+						</Button>
+					{/snippet}
+				</Tooltip.Trigger>
+				<Tooltip.Content>Open in VS Code</Tooltip.Content>
+			</Tooltip.Root>
+		{/if}
 		{#if activeGitHubUrl}
 			<Tooltip.Root>
 				<Tooltip.Trigger>

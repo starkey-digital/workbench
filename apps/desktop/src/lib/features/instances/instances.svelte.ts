@@ -1,5 +1,11 @@
-import { createHttpTransport, DEFAULT_TIMEOUT_MS, withTimeout } from '@workbench/transport';
+import {
+	createHttpTransport,
+	DEFAULT_TIMEOUT_MS,
+	withTimeout,
+	type ControlPlaneTransport
+} from '@workbench/transport';
 import { ControlPlaneStore } from '@workbench/control-plane-ui';
+import { RemoteSession, type RemoteSessionDeps } from './remote-session';
 import { uid } from '$lib/utils/uid';
 import { log } from '$lib/log';
 
@@ -26,16 +32,33 @@ export class RemoteInstance {
 	readonly config: RemoteInstanceConfig;
 	status = $state<InstanceStatus>('connecting');
 	readonly store: ControlPlaneStore;
+	private readonly transport: ControlPlaneTransport;
+	private remoteSession: RemoteSession | null = null;
 
 	constructor(config: RemoteInstanceConfig) {
 		this.config = config;
-		this.store = new ControlPlaneStore(
-			createHttpTransport({ baseUrl: config.url, token: config.token })
-		);
+		this.transport = createHttpTransport({ baseUrl: config.url, token: config.token });
+		this.store = new ControlPlaneStore(this.transport);
 	}
 
 	get base(): string {
 		return this.config.url.replace(/\/$/, '');
+	}
+
+	/** Its workspaces, made on first use. */
+	session(deps: RemoteSessionDeps): RemoteSession {
+		return (this.remoteSession ??= new RemoteSession(
+			this.config.id,
+			{ baseUrl: this.base, token: this.config.token },
+			this.transport,
+			this.store,
+			deps
+		));
+	}
+
+	/** Stop following its workspaces. */
+	dispose(): void {
+		this.remoteSession?.workspaces.dispose();
 	}
 
 	/** Ping /health; (re)load its projects on any transition into online —
@@ -122,6 +145,7 @@ export class InstancesStore {
 	}
 
 	remove(id: string): void {
+		this.remotes.find((r) => r.config.id === id)?.dispose();
 		this.remotes = this.remotes.filter((r) => r.config.id !== id);
 		if (this.activeId === id) this.activeId = this.localId;
 		this.persist();

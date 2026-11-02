@@ -34,12 +34,12 @@
 	import {
 		getClaudeSessionStore,
 		getGitHubStore,
+		getWorkbenchServer,
 		getWorkbenchSettingsStore,
 		getWorkspaceStore
 	} from '$stores/context';
 	import PRStatusBadge from '$features/projects/PRStatusBadge.svelte';
 	import { openUrl } from '$lib/utils/open-url';
-	import { planUsage } from './agent-api';
 	import { acquireChat, followPane } from './chat-registry.svelte';
 	import { desktopChatPlatform } from './chat-platform';
 	import ChatResumePicker from './ChatResumePicker.svelte';
@@ -81,6 +81,7 @@
 	const workspaceStore = getWorkspaceStore();
 	const githubStore = getGitHubStore();
 	const settingsStore = getWorkbenchSettingsStore();
+	const server = getWorkbenchServer();
 	// svelte-ignore state_referenced_locally
 	const agentLabel = agentName(agent);
 	// svelte-ignore state_referenced_locally
@@ -93,7 +94,8 @@
 			sessionId,
 			paneId
 		},
-		{ status, generation }
+		{ status, generation },
+		server.agents
 	);
 	// Shown again (a workspace switch): catch up on anything the view missed.
 	if (!created) chat.resync();
@@ -166,9 +168,9 @@
 	const planLimits =
 		agent === 'claude'
 			? useAccountPlanUsage(
-					'loopback',
+					server.id,
 					() => chat.accountId,
-					(account, fresh) => planUsage(account, fresh),
+					(account, fresh) => server.agents.usage(account, fresh),
 					() => chat.meta
 				)
 			: null;

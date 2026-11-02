@@ -1,4 +1,5 @@
-import { invoke } from '$lib/transport';
+import { transport } from '$lib/transport';
+import type { ControlPlaneTransport } from '@workbench/transport';
 import { listen } from '@tauri-apps/api/event';
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import {
@@ -23,6 +24,10 @@ const MAX_LABEL_DISCOVERY_ATTEMPTS = 6;
 /** Who to notify about: a pane here, or a session no pane shows. */
 export type AttentionTarget =
 	{ paneId: string; sessionId: string } | { id: string; projectPath: string; label: string };
+
+export type ProjectLookup = Pick<ProjectStore, 'getByPath'>;
+/** Approves the agent integration a launch needs (a remote host manages its own). */
+export type IntegrationGate = Pick<IntegrationApprovalStore, 'ensureIntegration'>;
 
 const discoveryKey = (cwd: string, type: 'claude' | 'codex') => `${type}:${cwd}`;
 
@@ -61,9 +66,11 @@ export class ClaudeSessionStore {
 	/** Reference to workspace store for Claude pane detection */
 	private workspaces: WorkspaceStore;
 	/** Reference to project store for opening projects */
-	private projects: ProjectStore;
+	private projects: ProjectLookup;
 	/** Reference to integration approval store for gating AI sessions */
-	private integrationApproval: IntegrationApprovalStore;
+	private integrationApproval: IntegrationGate;
+	/** Where session discovery runs: the workspaces' server. */
+	private api: Pick<ControlPlaneTransport, 'invoke'>;
 
 	/** Callbacks for a session needing someone (an answer, or its turn ended), or no longer */
 	private attentionCallbacks: Array<
@@ -337,7 +344,7 @@ export class ClaudeSessionStore {
 	async peekSessions(cwd: string, type: 'claude' | 'codex'): Promise<DiscoveredClaudeSession[]> {
 		const command = type === 'codex' ? 'discover_codex_sessions' : 'discover_claude_sessions';
 		try {
-			return await invoke<DiscoveredClaudeSession[]>(command, { projectPath: cwd });
+			return await this.api.invoke(command, { projectPath: cwd });
 		} catch (e) {
 			log.error('ClaudeSessionStore', `Failed to discover ${type} sessions:`, e);
 			return [];
@@ -357,12 +364,14 @@ export class ClaudeSessionStore {
 
 	constructor(
 		workspaces: WorkspaceStore,
-		projects: ProjectStore,
-		integrationApproval: IntegrationApprovalStore
+		projects: ProjectLookup,
+		integrationApproval: IntegrationGate,
+		api: Pick<ControlPlaneTransport, 'invoke'> = transport()
 	) {
 		this.workspaces = workspaces;
 		this.projects = projects;
 		this.integrationApproval = integrationApproval;
+		this.api = api;
 
 		listen<CodexNotifyEvent>('codex:notify', (event) => {
 			this.onCodexNotifyEvent(event.payload);

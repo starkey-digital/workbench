@@ -19,7 +19,12 @@
  * itself would then take the terminal back from the other device.
  */
 
-import { loopbackServer, parseTerminalControlFrame, terminalWsUrl } from '@workbench/transport';
+import {
+	loopbackServer,
+	parseTerminalControlFrame,
+	terminalWsUrl,
+	type ServerAddress
+} from '@workbench/transport';
 import { breadcrumb } from '@workbench/telemetry';
 import { log } from '$lib/log';
 
@@ -57,12 +62,14 @@ export class TerminalConnection {
 	 * @param onData  Called with raw PTY output bytes as they arrive.
 	 * @param onExit  Called exactly once when the session ends or is taken over.
 	 * @param onReset Called before scrollback replay, so it isn't printed twice.
+	 * @param server  The server the terminal runs on.
 	 */
 	constructor(
 		terminalId: string,
 		onData: (data: TerminalDataPayload) => void,
 		onExit: (info: TerminalExitInfo) => void,
-		onReset?: () => void
+		onReset?: () => void,
+		private readonly server: () => Promise<ServerAddress> = loopbackServer
 	) {
 		this.terminalId = terminalId;
 		this.onData = onData;
@@ -78,7 +85,7 @@ export class TerminalConnection {
 
 	/** Attach at this size; resolves once the socket is open and sized. */
 	async connect(cols: number, rows: number): Promise<void> {
-		const { baseUrl, token } = await loopbackServer();
+		const { baseUrl, token } = await this.server();
 		if (this.disposed) return;
 		await this.openSocket(terminalWsUrl(baseUrl, this.terminalId, token), cols, rows);
 	}

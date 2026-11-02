@@ -8,6 +8,7 @@ import type {
 	SessionType,
 	SplitDirection,
 	TerminalPaneState,
+	TerminalRenderer,
 	TerminalTabState
 } from '$types/workbench';
 import {
@@ -20,10 +21,22 @@ import { transport } from '$lib/transport';
 import { effectivePath } from '$lib/utils/path';
 import { followPane, releaseChat } from '$features/chat/chat-registry.svelte';
 import { getGitStore, getWorkbenchSettingsStore } from './context';
+import type { GitStore } from './git.svelte';
+import type { WorkbenchSettingsStore } from './workbench-settings.svelte';
 import { hasSavedUi, loadUi, pruneUi, saveUi, seededUi, type WorkspaceUi } from './workspace-ui';
 import { workspaceView } from './workspace-view';
 
 export type WorkspaceApi = Pick<ControlPlaneTransport, 'workspaceCommand' | 'subscribeWorkspace'>;
+
+/** Defaults: the loopback server's workspaces, with the stores from context. */
+export interface WorkspaceStoreOptions {
+	/** Where this device keeps its choices for the server's workspaces (one key per server). */
+	uiKey?: string;
+	/** Another machine's server. */
+	remote?: boolean;
+	settings?: WorkbenchSettingsStore;
+	git?: GitStore;
+}
 
 /** Boot doesn't wait longer than this for the server's first snapshot. */
 const FIRST_SNAPSHOT_MS = 5000;
@@ -51,22 +64,35 @@ interface NewSessionOptions {
  */
 export class WorkspaceStore {
 	private snapshot = $state.raw<WorkspaceSnapshot>({ rev: 0, workspaces: [] });
-	private ui = $state.raw<WorkspaceUi>(loadUi());
+	private ui = $state.raw<WorkspaceUi>({ selectedId: null, activeTabs: {}, chatPanes: [] });
 	/** No state saved on this device yet: take the one an older desktop saved with the model. */
-	private seed = !hasSavedUi();
+	private seed: boolean;
 	/** Ids a command made, kept from pruning until a snapshot shows them (or they expire). */
 	private pending: Record<string, number> = {};
 	/** Spawn notices already shown, by pane and spawn. */
 	private shownNotices: Record<string, true> = {};
 	private unsubscribe: (() => void) | null = null;
-	private settingsStore = getWorkbenchSettingsStore();
-	private gitStore = getGitStore();
+	private settingsStore: WorkbenchSettingsStore;
+	private gitStore: GitStore;
 	private switchCallbacks: Array<(projectPath: string) => void> = [];
 
 	private readonly api: WorkspaceApi;
+	private readonly uiKey: string | undefined;
+	private readonly remote: boolean;
 
-	constructor(api: WorkspaceApi = transport()) {
+	constructor(api: WorkspaceApi = transport(), options: WorkspaceStoreOptions = {}) {
 		this.api = api;
+		this.uiKey = options.uiKey;
+		this.remote = options.remote ?? false;
+		this.settingsStore = options.settings ?? getWorkbenchSettingsStore();
+		this.gitStore = options.git ?? getGitStore();
+		this.ui = loadUi(this.uiKey);
+		this.seed = !hasSavedUi(this.uiKey);
+	}
+
+	/** Native terminals are this machine's, so a remote server's workspaces open in xterm. */
+	private get renderer(): TerminalRenderer {
+		return this.remote ? 'xterm' : this.settingsStore.terminalRenderer;
 	}
 
 	/** False while the snapshot stream is down and retrying: what's shown may be stale. */
@@ -160,7 +186,7 @@ export class WorkspaceStore {
 	private setUi(ui: WorkspaceUi): void {
 		for (const paneId of this.ui.chatPanes) if (!ui.chatPanes.includes(paneId)) releaseChat(paneId);
 		this.ui = ui;
-		saveUi(ui);
+		saveUi(ui, this.uiKey);
 	}
 
 	/** Send one command; a refusal is shown, never thrown. */
@@ -336,7 +362,7 @@ export class WorkspaceStore {
 			type: 'openWorkspace',
 			projectPath: project.path,
 			projectName: project.name,
-			renderer: this.settingsStore.terminalRenderer
+			renderer: this.renderer
 		});
 	}
 
@@ -351,7 +377,7 @@ export class WorkspaceStore {
 			projectName: project.name,
 			worktreePath,
 			branch,
-			renderer: this.settingsStore.terminalRenderer
+			renderer: this.renderer
 		});
 	}
 
