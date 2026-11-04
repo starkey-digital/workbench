@@ -32,12 +32,19 @@ export class NewProjectFlow {
 	constructor(store: ControlPlaneStore, start?: string) {
 		this.store = store;
 		this.browser = new FolderBrowser((path) => store.listFolders(path));
-		void this.browser.open(start?.trim() || undefined);
+		void this.openStart(start?.trim() || undefined);
 	}
 
-	/** The folder being browsed: where a new or cloned project goes. */
+	/** `start`, else home: a saved folder that has gone mustn't leave nothing to browse. */
+	private async openStart(start?: string) {
+		await this.browser.open(start);
+		if (start && !this.browser.listing) await this.browser.open();
+	}
+
+	/** The folder being browsed: where a new or cloned project goes. None while another
+	 *  loads, so nothing lands in the folder just left. */
 	get here(): string | null {
-		return this.browser.listing?.path ?? null;
+		return this.browser.loading ? null : (this.browser.listing?.path ?? null);
 	}
 
 	get hereIsProject(): boolean {

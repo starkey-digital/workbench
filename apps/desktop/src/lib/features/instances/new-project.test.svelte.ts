@@ -47,6 +47,17 @@ describe('NewProjectFlow', () => {
 		expect(home.here).toBe('/home/me');
 	});
 
+	it("falls back to home when the start folder can't be listed", async () => {
+		const { store } = setup();
+		const list = store.listFolders.bind(store);
+		vi.spyOn(store, 'listFolders').mockImplementation((path) =>
+			path === '/gone' ? Promise.reject(new Error('no such folder')) : list(path)
+		);
+		const flow = new NewProjectFlow(store, '/gone');
+		await ready(flow);
+		expect(flow.here).toBe('/home/me');
+	});
+
 	it('adds the folder shown, and knows one that is already a project', async () => {
 		const { store, calls } = setup([{ name: 'me', path: '/home/me/' }]);
 		const flow = new NewProjectFlow(store);

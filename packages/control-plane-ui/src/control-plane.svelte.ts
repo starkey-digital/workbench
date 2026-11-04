@@ -70,8 +70,12 @@ export class ControlPlaneStore {
 
 	/** The project edits throw, so the form that sent one can show why it failed. */
 	async addProject(edit: ProjectEdit): Promise<ProjectConfig> {
-		const project = await this.transport.invoke('add_project', { edit });
-		this.projects = [...this.projects, project];
+		return this.added(await this.transport.invoke('add_project', { edit }));
+	}
+
+	/** `project` saved on the server; a refresh that overlapped may have listed it already. */
+	private added(project: ProjectConfig): ProjectConfig {
+		this.projects = [...this.projects.filter((p) => p.path !== project.path), project];
 		return project;
 	}
 
@@ -98,9 +102,7 @@ export class ControlPlaneStore {
 
 	/** Clones a repository on the server's machine and adds it as a project. */
 	async cloneProject(request: CloneProjectRequest): Promise<ProjectConfig> {
-		const project = await this.transport.invoke('clone_project', { request });
-		this.projects = [...this.projects, project];
-		return project;
+		return this.added(await this.transport.invoke('clone_project', { request }));
 	}
 
 	/** The repositories the server's `gh` login reaches. */
