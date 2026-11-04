@@ -11,6 +11,7 @@
 	import ConfirmDialog from '$components/ConfirmDialog.svelte';
 	import { ConfirmAction } from '$lib/utils/confirm-action.svelte';
 	import {
+		ALL_INTERFACES,
 		pairingAddresses,
 		startServer,
 		stopServer,
@@ -24,7 +25,7 @@
 	import SettingsRow from './SettingsRow.svelte';
 	import SettingsSection from './SettingsSection.svelte';
 	import ServerPairingDialog from './ServerPairingDialog.svelte';
-	import { ALL_INTERFACES, boundPort, pairingUrl, reachableAddresses } from './server-pairing';
+	import { boundHost, boundPort, pairingUrl, reachableAddresses } from './server-pairing';
 
 	const store = getWorkbenchSettingsStore();
 
@@ -46,23 +47,32 @@
 			value: a.address,
 			label: `${a.address} (${a.interface}${a.tailscale ? ', Tailscale' : ''})`
 		}));
-		const choices = [{ value: ALL_INTERFACES, label: 'All interfaces (0.0.0.0)' }, ...own];
+		const choices = [
+			{ value: ALL_INTERFACES, label: `All interfaces (${ALL_INTERFACES})` },
+			...own
+		];
 		for (const extra of ['127.0.0.1', store.serverBind])
 			if (!choices.some((c) => c.value === extra)) choices.push({ value: extra, label: extra });
 		return choices;
 	});
 
-	/** Full URLs to give another device, on the port it's bound to (else the saved one). */
+	/** Where another device reaches the running server: its live address, not the saved one. */
+	const reachable = $derived.by(() => {
+		const host = boundHost(server.address);
+		const port = boundPort(server.address);
+		if (!server.running || host === null || port === null) return null;
+		return { port, addresses: reachableAddresses(host, addresses) };
+	});
 	const urls = $derived(
-		reachableAddresses(store.serverBind, addresses).map((a) => ({
-			...a,
-			url: pairingUrl(a.address, boundPort(server.address) ?? store.serverPort)
-		}))
+		reachable?.addresses.map((a) => ({ ...a, url: pairingUrl(a.address, reachable.port) })) ?? []
 	);
 
 	onMount(async () => {
 		try {
 			server = await serverStatus();
+			// The app's start at launch failed, e.g. a saved address this machine no longer has.
+			if (store.serverMode && !server.running)
+				serverError = `Server mode is on but not listening on ${store.serverBind}. Pick another address, or turn it off and on.`;
 		} catch {
 			/* leave as not-running */
 		}
@@ -91,13 +101,19 @@
 		}
 	}
 
-	/** Restart a running LAN server so a new port or address takes effect. */
-	async function restartServer() {
+	/** Save `key`, then (re)start the server so it takes effect: also after a failed start. */
+	async function applyConnection<K extends 'serverPort' | 'serverBind'>(
+		key: K,
+		value: (typeof store)[K]
+	) {
 		serverError = null;
 		try {
-			// Ask Rust, not the status cached at mount, whether it's running.
-			if (!(await serverStatus()).running) return;
-			await stopServer();
+			store.set(key, value);
+			await store.save();
+			// The main window saves settings too; keep its copy current.
+			await emit('settings:changed');
+			if (!store.serverMode) return;
+			if ((await serverStatus()).running) await stopServer();
 			server = await startServer(
 				store.serverBind,
 				store.serverPort,
@@ -105,22 +121,14 @@
 			);
 		} catch (e) {
 			serverError = e instanceof Error ? e.message : String(e);
-			server = stoppedServer;
+			server = await serverStatus().catch(() => stoppedServer);
 		}
 	}
 
-	async function applyServerPort(value: string) {
+	function applyServerPort(value: string) {
 		const port = Number(value);
-		if (!Number.isInteger(port) || port < 1 || port > 65535) return;
-		store.set('serverPort', port);
-		await store.save();
-		await restartServer();
-	}
-
-	async function applyServerBind(bind: string) {
-		store.set('serverBind', bind);
-		await store.save();
-		await restartServer();
+		if (Number.isInteger(port) && port >= 1 && port <= 65535)
+			void applyConnection('serverPort', port);
 	}
 
 	/** Rust saves the new token and restarts a running server, cutting off old clients. */
@@ -138,8 +146,12 @@
 				serverError = 'Start server mode to pair a phone.';
 				return;
 			}
-			addresses = await pairingAddresses();
-			pairing = { addresses: reachableAddresses(store.serverBind, addresses), port };
+			const reachableNow = reachableAddresses(boundHost(server.address) ?? '', addresses);
+			if (!reachableNow.length) {
+				serverError = 'It listens on this machine only: pick another address to pair a phone.';
+				return;
+			}
+			pairing = { addresses: reachableNow, port };
 			pairingOpen = true;
 		} catch (e) {
 			serverError = e instanceof Error ? e.message : String(e);
@@ -190,7 +202,11 @@
 		description="All interfaces, or only one address such as Tailscale's. Restarts a running server when changed."
 	>
 		{#snippet control()}
-			<Select.Root type="single" value={store.serverBind} onValueChange={applyServerBind}>
+			<Select.Root
+				type="single"
+				value={store.serverBind}
+				onValueChange={(bind) => applyConnection('serverBind', bind)}
+			>
 				<Select.Trigger class="h-8 w-56 font-mono text-xs" aria-label="Listen on">
 					{bindChoices.find((c) => c.value === store.serverBind)?.label ?? store.serverBind}
 				</Select.Trigger>

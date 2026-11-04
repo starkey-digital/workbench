@@ -253,8 +253,9 @@
 					workbenchSettingsStore.serverPort,
 					await workbenchSettingsStore.ensureServerToken()
 				);
-			} catch {
-				/* server failed to start (e.g. port in use); surfaced in settings */
+			} catch (e) {
+				// E.g. port in use, or a saved address this machine no longer has; settings says so too.
+				log.warn('ServerMode', 'Server mode failed to start:', e);
 			}
 		}
 	});

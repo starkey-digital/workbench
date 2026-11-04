@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { encode } from 'uqr';
 import { buildPairingUri } from '@workbench/transport';
 import {
+	boundHost,
 	boundPort,
 	defaultPairingAddress,
 	pairingQr,
@@ -49,10 +50,22 @@ describe('reachableAddresses', () => {
 		expect(reachableAddresses('100.64.0.2', [ts, lan])).toEqual([ts]);
 	});
 
-	it("keeps an address this machine doesn't list, such as loopback", () => {
-		expect(reachableAddresses('127.0.0.1', [ts, lan])).toEqual([
-			{ interface: '', address: '127.0.0.1', tailscale: false }
+	it("keeps an address this machine doesn't list", () => {
+		expect(reachableAddresses('10.0.0.9', [ts, lan])).toEqual([
+			{ interface: '', address: '10.0.0.9', tailscale: false }
 		]);
+	});
+
+	it('is nothing for loopback, which no other device reaches', () => {
+		expect(reachableAddresses('127.0.0.1', [ts, lan])).toEqual([]);
+	});
+});
+
+describe('boundHost', () => {
+	it('drops the port and IPv6 brackets', () => {
+		expect(boundHost('100.64.0.2:4317')).toBe('100.64.0.2');
+		expect(boundHost('[::]:4317')).toBe('::');
+		expect(boundHost(null)).toBeNull();
 	});
 });
 

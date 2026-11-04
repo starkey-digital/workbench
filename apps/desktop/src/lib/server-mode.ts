@@ -5,6 +5,9 @@
  */
 import { invoke } from '@tauri-apps/api/core';
 
+/** The LAN server's bind for every interface (the default). */
+export const ALL_INTERFACES = '0.0.0.0';
+
 export interface ServerStatus {
 	running: boolean;
 	address: string | null;

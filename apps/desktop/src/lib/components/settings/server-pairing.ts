@@ -1,6 +1,6 @@
 import { encode } from 'uqr';
 import { buildPairingUri } from '@workbench/transport';
-import type { PairingAddress } from '$lib/server-mode';
+import { ALL_INTERFACES, type PairingAddress } from '$lib/server-mode';
 
 /** Port from a bound socket address (`0.0.0.0:4317`, `[::]:4317`), or null. */
 export function boundPort(address: string | null): number | null {
@@ -13,12 +13,16 @@ export function defaultPairingAddress(addresses: PairingAddress[]): string | und
 	return addresses[0]?.address;
 }
 
-/** Listening on every interface. */
-export const ALL_INTERFACES = '0.0.0.0';
+/** Host from a bound socket address (`100.64.0.2:4317` → `100.64.0.2`, `[::]:4317` → `::`). */
+export function boundHost(address: string | null): string | null {
+	return address?.replace(/:\d+$/, '').replace(/^\[(.*)\]$/, '$1') || null;
+}
 
-/** The addresses a server listening on `bind` answers on, from this machine's. */
+/** The addresses another device reaches a server listening on `bind` at, from this
+ *  machine's: none for loopback. */
 export function reachableAddresses(bind: string, addresses: PairingAddress[]): PairingAddress[] {
 	if (bind === ALL_INTERFACES) return addresses;
+	if (bind.startsWith('127.') || bind === '::1') return [];
 	const own = addresses.filter((a) => a.address === bind);
 	return own.length ? own : [{ interface: '', address: bind, tailscale: false }];
 }
