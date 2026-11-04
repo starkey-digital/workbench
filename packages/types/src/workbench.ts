@@ -472,6 +472,8 @@ export interface WorkbenchSettings {
 	accentColor?: AccentColor;
 	serverMode?: boolean;
 	serverPort?: number;
+	/** Address the LAN server listens on: `0.0.0.0` (every interface) or one of this machine's. */
+	serverBind?: string;
 	/** Bearer token the LAN server requires; generated on first enable. */
 	serverToken?: string | null;
 	settingsWindowBounds?: SettingsWindowBounds | null;

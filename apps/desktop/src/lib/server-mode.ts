@@ -5,6 +5,9 @@
  */
 import { invoke } from '@tauri-apps/api/core';
 
+/** The LAN server's bind for every interface (the default). */
+export const ALL_INTERFACES = '0.0.0.0';
+
 export interface ServerStatus {
 	running: boolean;
 	address: string | null;
@@ -15,9 +18,9 @@ export interface ServerStatus {
 	token: string | null;
 }
 
-/** Start the LAN server. Rust refuses a missing or weak (< 32 chars) token. */
-export function startServer(port: number, token: string): Promise<ServerStatus> {
-	return invoke<ServerStatus>('start_server', { port, token });
+/** Start the LAN server on `bind`. Rust refuses a missing or weak (< 32 chars) token. */
+export function startServer(bind: string, port: number, token: string): Promise<ServerStatus> {
+	return invoke<ServerStatus>('start_server', { bind, port, token });
 }
 
 /**

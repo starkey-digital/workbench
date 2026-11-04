@@ -1,6 +1,6 @@
 import { encode } from 'uqr';
 import { buildPairingUri } from '@workbench/transport';
-import type { PairingAddress } from '$lib/server-mode';
+import { ALL_INTERFACES, type PairingAddress } from '$lib/server-mode';
 
 /** Port from a bound socket address (`0.0.0.0:4317`, `[::]:4317`), or null. */
 export function boundPort(address: string | null): number | null {
@@ -11,6 +11,20 @@ export function boundPort(address: string | null): number | null {
 /** The address pre-selected in the pairing dialog (already ranked Tailscale-first by Rust). */
 export function defaultPairingAddress(addresses: PairingAddress[]): string | undefined {
 	return addresses[0]?.address;
+}
+
+/** Host from a bound socket address (`100.64.0.2:4317` → `100.64.0.2`, `[::]:4317` → `::`). */
+export function boundHost(address: string | null): string | null {
+	return address?.replace(/:\d+$/, '').replace(/^\[(.*)\]$/, '$1') || null;
+}
+
+/** The addresses another device reaches a server listening on `bind` at, from this
+ *  machine's: none for loopback. */
+export function reachableAddresses(bind: string, addresses: PairingAddress[]): PairingAddress[] {
+	if (bind === ALL_INTERFACES) return addresses;
+	if (bind.startsWith('127.') || bind === '::1') return [];
+	const own = addresses.filter((a) => a.address === bind);
+	return own.length ? own : [{ interface: '', address: bind, tailscale: false }];
 }
 
 export function pairingUrl(host: string, port: number): string {

@@ -17,6 +17,7 @@
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import XIcon from '@lucide/svelte/icons/x';
 	import InstanceSwitcher from '$features/instances/InstanceSwitcher.svelte';
+	import type { RemoteInstance } from '$features/instances/instances.svelte';
 	import * as ContextMenu from '@workbench/ui/context-menu';
 	import * as DropdownMenu from '@workbench/ui/dropdown-menu';
 	import { projectSections } from '@workbench/control-plane-ui';
@@ -56,7 +57,7 @@
 	}: {
 		sidebarCollapsed: boolean;
 		onToggleSidebar: () => void;
-		onConnect: () => void;
+		onConnect: (remote?: RemoteInstance) => void;
 	} = $props();
 
 	// Explicit per-project toggles; projects the user never toggled follow "is active".

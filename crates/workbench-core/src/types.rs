@@ -356,6 +356,9 @@ pub struct WorkbenchSettings {
     pub server_mode: bool,
     #[serde(default = "default_server_port")]
     pub server_port: u16,
+    /// Address the LAN server listens on: `0.0.0.0` (every interface) or one of this machine's.
+    #[serde(default = "default_server_bind")]
+    pub server_bind: String,
     /// Bearer token the LAN server requires. Generated on first enable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server_token: Option<String>,
@@ -417,6 +420,10 @@ pub struct TransferProgress {
 
 fn default_server_port() -> u16 {
     4317
+}
+
+fn default_server_bind() -> String {
+    "0.0.0.0".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -493,6 +500,7 @@ impl Default for WorkbenchSettings {
             accent_color: default_accent_color(),
             server_mode: false,
             server_port: default_server_port(),
+            server_bind: default_server_bind(),
             server_token: None,
             settings_window_bounds: None,
             claude_accounts: Vec::new(),

@@ -81,7 +81,7 @@
 						<Select.Root
 							type="single"
 							bind:value={flow.serverId}
-							onValueChange={() => (flow.browser = null)}
+							onValueChange={() => flow.chooseServer(instances.remotes)}
 							disabled={flow.copying}
 						>
 							<Select.Trigger class="w-full" aria-label="Server">
@@ -172,6 +172,16 @@
 								Browse…
 							</Button>
 						</div>
+						{#if server && flow.parent.trim() !== (server.config.copyFolder ?? '')}
+							<label class="flex items-center gap-2 text-xs text-muted-foreground">
+								<Checkbox
+									checked={flow.makeDefault}
+									onCheckedChange={(v) => (flow.makeDefault = v === true)}
+									disabled={flow.copying}
+								/>
+								Make this the default for {server.config.name}
+							</label>
+						{/if}
 					{/if}
 				</div>
 				<div class="space-y-2">
@@ -246,7 +256,8 @@
 				<Button
 					disabled={!server || flow.copying || !!flow.browser}
 					title={flow.browser ? 'Pick a folder first' : undefined}
-					onclick={() => flow.copy(instances.remotes)}
+					onclick={() =>
+						flow.copy(instances.remotes, (id, copyFolder) => instances.update(id, { copyFolder }))}
 				>
 					{#if flow.copying}
 						<LoaderIcon class="size-3.5 animate-spin" />

@@ -27,7 +27,7 @@ import {
 	isCodexApprovalPolicy,
 	isCodexSandboxMode
 } from '$lib/utils/claude';
-import { rotateServerToken } from '$lib/server-mode';
+import { ALL_INTERFACES, rotateServerToken } from '$lib/server-mode';
 import { log } from '$lib/log';
 
 /** Fields on WorkbenchSettingsStore that can be updated via the generic `set()` method. */
@@ -75,6 +75,7 @@ export class WorkbenchSettingsStore {
 	accentColor: AccentColor = $state<AccentColor>('violet');
 	serverMode = $state(false);
 	serverPort = $state(4317);
+	serverBind = $state(ALL_INTERFACES);
 	serverToken: string | null = $state(null);
 	settingsWindowBounds: SettingsWindowBounds | null = $state(null);
 	claudeAccounts: ClaudeAccount[] = $state([]);
@@ -145,6 +146,7 @@ export class WorkbenchSettingsStore {
 		this.accentColor = settings.accentColor ?? 'violet';
 		this.serverMode = settings.serverMode ?? false;
 		this.serverPort = settings.serverPort ?? 4317;
+		this.serverBind = settings.serverBind ?? ALL_INTERFACES;
 		this.serverToken = settings.serverToken ?? null;
 		this.settingsWindowBounds = settings.settingsWindowBounds ?? null;
 		this.claudeAccounts = Array.isArray(settings.claudeAccounts) ? settings.claudeAccounts : [];
@@ -328,6 +330,7 @@ export class WorkbenchSettingsStore {
 			accentColor: this.accentColor,
 			serverMode: this.serverMode,
 			serverPort: this.serverPort,
+			serverBind: this.serverBind,
 			serverToken: this.serverToken,
 			settingsWindowBounds: this.settingsWindowBounds,
 			claudeAccounts: this.claudeAccounts,

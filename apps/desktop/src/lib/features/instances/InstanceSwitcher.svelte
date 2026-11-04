@@ -2,14 +2,17 @@
 	import * as DropdownMenu from '@workbench/ui/dropdown-menu';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import MonitorIcon from '@lucide/svelte/icons/monitor';
+	import PencilIcon from '@lucide/svelte/icons/pencil';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import XIcon from '@lucide/svelte/icons/x';
 	import { getInstancesStore } from '$stores/context';
-	import type { InstanceStatus } from './instances.svelte';
+	import type { InstanceStatus, RemoteInstance } from './instances.svelte';
 
-	let { onConnect }: { onConnect: () => void } = $props();
+	/** Opens the connect dialog: to add a server, or to edit `remote`. */
+	let { onConnect }: { onConnect: (remote?: RemoteInstance) => void } = $props();
 
 	const instances = getInstancesStore();
+	let menuOpen = $state(false);
 
 	const activeName = $derived(
 		instances.activeIsLocal
@@ -27,7 +30,7 @@
 	}
 </script>
 
-<DropdownMenu.Root>
+<DropdownMenu.Root bind:open={menuOpen}>
 	<DropdownMenu.Trigger
 		class="flex min-w-0 flex-1 items-center gap-1.5 rounded px-1.5 py-1 text-left transition-colors hover:bg-wb-panel2"
 	>
@@ -57,7 +60,20 @@
 					<span class="flex-1 truncate">{remote.config.name}</span>
 					<span class="text-[10px] text-wb-ink-soft">{remote.status}</span>
 					<button
-						class="ml-1 rounded p-0.5 text-wb-ink-soft hover:text-wb-err"
+						class="ml-1 rounded p-0.5 text-wb-ink-soft hover:text-wb-ink"
+						title="Edit"
+						aria-label="Edit {remote.config.name}"
+						onclick={(e) => {
+							// Not a menu item (that would switch to it): close the menu by hand under the dialog.
+							e.stopPropagation();
+							menuOpen = false;
+							onConnect(remote);
+						}}
+					>
+						<PencilIcon class="size-3" />
+					</button>
+					<button
+						class="rounded p-0.5 text-wb-ink-soft hover:text-wb-err"
 						title="Remove"
 						onclick={(e) => {
 							e.stopPropagation();
@@ -71,7 +87,7 @@
 		{/if}
 
 		<DropdownMenu.Separator />
-		<DropdownMenu.Item onSelect={onConnect}>
+		<DropdownMenu.Item onSelect={() => onConnect()}>
 			<PlusIcon class="size-3.5" />
 			<span>Connect instance…</span>
 		</DropdownMenu.Item>

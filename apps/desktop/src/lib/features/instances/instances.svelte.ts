@@ -20,6 +20,8 @@ export interface RemoteInstanceConfig {
 	name: string;
 	url: string;
 	token?: string;
+	/** Where "Copy to server" puts projects by default. */
+	copyFolder?: string;
 }
 
 /** A connected remote Workbench server: its config, live status, and a
@@ -33,7 +35,8 @@ export function probeHealth(base: string, token?: string): Promise<Response> {
 }
 
 export class RemoteInstance {
-	readonly config: RemoteInstanceConfig;
+	/** Replaced in place when only its name or copy folder change. */
+	config: RemoteInstanceConfig;
 	status = $state<InstanceStatus>('connecting');
 	readonly store: ControlPlaneStore;
 	/** The host's Workbench version, and installing its update from here. */
@@ -41,9 +44,10 @@ export class RemoteInstance {
 	private updateCheckedAt = 0;
 	private readonly transport: ControlPlaneTransport;
 	private remoteSession: { session: RemoteSession; destroy: () => void } | null = null;
+	private disposed = false;
 
 	constructor(config: RemoteInstanceConfig) {
-		this.config = config;
+		this.config = $state.raw(config);
 		this.transport = createHttpTransport({ baseUrl: config.url, token: config.token });
 		this.store = new ControlPlaneStore(this.transport);
 		this.hostUpdate = new HostUpdate(this.transport);
@@ -74,6 +78,7 @@ export class RemoteInstance {
 
 	/** The server was removed. */
 	dispose(): void {
+		this.disposed = true;
 		this.remoteSession?.session.dispose();
 		this.remoteSession?.destroy();
 		this.remoteSession = null;
@@ -90,7 +95,8 @@ export class RemoteInstance {
 		} catch {
 			this.status = 'offline';
 		}
-		if (this.status !== 'online') return;
+		// Removed or replaced while the probe was out: its store and update are retired.
+		if (this.status !== 'online' || this.disposed) return;
 		// While it installs, every poll checks: the host answering on another version ends it.
 		// Otherwise now and then, so a release out since connecting shows up.
 		const now = Date.now();
@@ -111,12 +117,13 @@ const STORAGE_KEY = 'workbench.instances';
 
 function isConfig(c: unknown): c is RemoteInstanceConfig {
 	if (!c || typeof c !== 'object') return false;
-	const { id, name, url, token } = c as Record<string, unknown>;
+	const { id, name, url, token, copyFolder } = c as Record<string, unknown>;
 	return (
 		typeof id === 'string' &&
 		typeof name === 'string' &&
 		typeof url === 'string' &&
-		(token === undefined || typeof token === 'string')
+		(token === undefined || typeof token === 'string') &&
+		(copyFolder === undefined || typeof copyFolder === 'string')
 	);
 }
 
@@ -171,6 +178,26 @@ export class InstancesStore {
 		this.persist();
 		void instance.checkHealth();
 		return instance;
+	}
+
+	/** Change a server's settings. A new URL or token reconnects it (a fresh transport and
+	 *  workspaces); a new name or copy folder doesn't. A new URL may be another host, so it
+	 *  also gets a new id: nothing cached under the old one (tab layout, plan usage) carries over. */
+	update(id: string, changes: Partial<Omit<RemoteInstanceConfig, 'id'>>): void {
+		const old = this.remotes.find((r) => r.config.id === id);
+		if (!old) return;
+		const config = { ...old.config, ...changes };
+		if (config.url === old.config.url && config.token === old.config.token) {
+			old.config = config;
+		} else {
+			old.dispose();
+			if (config.url !== old.config.url) config.id = uid();
+			const instance = new RemoteInstance(config);
+			this.remotes = this.remotes.map((r) => (r === old ? instance : r));
+			if (this.activeId === id) this.activeId = config.id;
+			void instance.checkHealth();
+		}
+		this.persist();
 	}
 
 	remove(id: string): void {
