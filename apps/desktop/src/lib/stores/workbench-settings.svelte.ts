@@ -75,6 +75,7 @@ export class WorkbenchSettingsStore {
 	accentColor: AccentColor = $state<AccentColor>('violet');
 	serverMode = $state(false);
 	serverPort = $state(4317);
+	serverBind = $state('0.0.0.0');
 	serverToken: string | null = $state(null);
 	settingsWindowBounds: SettingsWindowBounds | null = $state(null);
 	claudeAccounts: ClaudeAccount[] = $state([]);
@@ -145,6 +146,7 @@ export class WorkbenchSettingsStore {
 		this.accentColor = settings.accentColor ?? 'violet';
 		this.serverMode = settings.serverMode ?? false;
 		this.serverPort = settings.serverPort ?? 4317;
+		this.serverBind = settings.serverBind ?? '0.0.0.0';
 		this.serverToken = settings.serverToken ?? null;
 		this.settingsWindowBounds = settings.settingsWindowBounds ?? null;
 		this.claudeAccounts = Array.isArray(settings.claudeAccounts) ? settings.claudeAccounts : [];
@@ -328,6 +330,7 @@ export class WorkbenchSettingsStore {
 			accentColor: this.accentColor,
 			serverMode: this.serverMode,
 			serverPort: this.serverPort,
+			serverBind: this.serverBind,
 			serverToken: this.serverToken,
 			settingsWindowBounds: this.settingsWindowBounds,
 			claudeAccounts: this.claudeAccounts,

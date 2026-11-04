@@ -13,6 +13,16 @@ export function defaultPairingAddress(addresses: PairingAddress[]): string | und
 	return addresses[0]?.address;
 }
 
+/** Listening on every interface. */
+export const ALL_INTERFACES = '0.0.0.0';
+
+/** The addresses a server listening on `bind` answers on, from this machine's. */
+export function reachableAddresses(bind: string, addresses: PairingAddress[]): PairingAddress[] {
+	if (bind === ALL_INTERFACES) return addresses;
+	const own = addresses.filter((a) => a.address === bind);
+	return own.length ? own : [{ interface: '', address: bind, tailscale: false }];
+}
+
 export function pairingUrl(host: string, port: number): string {
 	return `http://${host}:${port}`;
 }

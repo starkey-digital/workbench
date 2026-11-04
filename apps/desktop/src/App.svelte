@@ -249,6 +249,7 @@
 		if (workbenchSettingsStore.serverMode) {
 			try {
 				await startServer(
+					workbenchSettingsStore.serverBind,
 					workbenchSettingsStore.serverPort,
 					await workbenchSettingsStore.ensureServerToken()
 				);

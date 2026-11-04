@@ -15,9 +15,9 @@ export interface ServerStatus {
 	token: string | null;
 }
 
-/** Start the LAN server. Rust refuses a missing or weak (< 32 chars) token. */
-export function startServer(port: number, token: string): Promise<ServerStatus> {
-	return invoke<ServerStatus>('start_server', { port, token });
+/** Start the LAN server on `bind`. Rust refuses a missing or weak (< 32 chars) token. */
+export function startServer(bind: string, port: number, token: string): Promise<ServerStatus> {
+	return invoke<ServerStatus>('start_server', { bind, port, token });
 }
 
 /**

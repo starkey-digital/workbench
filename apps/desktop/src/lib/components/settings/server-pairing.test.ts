@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { encode } from 'uqr';
 import { buildPairingUri } from '@workbench/transport';
-import { boundPort, defaultPairingAddress, pairingQr, pairingUrl } from './server-pairing';
+import {
+	boundPort,
+	defaultPairingAddress,
+	pairingQr,
+	pairingUrl,
+	reachableAddresses
+} from './server-pairing';
 
 const TOKEN = 'f'.repeat(64);
 
@@ -28,6 +34,25 @@ describe('defaultPairingAddress', () => {
 			])
 		).toBe('100.100.1.1');
 		expect(defaultPairingAddress([])).toBeUndefined();
+	});
+});
+
+describe('reachableAddresses', () => {
+	const lan = { interface: 'en0', address: '192.168.1.5', tailscale: false };
+	const ts = { interface: 'utun4', address: '100.64.0.2', tailscale: true };
+
+	it('is every address when listening on all interfaces', () => {
+		expect(reachableAddresses('0.0.0.0', [ts, lan])).toEqual([ts, lan]);
+	});
+
+	it('is only the address listened on', () => {
+		expect(reachableAddresses('100.64.0.2', [ts, lan])).toEqual([ts]);
+	});
+
+	it("keeps an address this machine doesn't list, such as loopback", () => {
+		expect(reachableAddresses('127.0.0.1', [ts, lan])).toEqual([
+			{ interface: '', address: '127.0.0.1', tailscale: false }
+		]);
 	});
 });
 

@@ -7,6 +7,7 @@
 	import { emit } from '@tauri-apps/api/event';
 	import { Button } from '@workbench/ui/button';
 	import { Input } from '@workbench/ui/input';
+	import * as Select from '@workbench/ui/select';
 	import ConfirmDialog from '$components/ConfirmDialog.svelte';
 	import { ConfirmAction } from '$lib/utils/confirm-action.svelte';
 	import {
@@ -23,7 +24,7 @@
 	import SettingsRow from './SettingsRow.svelte';
 	import SettingsSection from './SettingsSection.svelte';
 	import ServerPairingDialog from './ServerPairingDialog.svelte';
-	import { boundPort } from './server-pairing';
+	import { ALL_INTERFACES, boundPort, pairingUrl, reachableAddresses } from './server-pairing';
 
 	const store = getWorkbenchSettingsStore();
 
@@ -31,16 +32,44 @@
 	let server: ServerStatus = $state(stoppedServer);
 	let serverError: string | null = $state(null);
 	let tokenRevealed = $state(false);
-	let tokenCopied = $state(false);
+	/** What was just copied, for its check mark. */
+	let copied = $state<string | null>(null);
+	/** This machine's addresses, Tailscale first. */
+	let addresses = $state<PairingAddress[]>([]);
 	const tokenRotation = new ConfirmAction<true>();
 	let pairing = $state<{ addresses: PairingAddress[]; port: number } | null>(null);
 	let pairingOpen = $state(false);
+
+	/** Every address it can listen on: all, this machine's, loopback, and the saved one. */
+	const bindChoices = $derived.by(() => {
+		const own = addresses.map((a) => ({
+			value: a.address,
+			label: `${a.address} (${a.interface}${a.tailscale ? ', Tailscale' : ''})`
+		}));
+		const choices = [{ value: ALL_INTERFACES, label: 'All interfaces (0.0.0.0)' }, ...own];
+		for (const extra of ['127.0.0.1', store.serverBind])
+			if (!choices.some((c) => c.value === extra)) choices.push({ value: extra, label: extra });
+		return choices;
+	});
+
+	/** Full URLs to give another device, on the port it's bound to (else the saved one). */
+	const urls = $derived(
+		reachableAddresses(store.serverBind, addresses).map((a) => ({
+			...a,
+			url: pairingUrl(a.address, boundPort(server.address) ?? store.serverPort)
+		}))
+	);
 
 	onMount(async () => {
 		try {
 			server = await serverStatus();
 		} catch {
 			/* leave as not-running */
+		}
+		try {
+			addresses = await pairingAddresses();
+		} catch {
+			/* only "All interfaces" and loopback to choose from */
 		}
 	});
 
@@ -52,7 +81,9 @@
 			await store.save();
 			// The main window saves settings too; keep its copy of the token current.
 			await emit('settings:changed');
-			server = token ? await startServer(store.serverPort, token) : await stopServer();
+			server = token
+				? await startServer(store.serverBind, store.serverPort, token)
+				: await stopServer();
 		} catch (e) {
 			serverError = e instanceof Error ? e.message : String(e);
 			store.set('serverMode', false);
@@ -60,14 +91,18 @@
 		}
 	}
 
-	/** Restart a running LAN server so a new port takes effect. */
+	/** Restart a running LAN server so a new port or address takes effect. */
 	async function restartServer() {
 		serverError = null;
 		try {
 			// Ask Rust, not the status cached at mount, whether it's running.
 			if (!(await serverStatus()).running) return;
 			await stopServer();
-			server = await startServer(store.serverPort, await store.ensureServerToken());
+			server = await startServer(
+				store.serverBind,
+				store.serverPort,
+				await store.ensureServerToken()
+			);
 		} catch (e) {
 			serverError = e instanceof Error ? e.message : String(e);
 			server = stoppedServer;
@@ -78,6 +113,12 @@
 		const port = Number(value);
 		if (!Number.isInteger(port) || port < 1 || port > 65535) return;
 		store.set('serverPort', port);
+		await store.save();
+		await restartServer();
+	}
+
+	async function applyServerBind(bind: string) {
+		store.set('serverBind', bind);
 		await store.save();
 		await restartServer();
 	}
@@ -97,18 +138,20 @@
 				serverError = 'Start server mode to pair a phone.';
 				return;
 			}
-			pairing = { addresses: await pairingAddresses(), port };
+			addresses = await pairingAddresses();
+			pairing = { addresses: reachableAddresses(store.serverBind, addresses), port };
 			pairingOpen = true;
 		} catch (e) {
 			serverError = e instanceof Error ? e.message : String(e);
 		}
 	}
 
-	async function copyServerToken() {
-		if (!store.serverToken) return;
-		await navigator.clipboard.writeText(store.serverToken);
-		tokenCopied = true;
-		setTimeout(() => (tokenCopied = false), 1500);
+	async function copy(text: string) {
+		await navigator.clipboard.writeText(text);
+		copied = text;
+		setTimeout(() => {
+			if (copied === text) copied = null;
+		}, 1500);
 	}
 </script>
 
@@ -142,6 +185,24 @@
 </SettingsSection>
 
 <SettingsSection title="Connection">
+	<SettingsRow
+		label="Listen on"
+		description="All interfaces, or only one address such as Tailscale's. Restarts a running server when changed."
+	>
+		{#snippet control()}
+			<Select.Root type="single" value={store.serverBind} onValueChange={applyServerBind}>
+				<Select.Trigger class="h-8 w-56 font-mono text-xs" aria-label="Listen on">
+					{bindChoices.find((c) => c.value === store.serverBind)?.label ?? store.serverBind}
+				</Select.Trigger>
+				<Select.Content>
+					{#each bindChoices as choice (choice.value)}
+						<Select.Item value={choice.value} class="font-mono text-xs">{choice.label}</Select.Item>
+					{/each}
+				</Select.Content>
+			</Select.Root>
+		{/snippet}
+	</SettingsRow>
+
 	<SettingsRow label="Port" description="Restarts a running server when changed.">
 		{#snippet control()}
 			<Input
@@ -154,6 +215,36 @@
 				onchange={(e) => applyServerPort((e.currentTarget as HTMLInputElement).value)}
 			/>
 		{/snippet}
+	</SettingsRow>
+
+	<SettingsRow
+		label="Addresses"
+		description="What another device connects to: copy one into its Connect instance dialog."
+	>
+		<ul class="mt-2 space-y-1">
+			{#each urls as a (a.url)}
+				<li class="flex items-center gap-2">
+					<code class="min-w-0 flex-1 font-mono text-xs break-all text-wb-ink select-all"
+						>{a.url}</code
+					>
+					{#if a.interface}
+						<span class="text-[11px] text-wb-ink-soft"
+							>{a.interface}{a.tailscale ? ' · Tailscale' : ''}</span
+						>
+					{/if}
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						aria-label="Copy {a.url}"
+						onclick={() => copy(a.url)}
+					>
+						{#if copied === a.url}<CheckIcon />{:else}<CopyIcon />{/if}
+					</Button>
+				</li>
+			{:else}
+				<li class="text-xs text-wb-ink-soft">No network addresses found.</li>
+			{/each}
+		</ul>
 	</SettingsRow>
 
 	{#if store.serverToken}
@@ -172,8 +263,13 @@
 				>
 					{#if tokenRevealed}<EyeOffIcon />{:else}<EyeIcon />{/if}
 				</Button>
-				<Button variant="ghost" size="icon-sm" aria-label="Copy token" onclick={copyServerToken}>
-					{#if tokenCopied}<CheckIcon />{:else}<CopyIcon />{/if}
+				<Button
+					variant="ghost"
+					size="icon-sm"
+					aria-label="Copy token"
+					onclick={() => store.serverToken && copy(store.serverToken)}
+				>
+					{#if copied === store.serverToken}<CheckIcon />{:else}<CopyIcon />{/if}
 				</Button>
 				<Button variant="outline" size="sm" onclick={() => tokenRotation.request(true)}>
 					Regenerate…
