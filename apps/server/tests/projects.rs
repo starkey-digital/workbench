@@ -127,4 +127,47 @@ async fn a_client_adds_renames_and_removes_a_project() {
         .map(|p| p["name"].as_str().unwrap())
         .collect();
     assert_eq!(names, ["Renamed"]);
+
+    // A new folder, `git init`ed; it isn't a project until added.
+    let made = send(
+        reqwest::Method::POST,
+        "/fs/folders",
+        json!({ "parent": tmp.path(), "name": "fresh", "gitInit": true }),
+    )
+    .await
+    .unwrap();
+    assert!(made.status().is_success());
+    let made: String = made.json().await.unwrap();
+    assert!(std::path::Path::new(&made).join(".git").is_dir());
+    let taken = send(
+        reqwest::Method::POST,
+        "/fs/folders",
+        json!({ "parent": tmp.path(), "name": "fresh" }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(taken.status(), 400);
+
+    // A clone lands in the folder asked for and is registered.
+    let cloned = send(
+        reqwest::Method::POST,
+        "/projects/clone",
+        json!({ "url": made, "parent": tmp.path(), "folder": "copy" }),
+    )
+    .await
+    .unwrap();
+    assert!(cloned.status().is_success());
+    let cloned: Value = cloned.json().await.unwrap();
+    assert_eq!(cloned["name"], "copy");
+    assert!(tmp.path().join("copy/.git").is_dir());
+    changes.changed().await.unwrap();
+
+    let refused = send(
+        reqwest::Method::POST,
+        "/projects/clone",
+        json!({ "url": "--upload-pack=x", "parent": tmp.path() }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(refused.status(), 400);
 }

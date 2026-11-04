@@ -5,12 +5,12 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 
-use crate::projects::invalid;
+use crate::projects::new_project;
 use crate::types::{ProjectConfig, ProjectEdit};
 
 /// Left out when git ignores them (a tracked `build/` is source), or always in
@@ -200,29 +200,9 @@ pub fn import(
     name: &str,
     archive: impl Read,
 ) -> Result<ProjectConfig> {
-    if !matches!(
-        Path::new(folder).components().collect::<Vec<_>>()[..],
-        [Component::Normal(_)]
-    ) {
-        return invalid(format!("not a folder name: {folder}"));
-    }
-    let parent = match parent.filter(|p| !p.trim().is_empty()) {
-        Some(p) if crate::projects::is_plain_absolute(Path::new(p)) => PathBuf::from(p),
-        Some(p) => return invalid(format!("not a plain absolute path: {p}")),
-        None => crate::config::load_workbench_settings()?
-            .clone_base_dir
-            .filter(|d| Path::new(d).is_absolute())
-            .map(PathBuf::from)
-            .unwrap_or_else(crate::paths::home_dir),
-    };
-    let dest = parent.join(folder);
-    if dest.symlink_metadata().is_ok() {
-        return invalid(format!("{} already exists on this host", dest.display()));
-    }
+    let parent = new_project::parent_folder(parent)?;
     // Refused before reading the upload, not after unpacking all of it.
-    if crate::projects::is_registered(&dest.to_string_lossy())? {
-        return invalid(format!("{} is already a project here", dest.display()));
-    }
+    let dest = new_project::new_child(&parent, folder)?;
     fs::create_dir_all(&parent)?;
     // Its own per import, so two copies of one folder never share it.
     let staging = parent.join(format!(

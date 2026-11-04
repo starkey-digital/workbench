@@ -45,6 +45,33 @@ pub struct ProjectEdit {
     pub claude_account_id: Option<String>,
 }
 
+/// `POST /fs/folders`: make an empty folder for a new project.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateFolderRequest {
+    pub parent: String,
+    pub name: String,
+    /// `git init` it too.
+    #[serde(default)]
+    pub git_init: bool,
+}
+
+/// `POST /projects/clone`: clone a repository on the host and register it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloneProjectRequest {
+    pub url: String,
+    /// Unset: the host's clone folder, else home.
+    #[serde(default)]
+    pub parent: Option<String>,
+    /// Unset: the repository's name, as `git clone` picks it.
+    #[serde(default)]
+    pub folder: Option<String>,
+    /// Unset: the folder's name.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
 /// The folders inside one folder of the host, for picking a project there.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

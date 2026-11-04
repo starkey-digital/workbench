@@ -1,5 +1,13 @@
 import type { ControlPlaneTransport } from '@workbench/transport';
-import type { FolderListing, ProjectConfig, ProjectEdit, WorktreeInfo } from '@workbench/types';
+import type {
+	CloneProjectRequest,
+	CreateFolderRequest,
+	FolderListing,
+	GitHubRepo,
+	ProjectConfig,
+	ProjectEdit,
+	WorktreeInfo
+} from '@workbench/types';
 
 /**
  * Transport-driven control-plane state for a remote client's sidebar. Works against any
@@ -62,8 +70,12 @@ export class ControlPlaneStore {
 
 	/** The project edits throw, so the form that sent one can show why it failed. */
 	async addProject(edit: ProjectEdit): Promise<ProjectConfig> {
-		const project = await this.transport.invoke('add_project', { edit });
-		this.projects = [...this.projects, project];
+		return this.added(await this.transport.invoke('add_project', { edit }));
+	}
+
+	/** `project` saved on the server; a refresh that overlapped may have listed it already. */
+	private added(project: ProjectConfig): ProjectConfig {
+		this.projects = [...this.projects.filter((p) => p.path !== project.path), project];
 		return project;
 	}
 
@@ -81,6 +93,21 @@ export class ControlPlaneStore {
 	/** The subfolders of `path` on the server's machine (its home folder when absent). */
 	listFolders(path?: string): Promise<FolderListing> {
 		return this.transport.invoke('list_folders', path ? { path } : {});
+	}
+
+	/** An empty folder on the server's machine (not yet a project); answers its path. */
+	createFolder(request: CreateFolderRequest): Promise<string> {
+		return this.transport.invoke('create_folder', { request });
+	}
+
+	/** Clones a repository on the server's machine and adds it as a project. */
+	async cloneProject(request: CloneProjectRequest): Promise<ProjectConfig> {
+		return this.added(await this.transport.invoke('clone_project', { request }));
+	}
+
+	/** The repositories the server's `gh` login reaches. */
+	listGithubRepos(): Promise<GitHubRepo[]> {
+		return this.transport.invoke('github_list_repos', undefined);
 	}
 
 	async loadWorktrees(projectPath: string) {

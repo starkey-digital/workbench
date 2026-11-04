@@ -8,7 +8,10 @@ use serde_json::Value;
 
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
-use workbench_core::types::{CreateWorktreeRequest, ProjectEdit};
+use workbench_core::projects::new_project;
+use workbench_core::types::{
+    CloneProjectRequest, CreateFolderRequest, CreateWorktreeRequest, ProjectEdit,
+};
 use workbench_core::workspace::Command;
 
 pub fn router(state: AppState) -> Router {
@@ -22,7 +25,9 @@ pub fn router(state: AppState) -> Router {
                 .put(update_project)
                 .delete(remove_project),
         )
-        .route("/fs/folders", get(list_folders))
+        .route("/fs/folders", get(list_folders).post(create_folder))
+        .route("/projects/clone", post(clone_project))
+        .route("/github/repos", get(github_repos))
         .route(
             "/transfer/project",
             post(crate::transfer_routes::import_project),
@@ -211,6 +216,27 @@ async fn list_folders(Query(q): Query<OptionalPathQuery>) -> ApiResult<Json<Valu
     let listing =
         blocking(move || workbench_core::projects::list_folders(q.path.as_deref())).await?;
     Ok(Json(serde_json::to_value(listing)?))
+}
+
+/// A new project's empty folder; answers its path. The client then adds it.
+async fn create_folder(Json(req): Json<CreateFolderRequest>) -> ApiResult<Json<String>> {
+    Ok(Json(blocking(move || new_project::create_folder(req)).await?))
+}
+
+/// Clones a repository on this host and registers it.
+async fn clone_project(
+    State(state): State<AppState>,
+    Json(req): Json<CloneProjectRequest>,
+) -> ApiResult<Json<Value>> {
+    let project = blocking(move || new_project::clone(req)).await?;
+    state.projects.notify();
+    Ok(Json(serde_json::to_value(project)?))
+}
+
+/// The repositories this host's `gh` login reaches, to pick one to clone.
+async fn github_repos() -> ApiResult<Json<Value>> {
+    let repos = blocking(workbench_core::github::list_repos).await?;
+    Ok(Json(serde_json::to_value(repos)?))
 }
 
 async fn list_worktrees(Query(q): Query<PathQuery>) -> ApiResult<Json<Value>> {

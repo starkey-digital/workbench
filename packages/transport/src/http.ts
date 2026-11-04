@@ -28,6 +28,12 @@ type Req = {
 /** Adding or removing a worktree checks out or deletes a whole tree and runs hooks. */
 const WORKTREE_TIMEOUT_MS = 120_000;
 
+/** A clone downloads the whole repository; the server gives `git` an hour, so wait past it. */
+const CLONE_TIMEOUT_MS = 61 * 60_000;
+
+/** `gh api --paginate` over every org may take the server's full 60s. */
+const REPO_LIST_TIMEOUT_MS = 70_000;
+
 /**
  * Maps each control-plane command to a concrete `workbench-server` request.
  * Commands the server intentionally does not expose (saving the whole project
@@ -53,6 +59,17 @@ function toRequest<K extends keyof ControlPlaneCommands>(
 				path: '/fs/folders',
 				...(a.path ? { query: { path: String(a.path) } } : {})
 			};
+		case 'create_folder':
+			return { method: 'POST', path: '/fs/folders', body: a.request };
+		case 'clone_project':
+			return {
+				method: 'POST',
+				path: '/projects/clone',
+				body: a.request,
+				timeoutMs: CLONE_TIMEOUT_MS
+			};
+		case 'github_list_repos':
+			return { method: 'GET', path: '/github/repos', timeoutMs: REPO_LIST_TIMEOUT_MS };
 		case 'list_worktrees':
 			return { method: 'GET', path: '/projects/worktrees', query: { path: String(a.path) } };
 		case 'create_worktree':

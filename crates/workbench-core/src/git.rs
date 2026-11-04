@@ -545,7 +545,23 @@ pub fn delete_branch(repo_path: &str, branch: &str, force: bool) -> Result<()> {
 
 pub fn clone_repo(url: &str, dest_path: &str) -> Result<()> {
     let home = dirs::home_dir().unwrap_or_default();
-    git_output(&["clone", url, dest_path], &home.to_string_lossy())?;
+    // GitHub logins through `gh`, as `gh auth setup-git` would set up, so a private repo
+    // from `gh`'s list clones without that having been run. Skipped when `gh` isn't found.
+    let gh = crate::shell::tool("gh");
+    let gh = Path::new(gh.get_program());
+    let helper = gh.is_absolute().then(|| {
+        format!(
+            "credential.https://github.com.helper=!'{}' auth git-credential",
+            gh.display()
+        )
+    });
+    let mut args = Vec::new();
+    if let Some(helper) = &helper {
+        args.extend(["-c", "credential.https://github.com.helper=", "-c", helper]);
+    }
+    // `--`: a URL starting with `-` is never read as an option.
+    args.extend(["clone", "--", url, dest_path]);
+    git_output(&args, &home.to_string_lossy())?;
     Ok(())
 }
 

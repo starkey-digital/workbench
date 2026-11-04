@@ -1,7 +1,10 @@
 <script lang="ts">
 	import PanelLeftOpenIcon from '@lucide/svelte/icons/panel-left-open';
+	import PlusIcon from '@lucide/svelte/icons/plus';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import InstanceSwitcher from './InstanceSwitcher.svelte';
+	import RemoteNewProjectDialog from './RemoteNewProjectDialog.svelte';
+	import { NewProjectFlow } from './new-project.svelte';
 	import RemoteHostBar from './RemoteHostBar.svelte';
 	import RemoteProjectTree from './RemoteProjectTree.svelte';
 	import type { RemoteInstance } from './instances.svelte';
@@ -22,6 +25,9 @@
 	// Keyed by the instance in App, so this is its session for the component's life.
 	// svelte-ignore state_referenced_locally
 	const session = remoteSession(instance);
+
+	/** The open "New project" dialog's flow, made fresh each time it opens. */
+	let newProject = $state.raw<NewProjectFlow | null>(null);
 </script>
 
 <aside class="flex h-full w-full flex-col overflow-hidden border-r border-wb-hair bg-wb-panel">
@@ -38,7 +44,18 @@
 		{:else}
 			<InstanceSwitcher {onConnect} />
 			<button
-				class="ml-auto flex h-6 items-center gap-1 rounded-md border border-wb-hair px-2 font-mono text-[11px] text-wb-ink-mute transition-colors hover:bg-wb-panel2 hover:text-wb-ink"
+				class="ml-auto flex h-6 items-center gap-1 rounded-md border border-wb-hair px-2 font-mono text-[11px] text-wb-ink-mute transition-colors hover:bg-wb-panel2 hover:text-wb-ink disabled:opacity-50"
+				type="button"
+				title="New project on this server"
+				disabled={instance.status !== 'online'}
+				onclick={() =>
+					(newProject = new NewProjectFlow(instance.store, instance.config.copyFolder))}
+			>
+				<PlusIcon class="size-3" />
+				Project
+			</button>
+			<button
+				class="ml-1.5 flex h-6 items-center gap-1 rounded-md border border-wb-hair px-2 font-mono text-[11px] text-wb-ink-mute transition-colors hover:bg-wb-panel2 hover:text-wb-ink"
 				type="button"
 				onclick={() => {
 					void instance.store.refresh();
@@ -69,3 +86,11 @@
 		<RemoteHostBar {session} update={instance.hostUpdate} />
 	{/if}
 </aside>
+
+{#if newProject}
+	<RemoteNewProjectDialog
+		flow={newProject}
+		server={instance.config.name}
+		onclose={() => (newProject = null)}
+	/>
+{/if}

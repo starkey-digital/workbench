@@ -9,6 +9,8 @@ use anyhow::Result;
 
 use crate::types::{Folder, FolderListing, ProjectConfig, ProjectEdit, WorkbenchSettings};
 
+pub mod new_project;
+
 /// A change that can't be made (no such folder, already registered, an
 /// unknown account), as opposed to the config failing to load or save.
 #[derive(Debug)]
