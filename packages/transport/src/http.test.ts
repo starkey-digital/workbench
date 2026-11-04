@@ -80,6 +80,21 @@ describe('HttpTransport route mapping', () => {
 		]);
 	});
 
+	it('maps making a project to /fs/folders, /projects/clone and /github/repos', async () => {
+		const f = mockFetch(() => json({}));
+		const t = createHttpTransport({ baseUrl: 'http://host:4317' });
+		const folder = { parent: '/home/me', name: 'new', gitInit: true };
+		const clone = { url: 'https://github.com/acme/app', parent: '/home/me/Repos' };
+		await t.invoke('create_folder', { request: folder });
+		await t.invoke('clone_project', { request: clone });
+		await t.invoke('github_list_repos', undefined);
+		expect(f.mock.calls.map(([url, init]) => [init.method, url, init.body])).toEqual([
+			['POST', 'http://host:4317/fs/folders', JSON.stringify(folder)],
+			['POST', 'http://host:4317/projects/clone', JSON.stringify(clone)],
+			['GET', 'http://host:4317/github/repos', undefined]
+		]);
+	});
+
 	it('puts path in the query string for list_worktrees', async () => {
 		const f = mockFetch(() => json([]));
 		const t = createHttpTransport({ baseUrl: 'http://host:4317' });

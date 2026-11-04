@@ -15,10 +15,13 @@
 
 import type {
 	BranchInfo,
+	CloneProjectRequest,
 	CodexNotifyEvent,
+	CreateFolderRequest,
 	DiscoveredClaudeSession,
 	FolderListing,
 	GitHubRemote,
+	GitHubRepo,
 	GitInfo,
 	GitStatusResult,
 	HostUpdateStarted,
@@ -44,6 +47,12 @@ export interface ControlPlaneCommands {
 	remove_project: { args: { path: string }; result: void };
 	/** Server only: the subfolders of `path` (the host's home when absent). */
 	list_folders: { args: { path?: string }; result: FolderListing };
+	/** Server only: make an empty folder (not yet a project); answers its path. */
+	create_folder: { args: { request: CreateFolderRequest }; result: string };
+	/** Server only: clone a repository on the host and register it. */
+	clone_project: { args: { request: CloneProjectRequest }; result: ProjectConfig };
+	/** The repositories the host's `gh` login reaches. */
+	github_list_repos: { args: void; result: GitHubRepo[] };
 	list_worktrees: { args: { path: string }; result: WorktreeInfo[] };
 	create_worktree: { args: { request: unknown }; result: string };
 	remove_worktree: {

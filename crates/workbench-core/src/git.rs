@@ -545,7 +545,8 @@ pub fn delete_branch(repo_path: &str, branch: &str, force: bool) -> Result<()> {
 
 pub fn clone_repo(url: &str, dest_path: &str) -> Result<()> {
     let home = dirs::home_dir().unwrap_or_default();
-    git_output(&["clone", url, dest_path], &home.to_string_lossy())?;
+    // `--`: a URL starting with `-` is never read as an option.
+    git_output(&["clone", "--", url, dest_path], &home.to_string_lossy())?;
     Ok(())
 }
 

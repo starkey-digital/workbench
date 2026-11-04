@@ -49,6 +49,25 @@ export interface FolderListing {
 	folders: { name: string; path: string; /** Holds a `.git`. */ git: boolean }[];
 }
 
+/** `POST /fs/folders`: make an empty folder for a new project. */
+export interface CreateFolderRequest {
+	parent: string;
+	name: string;
+	/** `git init` it too. */
+	gitInit?: boolean;
+}
+
+/** `POST /projects/clone`: clone a repository on the host and register it. */
+export interface CloneProjectRequest {
+	url: string;
+	/** Absent: the host's clone folder, else home. */
+	parent?: string;
+	/** Absent: the repository's name, as `git clone` picks it. */
+	folder?: string;
+	/** Absent: the folder's name. */
+	name?: string;
+}
+
 /** A runnable entry from a project's root `package.json` `scripts`. */
 export interface PackageScript {
 	name: string;

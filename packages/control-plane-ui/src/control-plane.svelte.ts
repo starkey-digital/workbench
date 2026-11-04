@@ -1,5 +1,13 @@
 import type { ControlPlaneTransport } from '@workbench/transport';
-import type { FolderListing, ProjectConfig, ProjectEdit, WorktreeInfo } from '@workbench/types';
+import type {
+	CloneProjectRequest,
+	CreateFolderRequest,
+	FolderListing,
+	GitHubRepo,
+	ProjectConfig,
+	ProjectEdit,
+	WorktreeInfo
+} from '@workbench/types';
 
 /**
  * Transport-driven control-plane state for a remote client's sidebar. Works against any
@@ -81,6 +89,23 @@ export class ControlPlaneStore {
 	/** The subfolders of `path` on the server's machine (its home folder when absent). */
 	listFolders(path?: string): Promise<FolderListing> {
 		return this.transport.invoke('list_folders', path ? { path } : {});
+	}
+
+	/** An empty folder on the server's machine (not yet a project); answers its path. */
+	createFolder(request: CreateFolderRequest): Promise<string> {
+		return this.transport.invoke('create_folder', { request });
+	}
+
+	/** Clones a repository on the server's machine and adds it as a project. */
+	async cloneProject(request: CloneProjectRequest): Promise<ProjectConfig> {
+		const project = await this.transport.invoke('clone_project', { request });
+		this.projects = [...this.projects, project];
+		return project;
+	}
+
+	/** The repositories the server's `gh` login reaches. */
+	listGithubRepos(): Promise<GitHubRepo[]> {
+		return this.transport.invoke('github_list_repos', undefined);
 	}
 
 	async loadWorktrees(projectPath: string) {
