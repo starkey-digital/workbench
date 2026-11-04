@@ -16,7 +16,7 @@
 		instance: RemoteInstance;
 		sidebarCollapsed: boolean;
 		onToggleSidebar: () => void;
-		onConnect: () => void;
+		onConnect: (remote?: RemoteInstance) => void;
 	} = $props();
 
 	// Keyed by the instance in App, so this is its session for the component's life.

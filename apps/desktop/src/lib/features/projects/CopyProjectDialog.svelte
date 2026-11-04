@@ -81,7 +81,7 @@
 						<Select.Root
 							type="single"
 							bind:value={flow.serverId}
-							onValueChange={() => (flow.browser = null)}
+							onValueChange={() => flow.chooseServer(instances.remotes)}
 							disabled={flow.copying}
 						>
 							<Select.Trigger class="w-full" aria-label="Server">
@@ -246,7 +246,8 @@
 				<Button
 					disabled={!server || flow.copying || !!flow.browser}
 					title={flow.browser ? 'Pick a folder first' : undefined}
-					onclick={() => flow.copy(instances.remotes)}
+					onclick={() =>
+						flow.copy(instances.remotes, (id, copyFolder) => instances.update(id, { copyFolder }))}
 				>
 					{#if flow.copying}
 						<LoaderIcon class="size-3.5 animate-spin" />

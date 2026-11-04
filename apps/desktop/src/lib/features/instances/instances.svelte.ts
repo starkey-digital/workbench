@@ -20,6 +20,8 @@ export interface RemoteInstanceConfig {
 	name: string;
 	url: string;
 	token?: string;
+	/** Where "Copy to server" puts projects by default. */
+	copyFolder?: string;
 }
 
 /** A connected remote Workbench server: its config, live status, and a
@@ -33,7 +35,8 @@ export function probeHealth(base: string, token?: string): Promise<Response> {
 }
 
 export class RemoteInstance {
-	readonly config: RemoteInstanceConfig;
+	/** Replaced in place when only its name or copy folder change. */
+	config: RemoteInstanceConfig;
 	status = $state<InstanceStatus>('connecting');
 	readonly store: ControlPlaneStore;
 	/** The host's Workbench version, and installing its update from here. */
@@ -43,7 +46,7 @@ export class RemoteInstance {
 	private remoteSession: { session: RemoteSession; destroy: () => void } | null = null;
 
 	constructor(config: RemoteInstanceConfig) {
-		this.config = config;
+		this.config = $state.raw(config);
 		this.transport = createHttpTransport({ baseUrl: config.url, token: config.token });
 		this.store = new ControlPlaneStore(this.transport);
 		this.hostUpdate = new HostUpdate(this.transport);
@@ -111,12 +114,13 @@ const STORAGE_KEY = 'workbench.instances';
 
 function isConfig(c: unknown): c is RemoteInstanceConfig {
 	if (!c || typeof c !== 'object') return false;
-	const { id, name, url, token } = c as Record<string, unknown>;
+	const { id, name, url, token, copyFolder } = c as Record<string, unknown>;
 	return (
 		typeof id === 'string' &&
 		typeof name === 'string' &&
 		typeof url === 'string' &&
-		(token === undefined || typeof token === 'string')
+		(token === undefined || typeof token === 'string') &&
+		(copyFolder === undefined || typeof copyFolder === 'string')
 	);
 }
 
@@ -171,6 +175,23 @@ export class InstancesStore {
 		this.persist();
 		void instance.checkHealth();
 		return instance;
+	}
+
+	/** Change a server's settings. A new URL or token reconnects it (a fresh transport and
+	 *  workspaces); a new name or copy folder doesn't. */
+	update(id: string, changes: Partial<Omit<RemoteInstanceConfig, 'id'>>): void {
+		const old = this.remotes.find((r) => r.config.id === id);
+		if (!old) return;
+		const config = { ...old.config, ...changes };
+		if (config.url === old.config.url && config.token === old.config.token) {
+			old.config = config;
+		} else {
+			old.dispose();
+			const instance = new RemoteInstance(config);
+			this.remotes = this.remotes.map((r) => (r === old ? instance : r));
+			void instance.checkHealth();
+		}
+		this.persist();
 	}
 
 	remove(id: string): void {

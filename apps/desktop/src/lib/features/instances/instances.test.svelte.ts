@@ -97,6 +97,34 @@ describe('InstancesStore', () => {
 		store.dispose();
 	});
 
+	it('update() renames in place, keeping the connection', () => {
+		const store = new InstancesStore();
+		const inst = store.add({ name: 'box', url: 'http://box:4317', token: 't' });
+		store.setActive(inst.config.id);
+
+		store.update(inst.config.id, { name: 'mini', copyFolder: '/srv' });
+
+		expect(store.remotes[0]).toBe(inst);
+		expect(inst.config).toMatchObject({ name: 'mini', url: 'http://box:4317', copyFolder: '/srv' });
+		expect(JSON.parse(localStorage.getItem('workbench.instances')!)[0].name).toBe('mini');
+		store.dispose();
+	});
+
+	it('update() reconnects on a new URL or token, keeping the id and active server', () => {
+		const store = new InstancesStore();
+		const inst = store.add({ name: 'box', url: 'http://box:4317', token: 'old' });
+		store.setActive(inst.config.id);
+		const dispose = vi.spyOn(inst, 'dispose');
+
+		store.update(inst.config.id, { token: 'new' });
+
+		expect(dispose).toHaveBeenCalled();
+		expect(store.remotes[0]).not.toBe(inst);
+		expect(store.remotes[0].config).toMatchObject({ id: inst.config.id, token: 'new' });
+		expect(store.activeRemote).toBe(store.remotes[0]);
+		store.dispose();
+	});
+
 	it('dispose() clears the health poll interval', () => {
 		const store = new InstancesStore();
 		store.load(); // starts the 15s health poll

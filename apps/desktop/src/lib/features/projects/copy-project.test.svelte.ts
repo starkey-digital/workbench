@@ -6,9 +6,9 @@ import type { ProjectConfig } from '$types/workbench';
 
 const project: ProjectConfig = { name: 'App', path: '/repos/app' };
 
-function remote(id: string, status: RemoteInstance['status'], token?: string) {
+function remote(id: string, status: RemoteInstance['status'], token?: string, copyFolder?: string) {
 	return {
-		config: { id, name: id, url: `http://${id}:4317/`, token },
+		config: { id, name: id, url: `http://${id}:4317/`, token, copyFolder },
 		status,
 		base: `http://${id}:4317`,
 		store: {
@@ -85,6 +85,35 @@ describe('CopyProjectFlow', () => {
 		expect(flow.result).toEqual(copied);
 		expect(flow.copying).toBe(false);
 		expect(mini.store.refresh).toHaveBeenCalled();
+	});
+
+	it("starts from each server's copy folder, and remembers a new one once it copied", async () => {
+		const mini = remote('mini', 'online', undefined, '/srv');
+		const box = remote('box', 'online');
+		mockInvoke('copy_project_to_server', () => ({ project, claude: null, claudeError: null }));
+		flow.start(project, [mini, box]);
+		expect(flow.parent).toBe('/srv');
+
+		flow.serverId = 'box';
+		flow.chooseServer([mini, box]);
+		expect(flow.parent).toBe('');
+
+		flow.parent = ' /data/repos ';
+		const remember = vi.fn();
+		await flow.copy([mini, box], remember);
+		expect(remember).toHaveBeenCalledWith('box', '/data/repos');
+	});
+
+	it("doesn't remember the folder when the copy fails", async () => {
+		const mini = remote('mini', 'online');
+		mockInvoke('copy_project_to_server', () => {
+			throw 'nope';
+		});
+		flow.start(project, [mini]);
+		flow.parent = '/srv';
+		const remember = vi.fn();
+		await flow.copy([mini], remember);
+		expect(remember).not.toHaveBeenCalled();
 	});
 
 	it('shows the refusal and stays open for another try', async () => {

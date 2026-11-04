@@ -62,7 +62,7 @@ export class CopyProjectFlow {
 	open = $state(false);
 	project = $state<ProjectConfig | null>(null);
 	serverId = $state('');
-	/** Blank: the server's clone folder, else its home. */
+	/** Seeded from the server's copy folder. Blank: its clone folder, else its home. */
 	parent = $state('');
 	/** The server's folders while picking `parent`; null when not picking. */
 	browser = $state.raw<FolderBrowser | null>(null);
@@ -87,13 +87,18 @@ export class CopyProjectFlow {
 	start(project: ProjectConfig, remotes: RemoteInstance[]) {
 		this.project = project;
 		this.serverId = (remotes.find((r) => r.status === 'online') ?? remotes[0])?.config.id ?? '';
-		this.parent = '';
-		this.browser = null;
+		this.chooseServer(remotes);
 		this.claudeConfig = false;
 		this.claudeAccounts = false;
 		this.error = '';
 		this.result = null;
 		this.open = true;
+	}
+
+	/** `serverId` changed: start from its copy folder. */
+	chooseServer(remotes: RemoteInstance[]) {
+		this.parent = remotes.find((r) => r.config.id === this.serverId)?.config.copyFolder ?? '';
+		this.browser = null;
 	}
 
 	/** Browse the chosen server's folders, from the typed folder (else its home). */
@@ -111,7 +116,8 @@ export class CopyProjectFlow {
 		this.browser = null;
 	}
 
-	async copy(remotes: RemoteInstance[]) {
+	/** `remember` saves a typed or picked folder as that server's copy folder once it worked. */
+	async copy(remotes: RemoteInstance[], remember?: (serverId: string, copyFolder: string) => void) {
 		const remote = remotes.find((r) => r.config.id === this.serverId);
 		// While browsing, the folder shown isn't `parent` until it's picked.
 		if (!this.project || !remote || this.copying || this.browser) return;
@@ -119,6 +125,7 @@ export class CopyProjectFlow {
 		this.error = '';
 		this.progress = null;
 		this.uploaded = false;
+		const parent = this.parent.trim();
 		let unlisten: (() => void) | undefined;
 		try {
 			unlisten = await listen<TransferProgress>('transfer:progress', (e) =>
@@ -129,11 +136,12 @@ export class CopyProjectFlow {
 				token: remote.config.token ?? null,
 				projectPath: this.project.path,
 				projectName: this.project.name,
-				parent: this.parent.trim() || null,
+				parent: parent || null,
 				claudeConfig: this.claudeConfig,
 				claudeAccounts: this.claudeAccounts
 			});
 			void remote.store.refresh();
+			if (parent && parent !== remote.config.copyFolder) remember?.(remote.config.id, parent);
 		} catch (e) {
 			this.error = String(e);
 		} finally {

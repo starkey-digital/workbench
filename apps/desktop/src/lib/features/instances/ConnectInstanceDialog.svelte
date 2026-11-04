@@ -3,22 +3,35 @@
 	import { Button } from '@workbench/ui/button';
 	import { Input } from '@workbench/ui/input';
 	import { getInstancesStore } from '$stores/context';
-	import { probeHealth } from './instances.svelte';
+	import { probeHealth, type RemoteInstance } from './instances.svelte';
 
-	let { open = $bindable(false) }: { open?: boolean } = $props();
+	const DEFAULT_URL = 'http://localhost:4317';
+
+	let {
+		open = $bindable(false),
+		editing = $bindable(null)
+	}: {
+		open?: boolean;
+		/** The server being edited; null adds one. Cleared on close, so reopening it re-seeds. */
+		editing?: RemoteInstance | null;
+	} = $props();
 
 	const instances = getInstancesStore();
 
-	let name = $state('');
-	let url = $state('http://localhost:4317');
-	let token = $state('');
+	let name = $derived(editing?.config.name ?? '');
+	let url = $derived(editing?.config.url ?? DEFAULT_URL);
+	let token = $derived(editing?.config.token ?? '');
+	let copyFolder = $derived(editing?.config.copyFolder ?? '');
 	let testState = $state<'idle' | 'testing' | 'ok' | 'fail'>('idle');
 	let testMessage = $state('');
 
-	function reset() {
+	function close() {
+		open = false;
+		editing = null;
 		name = '';
-		url = 'http://localhost:4317';
+		url = DEFAULT_URL;
 		token = '';
+		copyFolder = '';
 		testState = 'idle';
 		testMessage = '';
 	}
@@ -38,26 +51,32 @@
 		}
 	}
 
-	function add() {
+	function save() {
 		const base = url.trim().replace(/\/$/, '');
 		if (!base) return;
-		const instance = instances.add({
+		const config = {
 			name: name.trim() || base.replace(/^https?:\/\//, ''),
 			url: base,
-			token: token.trim() || undefined
-		});
-		instances.setActive(instance.config.id);
-		open = false;
-		reset();
+			token: token.trim() || undefined,
+			copyFolder: copyFolder.trim() || undefined
+		};
+		if (editing) {
+			instances.update(editing.config.id, config);
+		} else {
+			instances.setActive(instances.add(config).config.id);
+		}
+		close();
 	}
 </script>
 
-<Dialog.Root bind:open onOpenChange={(o) => !o && reset()}>
+<Dialog.Root bind:open onOpenChange={(o) => !o && close()}>
 	<Dialog.Content class="max-w-sm">
 		<Dialog.Header>
-			<Dialog.Title>Connect instance</Dialog.Title>
+			<Dialog.Title>{editing ? 'Edit instance' : 'Connect instance'}</Dialog.Title>
 			<Dialog.Description>
-				Connect to a Workbench server to manage its projects and spawn sessions there.
+				{editing
+					? 'A new URL or token reconnects to the server.'
+					: 'Connect to a Workbench server to manage its projects and spawn sessions there.'}
 			</Dialog.Description>
 		</Dialog.Header>
 
@@ -74,6 +93,14 @@
 				Token (optional)
 				<Input bind:value={token} type="password" placeholder="bearer token" />
 			</label>
+			<label class="flex flex-col gap-1 text-sm">
+				Copy projects into (optional)
+				<Input
+					bind:value={copyFolder}
+					placeholder="Its clone folder, else home"
+					class="font-mono text-xs"
+				/>
+			</label>
 
 			<div class="flex items-center gap-2">
 				<Button variant="secondary" size="sm" onclick={test} disabled={testState === 'testing'}>
@@ -88,8 +115,8 @@
 		</div>
 
 		<Dialog.Footer>
-			<Button variant="ghost" onclick={() => (open = false)}>Cancel</Button>
-			<Button onclick={add}>Add</Button>
+			<Button variant="ghost" onclick={close}>Cancel</Button>
+			<Button onclick={save}>{editing ? 'Save' : 'Add'}</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

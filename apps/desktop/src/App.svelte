@@ -9,7 +9,7 @@
 	import ProjectSidebar from '$features/projects/ProjectSidebar.svelte';
 	import RemoteInstanceSidebar from '$features/instances/RemoteInstanceSidebar.svelte';
 	import ConnectInstanceDialog from '$features/instances/ConnectInstanceDialog.svelte';
-	import { InstancesStore } from '$features/instances/instances.svelte';
+	import { InstancesStore, type RemoteInstance } from '$features/instances/instances.svelte';
 	import RemoteWorkspaceArea from '$features/instances/RemoteWorkspaceArea.svelte';
 	import { loopbackWorkbench } from '$features/chat/agent-api';
 	import RightSidebar from '$features/sidebar/RightSidebar.svelte';
@@ -87,6 +87,11 @@
 	let sidebarPane = $state<ReturnType<typeof Resizable.Pane> | null>(null);
 	let githubSidebarPane = $state<ReturnType<typeof Resizable.Pane> | null>(null);
 	let connectOpen = $state(false);
+	let connectEditing = $state<RemoteInstance | null>(null);
+	function openConnect(remote?: RemoteInstance) {
+		connectEditing = remote ?? null;
+		connectOpen = true;
+	}
 
 	/** Open (or focus) settings in its own OS window, seeded with the active project. */
 	function openSettings() {
@@ -268,7 +273,7 @@
 			<ActivityRail
 				onToggleSidebar={toggleSidebar}
 				onOpenSettings={openSettings}
-				onOpenRemote={() => (connectOpen = true)}
+				onOpenRemote={() => openConnect()}
 			/>
 			<div class="h-full min-w-0 flex-1">
 				<Resizable.PaneGroup direction="horizontal">
@@ -289,14 +294,14 @@
 									instance={remote}
 									{sidebarCollapsed}
 									onToggleSidebar={toggleSidebar}
-									onConnect={() => (connectOpen = true)}
+									onConnect={openConnect}
 								/>
 							{/key}
 						{:else}
 							<ProjectSidebar
 								{sidebarCollapsed}
 								onToggleSidebar={toggleSidebar}
-								onConnect={() => (connectOpen = true)}
+								onConnect={openConnect}
 							/>
 						{/if}
 					</Resizable.Pane>
@@ -341,7 +346,7 @@
 
 <ProjectManager />
 <WorktreeManager />
-<ConnectInstanceDialog bind:open={connectOpen} />
+<ConnectInstanceDialog bind:open={connectOpen} bind:editing={connectEditing} />
 <IntegrationApprovalDialog />
 <UpdateDialog />
 <Toaster theme={themePrefs.theme} position="bottom-right" />
