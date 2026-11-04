@@ -66,6 +66,8 @@ export class CopyProjectFlow {
 	parent = $state('');
 	/** The server's folders while picking `parent`; null when not picking. */
 	browser = $state.raw<FolderBrowser | null>(null);
+	/** Save `parent` as the server's copy folder once the copy works. */
+	makeDefault = $state(false);
 	claudeConfig = $state(false);
 	claudeAccounts = $state(false);
 	copying = $state(false);
@@ -99,6 +101,7 @@ export class CopyProjectFlow {
 	chooseServer(remotes: RemoteInstance[]) {
 		this.parent = remotes.find((r) => r.config.id === this.serverId)?.config.copyFolder ?? '';
 		this.browser = null;
+		this.makeDefault = false;
 	}
 
 	/** Browse the chosen server's folders, from the typed folder (else its home). */
@@ -116,8 +119,11 @@ export class CopyProjectFlow {
 		this.browser = null;
 	}
 
-	/** `remember` saves a typed or picked folder as that server's copy folder once it worked. */
-	async copy(remotes: RemoteInstance[], remember?: (serverId: string, copyFolder: string) => void) {
+	/** `remember` saves `parent` as that server's copy folder, when `makeDefault` and it worked. */
+	async copy(
+		remotes: RemoteInstance[],
+		remember?: (serverId: string, copyFolder: string | undefined) => void
+	) {
 		const remote = remotes.find((r) => r.config.id === this.serverId);
 		// While browsing, the folder shown isn't `parent` until it's picked.
 		if (!this.project || !remote || this.copying || this.browser) return;
@@ -141,7 +147,7 @@ export class CopyProjectFlow {
 				claudeAccounts: this.claudeAccounts
 			});
 			void remote.store.refresh();
-			if (parent && parent !== remote.config.copyFolder) remember?.(remote.config.id, parent);
+			if (this.makeDefault) remember?.(remote.config.id, parent || undefined);
 		} catch (e) {
 			this.error = String(e);
 		} finally {

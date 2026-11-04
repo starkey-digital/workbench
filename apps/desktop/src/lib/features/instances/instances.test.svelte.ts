@@ -110,7 +110,7 @@ describe('InstancesStore', () => {
 		store.dispose();
 	});
 
-	it('update() reconnects on a new URL or token, keeping the id and active server', () => {
+	it('update() reconnects on a new token, keeping the id and active server', () => {
 		const store = new InstancesStore();
 		const inst = store.add({ name: 'box', url: 'http://box:4317', token: 'old' });
 		store.setActive(inst.config.id);
@@ -121,6 +121,18 @@ describe('InstancesStore', () => {
 		expect(dispose).toHaveBeenCalled();
 		expect(store.remotes[0]).not.toBe(inst);
 		expect(store.remotes[0].config).toMatchObject({ id: inst.config.id, token: 'new' });
+		expect(store.activeRemote).toBe(store.remotes[0]);
+		store.dispose();
+	});
+
+	it('update() gives a new URL a new id, and the active server follows it', () => {
+		const store = new InstancesStore();
+		const inst = store.add({ name: 'box', url: 'http://box:4317' });
+		store.setActive(inst.config.id);
+
+		store.update(inst.config.id, { url: 'http://mini:4317' });
+
+		expect(store.remotes[0].config.id).not.toBe(inst.config.id);
 		expect(store.activeRemote).toBe(store.remotes[0]);
 		store.dispose();
 	});

@@ -87,11 +87,20 @@
 			</label>
 			<label class="flex flex-col gap-1 text-sm">
 				Server URL
-				<Input bind:value={url} placeholder="http://host:4317" />
+				<Input
+					bind:value={url}
+					oninput={() => (testState = 'idle')}
+					placeholder="http://host:4317"
+				/>
 			</label>
 			<label class="flex flex-col gap-1 text-sm">
 				Token (optional)
-				<Input bind:value={token} type="password" placeholder="bearer token" />
+				<Input
+					bind:value={token}
+					oninput={() => (testState = 'idle')}
+					type="password"
+					placeholder="bearer token"
+				/>
 			</label>
 			<label class="flex flex-col gap-1 text-sm">
 				Copy projects into (optional)

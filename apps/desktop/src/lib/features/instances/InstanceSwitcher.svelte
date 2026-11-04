@@ -12,6 +12,7 @@
 	let { onConnect }: { onConnect: (remote?: RemoteInstance) => void } = $props();
 
 	const instances = getInstancesStore();
+	let menuOpen = $state(false);
 
 	const activeName = $derived(
 		instances.activeIsLocal
@@ -29,7 +30,7 @@
 	}
 </script>
 
-<DropdownMenu.Root>
+<DropdownMenu.Root bind:open={menuOpen}>
 	<DropdownMenu.Trigger
 		class="flex min-w-0 flex-1 items-center gap-1.5 rounded px-1.5 py-1 text-left transition-colors hover:bg-wb-panel2"
 	>
@@ -63,7 +64,9 @@
 						title="Edit"
 						aria-label="Edit {remote.config.name}"
 						onclick={(e) => {
+							// Not a menu item (that would switch to it): close the menu by hand under the dialog.
 							e.stopPropagation();
+							menuOpen = false;
 							onConnect(remote);
 						}}
 					>

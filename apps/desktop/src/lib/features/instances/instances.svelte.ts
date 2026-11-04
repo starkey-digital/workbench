@@ -44,6 +44,7 @@ export class RemoteInstance {
 	private updateCheckedAt = 0;
 	private readonly transport: ControlPlaneTransport;
 	private remoteSession: { session: RemoteSession; destroy: () => void } | null = null;
+	private disposed = false;
 
 	constructor(config: RemoteInstanceConfig) {
 		this.config = $state.raw(config);
@@ -77,6 +78,7 @@ export class RemoteInstance {
 
 	/** The server was removed. */
 	dispose(): void {
+		this.disposed = true;
 		this.remoteSession?.session.dispose();
 		this.remoteSession?.destroy();
 		this.remoteSession = null;
@@ -93,7 +95,8 @@ export class RemoteInstance {
 		} catch {
 			this.status = 'offline';
 		}
-		if (this.status !== 'online') return;
+		// Removed or replaced while the probe was out: its store and update are retired.
+		if (this.status !== 'online' || this.disposed) return;
 		// While it installs, every poll checks: the host answering on another version ends it.
 		// Otherwise now and then, so a release out since connecting shows up.
 		const now = Date.now();
@@ -178,7 +181,8 @@ export class InstancesStore {
 	}
 
 	/** Change a server's settings. A new URL or token reconnects it (a fresh transport and
-	 *  workspaces); a new name or copy folder doesn't. */
+	 *  workspaces); a new name or copy folder doesn't. A new URL may be another host, so it
+	 *  also gets a new id: nothing cached under the old one (tab layout, plan usage) carries over. */
 	update(id: string, changes: Partial<Omit<RemoteInstanceConfig, 'id'>>): void {
 		const old = this.remotes.find((r) => r.config.id === id);
 		if (!old) return;
@@ -187,8 +191,10 @@ export class InstancesStore {
 			old.config = config;
 		} else {
 			old.dispose();
+			if (config.url !== old.config.url) config.id = uid();
 			const instance = new RemoteInstance(config);
 			this.remotes = this.remotes.map((r) => (r === old ? instance : r));
+			if (this.activeId === id) this.activeId = config.id;
 			void instance.checkHealth();
 		}
 		this.persist();

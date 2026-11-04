@@ -172,6 +172,16 @@
 								Browse…
 							</Button>
 						</div>
+						{#if server && flow.parent.trim() !== (server.config.copyFolder ?? '')}
+							<label class="flex items-center gap-2 text-xs text-muted-foreground">
+								<Checkbox
+									checked={flow.makeDefault}
+									onCheckedChange={(v) => (flow.makeDefault = v === true)}
+									disabled={flow.copying}
+								/>
+								Make this the default for {server.config.name}
+							</label>
+						{/if}
 					{/if}
 				</div>
 				<div class="space-y-2">

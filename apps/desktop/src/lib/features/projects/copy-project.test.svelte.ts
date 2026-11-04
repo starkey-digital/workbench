@@ -87,7 +87,7 @@ describe('CopyProjectFlow', () => {
 		expect(mini.store.refresh).toHaveBeenCalled();
 	});
 
-	it("starts from each server's copy folder, and remembers a new one once it copied", async () => {
+	it("starts from each server's copy folder, and saves a new one when asked", async () => {
 		const mini = remote('mini', 'online', undefined, '/srv');
 		const box = remote('box', 'online');
 		mockInvoke('copy_project_to_server', () => ({ project, claude: null, claudeError: null }));
@@ -101,6 +101,10 @@ describe('CopyProjectFlow', () => {
 		flow.parent = ' /data/repos ';
 		const remember = vi.fn();
 		await flow.copy([mini, box], remember);
+		expect(remember).not.toHaveBeenCalled();
+
+		flow.makeDefault = true;
+		await flow.copy([mini, box], remember);
 		expect(remember).toHaveBeenCalledWith('box', '/data/repos');
 	});
 
@@ -111,6 +115,7 @@ describe('CopyProjectFlow', () => {
 		});
 		flow.start(project, [mini]);
 		flow.parent = '/srv';
+		flow.makeDefault = true;
 		const remember = vi.fn();
 		await flow.copy([mini], remember);
 		expect(remember).not.toHaveBeenCalled();
