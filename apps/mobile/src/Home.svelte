@@ -3,12 +3,10 @@
 	import { onMount } from 'svelte';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
-	import SquareTerminalIcon from '@lucide/svelte/icons/square-terminal';
 	import XIcon from '@lucide/svelte/icons/x';
 	import {
 		CHAT_FONT_SIZES,
 		CHAT_FONTS,
-		Elapsed,
 		fontPrefs,
 		shortPath,
 		TERMINAL_FONT_SIZES,
@@ -27,8 +25,9 @@
 		waitingLabel
 	} from './home-format.ts';
 	import MachinesSheet from './MachinesSheet.svelte';
-	import { paneTitle, workspaceLabel, type PaneEntry } from './panes.ts';
+	import { paneTitle } from './panes.ts';
 	import ProjectList from './ProjectList.svelte';
+	import RunningList from './RunningList.svelte';
 	import Sheet from './Sheet.svelte';
 	import ProjectReviewSheet from './ProjectReviewSheet.svelte';
 	import type { ReviewFolder } from './project-review.svelte';
@@ -63,16 +62,6 @@
 	});
 
 	const needsYou = $derived(client.panes.filter((e) => e.pane.waiting && e.pane.sessionId));
-	/** The host's workspaces as it orders them, each with its panes. */
-	const running = $derived(
-		(client.remote?.workspaces ?? [])
-			.map((workspace) => ({
-				workspace,
-				entries: client.panes.filter((e) => e.workspace === workspace && !e.pane.waiting)
-			}))
-			.filter((group) => group.entries.length > 0)
-	);
-	const runningCount = $derived(running.reduce((n, group) => n + group.entries.length, 0));
 	/** Every session's unfinished subagents and tasks on this machine, for the top bar;
 	 * none while its last snapshot may be stale. */
 	const machineTasks = $derived(
@@ -80,19 +69,6 @@
 			? runningTasksLabel(totalRunningTasks(client.panes.map((e) => e.pane.runningTasks)))
 			: null
 	);
-
-	function activity({ pane, workspace }: PaneEntry): string {
-		if (pane.status === 'needsTrust') return 'Needs folder trust';
-		if (pane.status === 'starting') return 'Starting';
-		if (pane.status === 'exited') return 'Exited';
-		if (pane.kind === 'shell') return 'Terminal';
-		if (pane.running)
-			return (
-				shortPath(pane.running.detail, workspace.worktreePath ?? workspace.projectPath) ||
-				pane.running.name
-			);
-		return pane.busy ? 'Thinking' : 'Your turn';
-	}
 </script>
 
 {#snippet runningTasks(counts: RunningTasks | undefined)}
@@ -151,7 +127,10 @@
 			type="button"
 			class="grid size-9 shrink-0 place-items-center rounded-lg text-wb-ink-mute active:bg-wb-panel2"
 			aria-label="Settings"
-			onclick={() => (settingsOpen = true)}
+			onclick={() => {
+				settingsOpen = true;
+				void client.loadAccounts();
+			}}
 		>
 			<SettingsIcon class="size-4.5" />
 		</button>
@@ -244,79 +223,7 @@
 			</section>
 		{/if}
 
-		{#if running.length > 0}
-			<section class="flex flex-col gap-2">
-				{@render sectionTitle('Running', runningCount)}
-				{#each running as group (group.workspace.id)}
-					<div class="flex flex-col gap-2">
-						<h3 class="truncate px-0.5 pt-1 font-mono text-[11px] text-wb-ink-mute">
-							{workspaceLabel(group.workspace)}
-						</h3>
-						{#each group.entries as entry (entry.pane.id)}
-							{@const pane = entry.pane}
-							{@const title = paneTitle(entry)}
-							<div
-								class="flex items-center gap-2.5 rounded-xl border border-wb-hair-soft bg-wb-panel py-2.5 pr-1.5 pl-3"
-							>
-								<button
-									type="button"
-									class="flex min-w-0 flex-1 items-center gap-2.5 text-left"
-									onclick={() => client.openPane(pane.id)}
-								>
-									<span
-										class={cn(
-											'grid size-8 shrink-0 place-items-center rounded-lg bg-wb-panel2',
-											pane.kind === 'codex'
-												? 'text-wb-codex'
-												: pane.kind === 'claude'
-													? 'text-wb-claude'
-													: 'text-wb-shell'
-										)}
-									>
-										{#if pane.kind === 'shell'}
-											<SquareTerminalIcon class="size-4" />
-										{:else}
-											<AgentIcon agent={pane.kind} class="size-4" />
-										{/if}
-									</span>
-									<span class="flex min-w-0 flex-col">
-										<span class="truncate text-[13.5px] font-medium">{title}</span>
-										<span
-											class={cn(
-												'truncate text-[11.5px] text-wb-ink-mute',
-												pane.running && 'font-mono text-[11px] text-wb-ink'
-											)}>{activity(entry)}</span
-										>
-										{@render runningTasks(pane.runningTasks)}
-									</span>
-									<span
-										class="ml-auto flex shrink-0 flex-col items-end gap-1 font-mono text-[11px] text-wb-ink-soft"
-									>
-										{#if pane.busy && pane.busySince}
-											<span class="spinner size-3"></span>
-											<Elapsed since={pane.busySince} />
-										{:else if pane.turnEndedAt}
-											{age(pane.turnEndedAt, now)}
-										{/if}
-									</span>
-								</button>
-								<!-- Ending a Claude or Codex session is in its chat's menu, not one stray tap away. -->
-								{#if pane.kind === 'shell'}
-									<button
-										type="button"
-										class="grid size-8 shrink-0 place-items-center rounded-lg text-wb-ink-soft active:bg-wb-panel2 active:text-wb-err"
-										aria-label="Close {title}"
-										onclick={() => client.endPane(pane.id)}
-									>
-										<XIcon class="size-4" />
-									</button>
-								{/if}
-							</div>
-						{/each}
-					</div>
-				{/each}
-			</section>
-		{/if}
+		<RunningList {client} {now} {sectionTitle} {runningTasks} />
 
 		<ProjectList
 			{client}

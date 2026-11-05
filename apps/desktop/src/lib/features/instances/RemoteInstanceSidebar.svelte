@@ -4,7 +4,7 @@
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import InstanceSwitcher from './InstanceSwitcher.svelte';
 	import RemoteNewProjectDialog from './RemoteNewProjectDialog.svelte';
-	import { NewProjectFlow } from './new-project.svelte';
+	import { NewProjectFlow } from '@workbench/control-plane-ui';
 	import RemoteHostBar from './RemoteHostBar.svelte';
 	import RemoteProjectTree from './RemoteProjectTree.svelte';
 	import type { RemoteInstance } from './instances.svelte';

@@ -7,7 +7,8 @@
 	import PencilIcon from '@lucide/svelte/icons/pencil';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import StarIcon from '@lucide/svelte/icons/star';
-	import type { ProjectConfig } from '@workbench/types';
+	import Trash2Icon from '@lucide/svelte/icons/trash-2';
+	import type { ProjectConfig, WorktreeInfo } from '@workbench/types';
 	import type { MobileClient } from './client.svelte.ts';
 	import { openExternal } from './open-external.ts';
 	import { baseName, repoLabel, tildePath } from './home-format.ts';
@@ -24,7 +25,9 @@
 		open,
 		onToggle,
 		onReview,
-		onEdit
+		onEdit,
+		onNewWorktree,
+		onRemoveWorktree
 	}: {
 		client: MobileClient;
 		project: ProjectConfig;
@@ -37,13 +40,25 @@
 		onToggle: () => void;
 		onReview: (folder: ReviewFolder, tab: 'history' | 'changes') => void;
 		onEdit: () => void;
+		onNewWorktree: () => void;
+		onRemoveWorktree: (worktree: WorktreeInfo) => void;
 	} = $props();
 
 	const store = $derived(client.store!);
 	const name = $derived(project.name || baseName(project.path));
 	const worktrees = $derived((store.worktrees[project.path] ?? []).filter((w) => !w.isMain));
+	/** A git checkout lists at least its main worktree; any other folder has none to manage. */
+	const isRepo = $derived(!!store.worktrees[project.path]?.length);
 	const githubUrl = $derived(store.githubUrls[project.path]);
-	let newBranch = $state('');
+	/** Open sessions per worktree path. */
+	const sessionsIn = $derived.by(() => {
+		const counts: Record<string, number> = {};
+		for (const { workspace } of client.panes) {
+			const path = workspace.worktreePath;
+			if (workspace.projectPath === project.path && path) counts[path] = (counts[path] ?? 0) + 1;
+		}
+		return counts;
+	});
 
 	const chip =
 		'flex h-8 min-w-0 items-center gap-1.5 rounded-lg border border-wb-hair bg-wb-panel px-2.5 text-[12px] text-wb-ink-mute active:bg-wb-panel2';
@@ -55,17 +70,10 @@
 		void store.loadGithubUrl(project.path);
 		if (!store.worktrees[project.path]) await store.loadWorktrees(project.path);
 	}
-
-	function createWorktree(e: SubmitEvent) {
-		e.preventDefault();
-		const branch = newBranch.trim();
-		if (!branch) return;
-		newBranch = '';
-		void store.createWorktree(project.path, branch);
-	}
 </script>
 
-{#snippet reviewChips(worktreePath: string | undefined, folderName: string)}
+{#snippet reviewChips(worktree: WorktreeInfo | undefined, folderName: string)}
+	{@const worktreePath = worktree?.path}
 	{@const folder = { projectPath: project.path, worktreePath, name: folderName }}
 	<div class="flex flex-wrap gap-1.5">
 		<button type="button" class={chip} onclick={() => onReview(folder, 'history')}>
@@ -77,6 +85,16 @@
 		{#if !worktreePath}
 			<button type="button" class={chip} onclick={onEdit}>
 				<PencilIcon class="size-3.5 shrink-0" />Edit
+			</button>
+		{/if}
+		{#if worktree}
+			<button
+				type="button"
+				class="{chip} active:text-wb-err"
+				aria-label="Remove worktree {folderName}"
+				onclick={() => onRemoveWorktree(worktree)}
+			>
+				<Trash2Icon class="size-3.5 shrink-0" />Remove
 			</button>
 		{/if}
 		{#if !worktreePath && githubUrl}
@@ -146,23 +164,40 @@
 		<div class="flex flex-col gap-3 border-t border-wb-hair-soft bg-wb-rail/50 p-3">
 			<StartButtons {client} projectPath={project.path} worktreePath={undefined} {name} wide />
 			{@render reviewChips(undefined, name)}
-			{#if worktrees.length > 0}
+			{#if isRepo}
 				<div class="flex flex-col gap-2">
 					<h3
-						class="flex items-center gap-2 text-[11px] font-semibold tracking-[0.08em] text-wb-ink-soft uppercase"
+						class="flex h-8 items-center gap-2 text-[11px] font-semibold tracking-[0.08em] text-wb-ink-soft uppercase"
 					>
 						Worktrees
 						<span class="font-mono tracking-normal text-wb-ink-mute">{worktrees.length}</span>
+						<button
+							type="button"
+							class="ml-auto flex h-8 items-center gap-1 rounded-lg border border-wb-hair bg-wb-panel px-2.5 text-[12px] font-medium tracking-normal text-wb-ink-mute normal-case active:bg-wb-panel2"
+							aria-label="New worktree in {name}"
+							onclick={onNewWorktree}
+						>
+							<PlusIcon class="size-3.5" />New
+						</button>
 					</h3>
 					{#each worktrees as w (w.path)}
 						{@const label = `${name} · ${w.branch || baseName(w.path)}`}
+						{@const sessions = sessionsIn[w.path] ?? 0}
 						<div
 							class="flex flex-col gap-2 rounded-lg border border-wb-hair-soft bg-wb-panel p-2.5"
 						>
 							<div class="flex items-center gap-2">
 								<GitBranchIcon class="size-3.5 shrink-0 text-wb-ink-soft" />
 								<span class="flex min-w-0 flex-1 flex-col">
-									<span class="truncate font-mono text-[12.5px]">{w.branch || '(detached)'}</span>
+									<span class="flex items-center gap-1.5">
+										<span class="truncate font-mono text-[12.5px]">{w.branch || '(detached)'}</span>
+										{#if sessions > 0}
+											<span
+												class="shrink-0 rounded-full bg-wb-ok/15 px-1.5 font-mono text-[10px] text-wb-ok"
+												>{sessions} open</span
+											>
+										{/if}
+									</span>
 									<span class="truncate font-mono text-[10.5px] text-wb-ink-soft"
 										>{baseName(w.path)}</span
 									>
@@ -174,29 +209,16 @@
 									name={label}
 								/>
 							</div>
-							{@render reviewChips(w.path, label)}
+							{@render reviewChips(w, label)}
 						</div>
+					{:else}
+						<p class="text-xs text-wb-ink-soft">
+							None yet. A worktree is a second checkout on its own branch, so a session can work
+							there without touching this one.
+						</p>
 					{/each}
 				</div>
 			{/if}
-			<form class="flex gap-2" onsubmit={createWorktree}>
-				<input
-					bind:value={newBranch}
-					placeholder="new-branch-name"
-					aria-label="New worktree branch for {name}"
-					autocapitalize="off"
-					autocorrect="off"
-					spellcheck={false}
-					class="h-9 min-w-0 flex-1 rounded-lg border border-wb-hair bg-wb-panel px-2.5 font-mono text-[12px] text-wb-ink placeholder:text-wb-ink-soft focus:border-wb-ink-soft focus:outline-none"
-				/>
-				<button
-					type="submit"
-					disabled={!newBranch.trim()}
-					class="flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-wb-hair bg-wb-panel2 px-3 text-[12px] font-medium text-wb-ink-mute active:bg-wb-panel disabled:opacity-50"
-				>
-					<PlusIcon class="size-3.5" />Worktree
-				</button>
-			</form>
 		</div>
 	{/if}
 </div>

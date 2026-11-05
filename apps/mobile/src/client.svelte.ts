@@ -113,7 +113,8 @@ export class MobileClient {
 		}
 	}
 
-	private async loadAccounts(): Promise<void> {
+	/** The host's accounts. Re-read on wake and when a picker opens: the host can add one any time. */
+	async loadAccounts(): Promise<void> {
 		const live = this.live();
 		// Off until this host says otherwise: another host's opt-in isn't this one's.
 		setExtendedDiagnostics(false);
@@ -333,6 +334,7 @@ export class MobileClient {
 			if (this.visible) {
 				void this.store?.refresh();
 				void this.hostUpdate?.check();
+				void this.loadAccounts();
 			}
 		};
 		document.addEventListener('visibilitychange', wake);
@@ -436,6 +438,18 @@ export class MobileClient {
 	/** End: the pane goes on every device, like the desktop's ×; its screen closes when it leaves. */
 	endPane = (paneId: string) =>
 		this.send({ type: 'closePane', paneId }, "Couldn't end the session");
+
+	/** Closes a workspace on every device, ending each session in it. */
+	closeWorkspace = (workspaceId: string) =>
+		this.send({ type: 'closeWorkspace', workspaceId }, "Couldn't close the workspace");
+
+	/** After a worktree is removed: its sessions can't outlive their folder. */
+	async closeWorktreeWorkspaces(worktreePath: string): Promise<void> {
+		const ids = (this.remote?.workspaces ?? [])
+			.filter((w) => w.worktreePath === worktreePath)
+			.map((w) => w.id);
+		await Promise.all(ids.map(this.closeWorkspace));
+	}
 
 	canRestart = (pane: WorkspacePane): boolean => pane.kind !== 'shell';
 

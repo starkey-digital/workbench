@@ -9,7 +9,7 @@
 	import { Label } from '@workbench/ui/label';
 	import FolderBrowserView from '$components/FolderBrowserView.svelte';
 	import GitHubRepoPicker from '$features/projects/GitHubRepoPicker.svelte';
-	import type { NewProjectFlow } from './new-project.svelte';
+	import type { NewProjectFlow } from '@workbench/control-plane-ui';
 
 	let {
 		flow,

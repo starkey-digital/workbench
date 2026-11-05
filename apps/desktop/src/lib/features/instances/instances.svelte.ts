@@ -108,8 +108,12 @@ export class RemoteInstance {
 			this.updateCheckedAt = now;
 			void this.hostUpdate.check();
 		}
-		if (prev !== 'online')
-			await Promise.all([this.store.refresh(), this.remoteSession?.session.loadAccounts()]);
+		// Every poll re-reads the accounts (one small GET): the host can add one at any time, and
+		// nothing pushes that to its clients.
+		await Promise.all([
+			prev !== 'online' && this.store.refresh(),
+			this.remoteSession?.session.loadAccounts()
+		]);
 	}
 }
 

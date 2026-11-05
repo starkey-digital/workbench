@@ -1,6 +1,7 @@
-import { FolderBrowser, type ControlPlaneStore } from '@workbench/control-plane-ui';
-import type { GitHubRepo, ProjectConfig } from '$types/workbench';
-import { repoUrl } from '$lib/utils/repo-url';
+import type { GitHubRepo, ProjectConfig } from '@workbench/types';
+import type { ControlPlaneStore } from './control-plane.svelte.ts';
+import { FolderBrowser } from './folder-browser.svelte.ts';
+import { repoUrl } from './repo-url.ts';
 
 export type NewProjectMode = 'folder' | 'clone';
 

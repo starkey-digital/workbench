@@ -281,6 +281,31 @@ describe('MobileClient on a host with the workspace API', () => {
 		await vi.waitFor(() => expect(c.accountId).toBe('work'));
 	});
 
+	it('closes a workspace, and every workspace of a removed worktree', async () => {
+		const { c } = await connected();
+		const inWorktree = { ...workspace(pane('p2')), id: 'w2', worktreePath: '/repo-wt' };
+		snapshot(1, workspace(pane('p1')), inWorktree);
+		await c.closeWorktreeWorkspaces('/repo-wt');
+		await c.closeWorkspace('w1');
+		expect(commands).toEqual([
+			{ type: 'closeWorkspace', workspaceId: 'w2' },
+			{ type: 'closeWorkspace', workspaceId: 'w1' }
+		]);
+	});
+
+	it('picks up an account the host added when the app comes back to the front', async () => {
+		let accounts = [{ id: 'work', name: 'Work' }];
+		const { c } = await connected({
+			'/settings/workbench': () => jsonResponse({ claudeAccounts: accounts })
+		});
+		const stop = c.watch();
+		await vi.waitFor(() => expect(c.accounts).toHaveLength(1));
+		accounts = [...accounts, { id: 'side', name: 'Side' }];
+		document.dispatchEvent(new Event('visibilitychange'));
+		await vi.waitFor(() => expect(c.accounts.map((a) => a.id)).toEqual(['work', 'side']));
+		stop();
+	});
+
 	it("shows a spawn's notice once", async () => {
 		const { c } = await connected();
 		snapshot(1, workspace(pane('p1', { notice: 'Prompt left out' })));

@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createMockTransport } from '@workbench/transport';
-import { ControlPlaneStore } from '@workbench/control-plane-ui';
-import { NewProjectFlow } from './new-project.svelte';
-import { repoUrl } from '$lib/utils/repo-url';
+import { ControlPlaneStore } from './control-plane.svelte.ts';
+import { NewProjectFlow } from './new-project.svelte.ts';
+import { repoUrl } from './repo-url.ts';
 
 function setup(projects: { name: string; path: string }[] = []) {
 	const transport = createMockTransport();
