@@ -13,6 +13,8 @@ import type {
 	WorkspacePane
 } from '@workbench/types';
 import { defaultAccountName, paneNotices } from '@workbench/types';
+import { errorText } from './error-text.ts';
+import { pathKey } from './home-format.ts';
 import { hostOf, normalizeUrl, SavedMachines } from './machines.svelte.ts';
 import { findPane, paneEntries, paneTitle, type PaneEntry } from './panes.ts';
 import { PaneScreens } from './pane-screens.svelte.ts';
@@ -29,10 +31,6 @@ import type { ChatRef, ClaudeView } from './types.ts';
 const LS_VIEW = 'wb.claudeView';
 /** While a host restarts into its update, check when it is back. */
 const UPDATE_CHECK_MS = 4000;
-
-function errorText(e: unknown): string {
-	return e instanceof Error ? e.message : String(e);
-}
 
 export type Folder = Pick<ReviewFolder, 'projectPath' | 'worktreePath'>;
 
@@ -96,6 +94,8 @@ export class MobileClient {
 	private attempt = 0;
 	/** Whether the app is in front: the host's model is followed only then. */
 	private visible = !document.hidden;
+	/** Bumped by each account switch; an account read started before one doesn't undo it. */
+	private accountSwitches = 0;
 
 	constructor(scanner?: QrScanner, openEventSource?: OpenEventSource) {
 		this.pairing = new PairingScan(scanner);
@@ -105,6 +105,7 @@ export class MobileClient {
 
 	/** Switch the host's active account, as the desktop's switcher does. */
 	async setAccount(id: string): Promise<void> {
+		this.accountSwitches++;
 		try {
 			await this.controlPlane?.invoke('set_active_claude_account', { id: id || null });
 			this.accountId = id || undefined;
@@ -113,10 +114,10 @@ export class MobileClient {
 		}
 	}
 
-	private async loadAccounts(): Promise<void> {
+	/** The host's accounts. Re-read on wake and when a picker opens: the host can add one any time. */
+	async loadAccounts(): Promise<void> {
 		const live = this.live();
-		// Off until this host says otherwise: another host's opt-in isn't this one's.
-		setExtendedDiagnostics(false);
+		const switches = this.accountSwitches;
 		try {
 			const settings = (await this.controlPlane?.invoke(
 				'load_workbench_settings',
@@ -126,12 +127,14 @@ export class MobileClient {
 			setExtendedDiagnostics(!!settings?.extendedDiagnostics);
 			this.accounts = (settings?.claudeAccounts ?? []).map(({ id, name }) => ({ id, name }));
 			this.defaultAccountName = defaultAccountName(settings);
+			// Read before a switch on this phone: its active account is older than the switch.
+			if (switches !== this.accountSwitches) return;
 			const active = settings?.activeClaudeAccount;
 			this.accountId = this.accounts.some((a) => a.id === active)
 				? (active ?? undefined)
 				: undefined;
 		} catch {
-			/* Older servers still support the default account. */
+			/* Older servers still support the default account; a failed re-read keeps what was read. */
 		}
 	}
 
@@ -218,6 +221,8 @@ export class MobileClient {
 				this.showNotices(remote.workspaces);
 			};
 			remote.follow(this.visible);
+			// Off until this host says otherwise: another host's opt-in isn't this one's.
+			setExtendedDiagnostics(false);
 			await this.loadAccounts();
 		} catch (e) {
 			if (superseded()) return;
@@ -333,6 +338,7 @@ export class MobileClient {
 			if (this.visible) {
 				void this.store?.refresh();
 				void this.hostUpdate?.check();
+				void this.loadAccounts();
 			}
 		};
 		document.addEventListener('visibilitychange', wake);
@@ -436,6 +442,35 @@ export class MobileClient {
 	/** End: the pane goes on every device, like the desktop's ×; its screen closes when it leaves. */
 	endPane = (paneId: string) =>
 		this.send({ type: 'closePane', paneId }, "Couldn't end the session");
+
+	/** Closes a workspace on every device, ending each session in it. */
+	closeWorkspace = (workspaceId: string) =>
+		this.send({ type: 'closeWorkspace', workspaceId }, "Couldn't close the workspace");
+
+	/** The host's workspaces open in a worktree (paths compared as `pathKey`s: git and the host
+	 *  can spell one folder differently). */
+	workspacesIn(worktreePath: string): ServerWorkspace[] {
+		const key = pathKey(worktreePath);
+		return (this.remote?.workspaces ?? []).filter(
+			(w) => w.worktreePath !== undefined && pathKey(w.worktreePath) === key
+		);
+	}
+
+	/** Sessions open in a worktree: what removing it ends. */
+	sessionsIn = (worktreePath: string): number =>
+		this.workspacesIn(worktreePath).reduce(
+			(n, w) => n + w.tabs.reduce((m, t) => m + t.panes.length, 0),
+			0
+		);
+
+	/** After a worktree is removed: its sessions can't outlive their folder. False when one
+	 *  wouldn't close (the notice says why), so the caller can offer to try again. */
+	async closeWorktreeWorkspaces(worktreePath: string): Promise<boolean> {
+		const results = await Promise.all(
+			this.workspacesIn(worktreePath).map((w) => this.closeWorkspace(w.id))
+		);
+		return results.every((r) => r !== null);
+	}
 
 	canRestart = (pane: WorkspacePane): boolean => pane.kind !== 'shell';
 

@@ -117,6 +117,26 @@ describe('RemoteSession', () => {
 		expect(session.accountError).toContain('unknown account');
 	});
 
+	it("a poll that read before a switch doesn't undo it or hide its error", async () => {
+		await vi.waitFor(() => expect(session.activeAccountId).toBe('work'));
+		let answer: (v: unknown) => void = () => {};
+		transport.mockInvoke('load_workbench_settings', () => new Promise((r) => (answer = r)));
+		transport.mockInvoke('set_active_claude_account', () => undefined);
+		const poll = session.loadAccounts();
+		await session.setActiveAccount(undefined);
+		answer({ claudeAccounts: [{ id: 'work', name: 'Work' }], activeClaudeAccount: 'work' });
+		await poll;
+		expect(session.activeAccountId).toBeUndefined();
+
+		transport.mockInvoke('set_active_claude_account', () => {
+			throw new Error('unknown account');
+		});
+		await session.setActiveAccount('gone');
+		transport.mockInvoke('load_workbench_settings', () => ({ claudeAccounts: [] }));
+		await session.loadAccounts();
+		expect(session.accountError).toContain('unknown account');
+	});
+
 	it("lists the host's logins, its default as ''", async () => {
 		await vi.waitFor(() => expect(session.claudeAccounts).toHaveLength(1));
 		expect(session.accountChoices).toEqual([

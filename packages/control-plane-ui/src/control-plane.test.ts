@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockTransport, type MockTransport } from '@workbench/transport';
 import { ControlPlaneStore } from './control-plane.svelte.ts';
 
@@ -150,6 +150,60 @@ describe('ControlPlaneStore', () => {
 		const result = await store.createWorktree('/a', 'feature');
 		expect(result).toBe('/a/feature');
 		expect(calls).toEqual(['create', 'list']);
+	});
+
+	it('addWorktree checks out an existing branch and throws a refusal', async () => {
+		const requests: unknown[] = [];
+		transport.mockInvoke('create_worktree', (args) => {
+			requests.push((args as { request: unknown }).request);
+			if (requests.length > 1) throw new Error('branch is already checked out');
+			return '/a-fix';
+		});
+		transport.mockInvoke('list_worktrees', () => [{ path: '/a-fix', branch: 'fix' }]);
+		expect(await store.addWorktree('/a', 'fix', false)).toBe('/a-fix');
+		expect(requests[0]).toEqual({ repoPath: '/a', branch: 'fix', newBranch: false });
+		expect(store.worktrees['/a']).toHaveLength(1);
+		await expect(store.addWorktree('/a', 'fix', false)).rejects.toThrow(/checked out/);
+		expect(store.error).toBeNull();
+	});
+
+	it('removeWorktree drops the row at once, sends the options and re-lists', async () => {
+		store.worktrees = {
+			'/a': [
+				{ path: '/a', head: '1', branch: 'main', isMain: true },
+				{ path: '/a-x', head: '2', branch: 'x', isMain: false }
+			]
+		};
+		let sent: unknown;
+		transport.mockInvoke('remove_worktree', (args) => {
+			sent = args;
+			return { branchDeleted: true };
+		});
+		let listed = 0;
+		transport.mockInvoke('list_worktrees', () => {
+			listed++;
+			return [{ path: '/a', head: '1', branch: 'main', isMain: true }];
+		});
+		const removed = await store.removeWorktree('/a', '/a-x', { deleteBranch: true });
+		expect(removed).toEqual({ branchDeleted: true });
+		expect(sent).toEqual({
+			repoPath: '/a',
+			worktreePath: '/a-x',
+			force: false,
+			deleteBranch: true
+		});
+		expect(store.worktrees['/a'].map((w) => w.path)).toEqual(['/a']);
+		await vi.waitFor(() => expect(listed).toBe(1));
+	});
+
+	it('a refused removeWorktree throws and keeps the row', async () => {
+		const row = { path: '/a-x', head: '2', branch: 'x', isMain: false };
+		store.worktrees = { '/a': [row] };
+		transport.mockInvoke('remove_worktree', () => {
+			throw new Error('contains modified or untracked files');
+		});
+		await expect(store.removeWorktree('/a', '/a-x')).rejects.toThrow(/modified/);
+		expect(store.worktrees['/a']).toEqual([row]);
 	});
 
 	it('captures errors from the transport into store.error', async () => {

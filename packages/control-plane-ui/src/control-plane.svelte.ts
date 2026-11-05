@@ -1,5 +1,6 @@
 import type { ControlPlaneTransport } from '@workbench/transport';
 import type {
+	BranchInfo,
 	CloneProjectRequest,
 	CreateFolderRequest,
 	FolderListing,
@@ -155,13 +156,43 @@ export class ControlPlaneStore {
 		}
 	}
 
-	async createWorktree(projectPath: string, branch: string) {
-		const result = await this.run(() =>
-			this.transport.invoke('create_worktree', {
-				request: { repoPath: projectPath, branch, newBranch: true }
-			})
-		);
-		if (result !== undefined) await this.loadWorktrees(projectPath);
-		return result;
+	/** A new branch's worktree; a failure lands in `error`. */
+	createWorktree(projectPath: string, branch: string) {
+		return this.run(() => this.addWorktree(projectPath, branch, true));
+	}
+
+	/** Checks out `branch` (made when `newBranch`) in a new worktree and answers its path.
+	 *  Throws, so the form that asked can show why. The host picks the base and folder. */
+	async addWorktree(projectPath: string, branch: string, newBranch: boolean): Promise<string> {
+		const path = await this.transport.invoke('create_worktree', {
+			request: { repoPath: projectPath, branch, newBranch }
+		});
+		await this.loadWorktrees(projectPath);
+		return path;
+	}
+
+	/** Removes a worktree's folder (and, asked, its branch: `git branch -d`, so unmerged work stays).
+	 *  Throws, so a refusal (uncommitted changes without `force`) can be shown. */
+	async removeWorktree(
+		projectPath: string,
+		worktreePath: string,
+		{ force = false, deleteBranch = false } = {}
+	): Promise<{ branchDeleted?: boolean } | null> {
+		const removed = await this.transport.invoke('remove_worktree', {
+			repoPath: projectPath,
+			worktreePath,
+			force,
+			deleteBranch
+		});
+		this.worktrees = {
+			...this.worktrees,
+			[projectPath]: (this.worktrees[projectPath] ?? []).filter((w) => w.path !== worktreePath)
+		};
+		void this.loadWorktrees(projectPath);
+		return removed;
+	}
+
+	listBranches(projectPath: string): Promise<BranchInfo[]> {
+		return this.transport.invoke('list_branches', { path: projectPath });
 	}
 }

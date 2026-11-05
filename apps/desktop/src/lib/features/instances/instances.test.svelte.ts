@@ -188,6 +188,25 @@ describe('RemoteInstance.checkHealth', () => {
 		expect(refresh).toHaveBeenCalledTimes(2);
 	});
 
+	it("re-reads the host's accounts on every poll, so one added there shows up", async () => {
+		const inst = new RemoteInstance({ id: '1', name: 'box', url: 'http://box:4317' });
+		vi.spyOn(inst.store, 'refresh').mockResolvedValue(undefined);
+		vi.spyOn(inst.hostUpdate, 'check').mockResolvedValue(undefined);
+		const loadAccounts = vi.fn(async () => {});
+		// The session itself needs a whole workspace store; only its account reload matters here.
+		(inst as unknown as { remoteSession: unknown }).remoteSession = {
+			session: { loadAccounts, dispose: () => {} },
+			destroy: () => {}
+		};
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(() => Promise.resolve({ ok: true }))
+		);
+		await inst.checkHealth();
+		await inst.checkHealth();
+		expect(loadAccounts).toHaveBeenCalledTimes(2);
+	});
+
 	it("checks the host's update on connect, and on every poll while one installs", async () => {
 		const inst = new RemoteInstance({ id: '1', name: 'box', url: 'http://box:4317' });
 		vi.spyOn(inst.store, 'refresh').mockResolvedValue(undefined);

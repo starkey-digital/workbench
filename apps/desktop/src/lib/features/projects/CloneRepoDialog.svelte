@@ -10,7 +10,7 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import { selectFolder } from '$lib/utils/dialog';
 	import { baseName } from '$lib/utils/path';
-	import { repoUrl } from '$lib/utils/repo-url';
+	import { repoUrl } from '@workbench/control-plane-ui';
 	import { getProjectStore, getWorkbenchSettingsStore } from '$stores/context';
 	import type { GitHubRepo } from '$types/workbench';
 	import GitHubRepoPicker from './GitHubRepoPicker.svelte';

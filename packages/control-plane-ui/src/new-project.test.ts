@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createMockTransport } from '@workbench/transport';
-import { ControlPlaneStore } from '@workbench/control-plane-ui';
-import { NewProjectFlow } from './new-project.svelte';
-import { repoUrl } from '$lib/utils/repo-url';
+import { ControlPlaneStore } from './control-plane.svelte.ts';
+import { NewProjectFlow } from './new-project.svelte.ts';
+import { repoUrl } from './repo-url.ts';
 
 function setup(projects: { name: string; path: string }[] = []) {
 	const transport = createMockTransport();
@@ -73,6 +73,13 @@ describe('NewProjectFlow', () => {
 		]);
 		expect(flow.added?.path).toBe('/home/me/app');
 		expect(store.projects.map((p) => p.path)).toContain('/home/me/app');
+	});
+
+	it('knows a Windows project however git or the desktop spelled its path', async () => {
+		const { store } = setup([{ name: 'repo', path: 'c:\\Users\\me\\repo' }]);
+		const flow = new NewProjectFlow(store);
+		await ready(flow);
+		expect(flow.isProject('C:/Users/me/repo/')).toBe(true);
 	});
 
 	it('makes a new folder where it is browsing, then adds it', async () => {

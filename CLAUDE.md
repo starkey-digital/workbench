@@ -21,7 +21,7 @@ packages/
   transport/         # @workbench/transport: ControlPlaneTransport (Tauri/Http/mock impls), typed via @workbench/types
   ui/                # @workbench/ui: shadcn-svelte primitives + cn(); subpath exports (@workbench/ui/button …)
   theme/             # @workbench/theme: theme.css — design tokens, accent presets, Tailwind v4 @theme mappings
-  control-plane-ui/  # @workbench/control-plane-ui: transport-driven ControlPlaneStore, FolderBrowser, HostUpdate, projectSections (desktop-remote + mobile)
+  control-plane-ui/  # @workbench/control-plane-ui: transport-driven ControlPlaneStore, FolderBrowser, NewProjectFlow (add / new folder / clone), HostUpdate, projectSections (desktop-remote + mobile)
   telemetry/         # @workbench/telemetry: Sentry setup + reporting shared by both webviews (see Observability)
   chat-ui/           # @workbench/chat-ui: Claude chat view (AgentChat, agentClient, ChatTranscript, composer, cards) for desktop + mobile
 plugins/workbench/    # Claude Code plugin (mod) reporting session activity to the hook bridge; injected only (no marketplace), so `plugin.json` is all it keeps of `.claude-plugin/`. Workspace package @workbench/claude-plugin: `test` = bun test (`test/`, the link's timeouts and retries against a fake fetch), `check` = tsc against types/claude-code.d.ts (the plugin API Claude Code 2.1.309 writes; replace it whole when bumping the tested CLI: the `plugin-authoring` skill writes the full file, built-in tool types included, to its own folder's `types/claude-code.d.ts`), `lint` = eslint; `claude plugin validate plugins/workbench` locally (no CLI in CI)

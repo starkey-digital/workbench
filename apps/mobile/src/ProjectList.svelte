@@ -5,12 +5,14 @@
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import StarIcon from '@lucide/svelte/icons/star';
 	import XIcon from '@lucide/svelte/icons/x';
-	import type { ProjectConfig } from '@workbench/types';
+	import { baseName, type ProjectConfig, type WorktreeInfo } from '@workbench/types';
 	import type { MobileClient } from './client.svelte.ts';
 	import type { ReviewFolder } from './project-review.svelte';
 	import { projectSections } from '@workbench/control-plane-ui';
+	import NewWorktreeSheet from './NewWorktreeSheet.svelte';
 	import ProjectRow from './ProjectRow.svelte';
 	import ProjectSheet from './ProjectSheet.svelte';
+	import RemoveWorktreeSheet from './RemoveWorktreeSheet.svelte';
 
 	let {
 		client,
@@ -25,6 +27,8 @@
 	let query = $state('');
 	/** The open add (no project) or edit sheet. */
 	let sheet = $state<{ project?: ProjectConfig } | null>(null);
+	/** The open new-worktree (no `worktree`) or remove-worktree sheet. */
+	let worktreeSheet = $state.raw<{ project: ProjectConfig; worktree?: WorktreeInfo } | null>(null);
 	/** Kept here so a row stays open when starring or searching remounts it. */
 	const expanded = new SvelteSet<string>();
 	const searching = $derived(query.trim() !== '');
@@ -123,12 +127,30 @@
 						}}
 						{onReview}
 						onEdit={() => (sheet = { project })}
+						onNewWorktree={() => (worktreeSheet = { project })}
+						onRemoveWorktree={(worktree) => (worktreeSheet = { project, worktree })}
 					/>
 				{/each}
 			{/if}
 		</div>
 	{/each}
 </section>
+
+{#if worktreeSheet?.worktree}
+	<RemoveWorktreeSheet
+		{client}
+		projectPath={worktreeSheet.project.path}
+		worktree={worktreeSheet.worktree}
+		onClose={() => (worktreeSheet = null)}
+	/>
+{:else if worktreeSheet}
+	<NewWorktreeSheet
+		{client}
+		projectPath={worktreeSheet.project.path}
+		name={worktreeSheet.project.name || baseName(worktreeSheet.project.path)}
+		onClose={() => (worktreeSheet = null)}
+	/>
+{/if}
 
 {#if sheet}
 	<ProjectSheet
