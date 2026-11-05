@@ -1,10 +1,7 @@
 import type { ControlPlaneStore } from '@workbench/control-plane-ui';
 import type { BranchInfo, WorktreeInfo } from '@workbench/types';
+import { errorText } from './error-text.ts';
 import { freeBranches } from './free-branches.ts';
-
-function errorText(e: unknown): string {
-	return e instanceof Error ? e.message : String(e);
-}
 
 /** "New worktree" for one project: a new branch off the host's default base, or an existing one. */
 export class NewWorktreeFlow {
@@ -77,19 +74,21 @@ export class WorktreeRemoval {
 	error = $state<string | null>(null);
 	/** git refused a plain remove (uncommitted or untracked files): the next try forces. */
 	needsForce = $state(false);
-	/** Set once removed: whether the branch asked to go stayed (unmerged work, or checked out elsewhere). */
-	done = $state.raw<{ branchKept: boolean } | null>(null);
+	/** Set once the folder is gone. `branchKept`: the branch asked to go stayed, because it has
+	 *  unmerged work or is checked out elsewhere (`oldHost`: the host predates deleting it, and
+	 *  nothing over HTTP can). `sessionsOpen`: a session in it didn't close, so `closeSessions` retries. */
+	done = $state.raw<{ branchKept: boolean; oldHost: boolean; sessionsOpen: boolean } | null>(null);
 	readonly projectPath: string;
 	readonly worktree: WorktreeInfo;
 	private readonly store: ControlPlaneStore;
-	/** Ends the sessions the host has open in the worktree. */
-	private readonly closeWorkspaces: (worktreePath: string) => Promise<void>;
+	/** Ends the sessions the host has open in the worktree; false when one wouldn't close. */
+	private readonly closeWorkspaces: (worktreePath: string) => Promise<boolean>;
 
 	constructor(
 		store: ControlPlaneStore,
 		projectPath: string,
 		worktree: WorktreeInfo,
-		closeWorkspaces: (worktreePath: string) => Promise<void>
+		closeWorkspaces: (worktreePath: string) => Promise<boolean>
 	) {
 		this.store = store;
 		this.projectPath = projectPath;
@@ -97,8 +96,9 @@ export class WorktreeRemoval {
 		this.closeWorkspaces = closeWorkspaces;
 	}
 
+	/** Whether everything finished: false on a refusal, a kept branch or a session left open. */
 	async remove(): Promise<boolean> {
-		if (this.busy) return false;
+		if (this.busy || this.done) return false;
 		this.busy = true;
 		this.error = null;
 		const deleteBranch = this.deleteBranch && !!this.worktree.branch;
@@ -107,16 +107,30 @@ export class WorktreeRemoval {
 				force: this.needsForce,
 				deleteBranch
 			});
-			await this.closeWorkspaces(this.worktree.path);
-			this.done = { branchKept: deleteBranch && removed?.branchDeleted === false };
-			return true;
+			const deleted = removed?.branchDeleted;
+			this.done = {
+				branchKept: deleteBranch && deleted !== true,
+				oldHost: deleteBranch && deleted === undefined,
+				sessionsOpen: false
+			};
 		} catch (e) {
 			this.error = errorText(e);
 			// Only git's own "use --force" refusal: a dropped connection must never escalate to forcing.
 			if (/--force/.test(this.error)) this.needsForce = true;
-			return false;
-		} finally {
 			this.busy = false;
+			return false;
 		}
+		const closed = await this.closeSessions();
+		return closed && !this.done.branchKept;
+	}
+
+	/** Ends the sessions still open in the removed worktree; true once none are. */
+	async closeSessions(): Promise<boolean> {
+		if (!this.done) return false;
+		this.busy = true;
+		const closed = await this.closeWorkspaces(this.worktree.path);
+		this.done = { ...this.done, sessionsOpen: !closed };
+		this.busy = false;
+		return closed;
 	}
 }

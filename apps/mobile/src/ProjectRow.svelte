@@ -50,15 +50,6 @@
 	/** A git checkout lists at least its main worktree; any other folder has none to manage. */
 	const isRepo = $derived(!!store.worktrees[project.path]?.length);
 	const githubUrl = $derived(store.githubUrls[project.path]);
-	/** Open sessions per worktree path. */
-	const sessionsIn = $derived.by(() => {
-		const counts: Record<string, number> = {};
-		for (const { workspace } of client.panes) {
-			const path = workspace.worktreePath;
-			if (workspace.projectPath === project.path && path) counts[path] = (counts[path] ?? 0) + 1;
-		}
-		return counts;
-	});
 
 	const chip =
 		'flex h-8 min-w-0 items-center gap-1.5 rounded-lg border border-wb-hair bg-wb-panel px-2.5 text-[12px] text-wb-ink-mute active:bg-wb-panel2';
@@ -182,7 +173,7 @@
 					</h3>
 					{#each worktrees as w (w.path)}
 						{@const label = `${name} · ${w.branch || baseName(w.path)}`}
-						{@const sessions = sessionsIn[w.path] ?? 0}
+						{@const sessions = client.sessionsIn(w.path)}
 						<div
 							class="flex flex-col gap-2 rounded-lg border border-wb-hair-soft bg-wb-panel p-2.5"
 						>

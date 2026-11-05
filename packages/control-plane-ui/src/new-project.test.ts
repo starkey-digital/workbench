@@ -75,6 +75,13 @@ describe('NewProjectFlow', () => {
 		expect(store.projects.map((p) => p.path)).toContain('/home/me/app');
 	});
 
+	it('knows a Windows project however git or the desktop spelled its path', async () => {
+		const { store } = setup([{ name: 'repo', path: 'c:\\Users\\me\\repo' }]);
+		const flow = new NewProjectFlow(store);
+		await ready(flow);
+		expect(flow.isProject('C:/Users/me/repo/')).toBe(true);
+	});
+
 	it('makes a new folder where it is browsing, then adds it', async () => {
 		const { store, calls } = setup();
 		const flow = new NewProjectFlow(store);

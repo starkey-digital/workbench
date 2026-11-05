@@ -52,6 +52,8 @@ export class RemoteSession {
 			this.defaultAccountName
 	);
 	private readonly uiKey: string;
+	/** Bumped by each account switch; an account read started before one doesn't undo it. */
+	private accountSwitches = 0;
 
 	private readonly transport: ControlPlaneTransport;
 	private readonly control: Pick<ControlPlaneStore, 'projects' | 'updateProject'>;
@@ -86,8 +88,10 @@ export class RemoteSession {
 		void this.loadAccounts();
 	}
 
-	/** The host's logins and its pick for new sessions; re-read on reconnect and Refresh. */
+	/** The host's logins and its pick for new sessions; re-read on every health poll and Refresh.
+	 *  It leaves `accountError` alone, so a poll can't hide why a switch failed. */
 	async loadAccounts(): Promise<void> {
+		const switches = this.accountSwitches;
 		try {
 			const settings = (await this.transport.invoke(
 				'load_workbench_settings',
@@ -95,18 +99,20 @@ export class RemoteSession {
 			)) as WorkbenchSettings;
 			this.claudeAccounts = settings.claudeAccounts ?? [];
 			this.defaultAccountName = defaultAccountName(settings);
+			// Read before a switch from here: its active account is older than the switch.
+			if (switches !== this.accountSwitches) return;
 			const active = settings.activeClaudeAccount;
 			this.activeAccountId = this.claudeAccounts.some((a) => a.id === active)
 				? (active ?? undefined)
 				: undefined;
-			this.accountError = null;
 		} catch {
-			/* An unreachable host keeps its default account only. */
+			/* An unreachable host keeps what was read last. */
 		}
 	}
 
 	/** Sets the host's account for new Claude sessions; running ones keep theirs. */
 	async setActiveAccount(id: string | undefined): Promise<void> {
+		this.accountSwitches++;
 		try {
 			await this.transport.invoke('set_active_claude_account', { id: id ?? null });
 			this.activeAccountId = id;

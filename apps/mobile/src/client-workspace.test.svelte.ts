@@ -281,16 +281,53 @@ describe('MobileClient on a host with the workspace API', () => {
 		await vi.waitFor(() => expect(c.accountId).toBe('work'));
 	});
 
-	it('closes a workspace, and every workspace of a removed worktree', async () => {
+	it('closes a workspace, and every workspace of a removed worktree however it is spelled', async () => {
 		const { c } = await connected();
-		const inWorktree = { ...workspace(pane('p2')), id: 'w2', worktreePath: '/repo-wt' };
+		const inWorktree = { ...workspace(pane('p2')), id: 'w2', worktreePath: 'C:\\Repo-wt' };
 		snapshot(1, workspace(pane('p1')), inWorktree);
-		await c.closeWorktreeWorkspaces('/repo-wt');
+		expect(c.sessionsIn('c:/repo-wt/')).toBe(1);
+		expect(await c.closeWorktreeWorkspaces('c:/repo-wt/')).toBe(true);
 		await c.closeWorkspace('w1');
 		expect(commands).toEqual([
 			{ type: 'closeWorkspace', workspaceId: 'w2' },
 			{ type: 'closeWorkspace', workspaceId: 'w1' }
 		]);
+		reply = () => new Response('busy', { status: 500 });
+		expect(await c.closeWorktreeWorkspaces('C:\\Repo-wt')).toBe(false);
+	});
+
+	it("an account re-read started before a switch doesn't undo it", async () => {
+		let answer: (r: Response) => void = () => {};
+		let slow = false;
+		const { c } = await connected({
+			'/settings/workbench': () =>
+				slow
+					? new Promise<Response>((r) => (answer = r))
+					: jsonResponse({
+							claudeAccounts: [
+								{ id: 'work', name: 'Work' },
+								{ id: 'side', name: 'Side' }
+							],
+							activeClaudeAccount: 'work',
+							extendedDiagnostics: true
+						}),
+			'/settings/active-claude-account': () => new Response(null, { status: 204 })
+		});
+		await vi.waitFor(() => expect(c.accountId).toBe('work'));
+		slow = true;
+		const read = c.loadAccounts();
+		await c.setAccount('side');
+		answer(
+			jsonResponse({
+				claudeAccounts: [
+					{ id: 'work', name: 'Work' },
+					{ id: 'side', name: 'Side' }
+				],
+				activeClaudeAccount: 'work'
+			})
+		);
+		await read;
+		expect(c.accountId).toBe('side');
 	});
 
 	it('picks up an account the host added when the app comes back to the front', async () => {

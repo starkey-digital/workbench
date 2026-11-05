@@ -23,12 +23,10 @@
 		client.closeWorktreeWorkspaces(path)
 	);
 	const label = $derived(worktree.branch || baseName(worktree.path));
-	const sessions = $derived(
-		client.panes.filter((e) => e.workspace.worktreePath === worktree.path).length
-	);
+	const sessions = $derived(client.sessionsIn(worktree.path));
 
 	async function remove() {
-		if ((await removal.remove()) && !removal.done?.branchKept) onClose();
+		if (await removal.remove()) onClose();
 	}
 </script>
 
@@ -52,10 +50,30 @@
 		</div>
 
 		{#if removal.done}
-			<p class="text-xs text-wb-ink-mute" role="status">
-				Kept branch <span class="font-mono">{worktree.branch}</span>: it has commits that aren't
-				merged, or it's checked out somewhere else.
-			</p>
+			{#if removal.done.sessionsOpen}
+				<div class="flex flex-col gap-2 rounded-lg border border-wb-err/40 bg-wb-err/10 p-3">
+					<p class="text-xs text-wb-err" role="alert">
+						The folder is gone, but its sessions didn't all close. They're still running on the
+						host.
+					</p>
+					<button
+						type="button"
+						class="h-9 rounded-lg bg-wb-err/15 text-[13px] font-semibold text-wb-err disabled:opacity-50"
+						disabled={removal.busy}
+						onclick={async () => {
+							if ((await removal.closeSessions()) && !removal.done?.branchKept) onClose();
+						}}>{removal.busy ? 'Closing…' : 'Close its sessions'}</button
+					>
+				</div>
+			{/if}
+			{#if removal.done.branchKept}
+				<p class="text-xs text-wb-ink-mute" role="status">
+					Kept branch <span class="font-mono">{worktree.branch}</span>:
+					{removal.done.oldHost
+						? 'this Workbench on the host is too old to delete branches. Update it, or delete the branch there.'
+						: "it has commits that aren't merged, or it's checked out somewhere else."}
+				</p>
+			{/if}
 		{:else}
 			<ul class="flex list-disc flex-col gap-1 pl-5 text-xs text-wb-ink-mute">
 				<li>The folder is deleted from the host.</li>

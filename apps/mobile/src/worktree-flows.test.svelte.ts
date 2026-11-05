@@ -82,7 +82,7 @@ describe('NewWorktreeFlow', () => {
 });
 
 describe('WorktreeRemoval', () => {
-	function removal(reply: (args: Record<string, unknown>) => unknown) {
+	function removal(reply: (args: Record<string, unknown>) => unknown, closes = [true]) {
 		const transport = createMockTransport();
 		const sent: Record<string, unknown>[] = [];
 		transport.mockInvoke('remove_worktree', (a) => {
@@ -95,7 +95,10 @@ describe('WorktreeRemoval', () => {
 			new ControlPlaneStore(transport),
 			'/repo',
 			tree('/repo-x', 'x'),
-			async (path) => void closed.push(path)
+			async (path) => {
+				closed.push(path);
+				return closes[closed.length - 1] ?? true;
+			}
 		);
 		return { flow, sent, closed };
 	}
@@ -107,13 +110,33 @@ describe('WorktreeRemoval', () => {
 			{ repoPath: '/repo', worktreePath: '/repo-x', force: false, deleteBranch: true }
 		]);
 		expect(closed).toEqual(['/repo-x']);
-		expect(flow.done).toEqual({ branchKept: false });
+		expect(flow.done).toEqual({ branchKept: false, oldHost: false, sessionsOpen: false });
 	});
 
-	it('says when git kept the branch', async () => {
-		const { flow } = removal(() => ({ branchDeleted: false }));
-		await flow.remove();
-		expect(flow.done).toEqual({ branchKept: true });
+	it('says when git kept the branch, or the host is too old to delete it', async () => {
+		const kept = removal(() => ({ branchDeleted: false }));
+		expect(await kept.flow.remove()).toBe(false);
+		expect(kept.flow.done).toMatchObject({ branchKept: true, oldHost: false });
+
+		const old = removal(() => null);
+		expect(await old.flow.remove()).toBe(false);
+		expect(old.flow.done).toMatchObject({ branchKept: true, oldHost: true });
+
+		const keepBranch = removal(() => null);
+		keepBranch.flow.deleteBranch = false;
+		expect(await keepBranch.flow.remove()).toBe(true);
+		expect(keepBranch.flow.done).toMatchObject({ branchKept: false, oldHost: false });
+	});
+
+	it('keeps the sheet on a retry when a session would not close, and never removes twice', async () => {
+		const { flow, sent, closed } = removal(() => ({ branchDeleted: true }), [false, true]);
+		expect(await flow.remove()).toBe(false);
+		expect(flow.done?.sessionsOpen).toBe(true);
+		expect(await flow.remove()).toBe(false);
+		expect(sent).toHaveLength(1);
+		expect(await flow.closeSessions()).toBe(true);
+		expect(flow.done?.sessionsOpen).toBe(false);
+		expect(closed).toEqual(['/repo-x', '/repo-x']);
 	});
 
 	it("offers force only after git's own refusal, and closes nothing on failure", async () => {
