@@ -40,13 +40,13 @@
 	<div class="flex min-w-0 flex-1 flex-col gap-px">
 		<span class="truncate text-xs text-wb-ink" title={check.name}>{check.name}</span>
 		{#if check.subtitle && check.subtitle !== check.name}
-			<span class="truncate text-[10.5px] text-wb-ink-soft" title={check.subtitle}>
+			<span class="truncate text-[11px] text-wb-ink-soft" title={check.subtitle}>
 				{check.subtitle}
 			</span>
 		{/if}
 	</div>
 	{#if duration}
-		<span class="shrink-0 font-mono text-[10.5px] text-wb-ink-soft">{duration}</span>
+		<span class="shrink-0 font-mono text-[11px] text-wb-ink-soft">{duration}</span>
 	{/if}
 {/snippet}
 

@@ -120,7 +120,7 @@
 			<div class="flex min-w-0 flex-1 flex-col">
 				<span class="text-xs font-medium text-wb-ink">{row.label}</span>
 				{#if row.detail}
-					<span class="text-[10.5px] text-wb-ink-soft">{row.detail}</span>
+					<span class="text-[11px] text-wb-ink-soft">{row.detail}</span>
 				{/if}
 			</div>
 			{#if row.key === 'branch' && pr.actions.canUpdateBranch}
@@ -200,7 +200,7 @@
 						)
 					)}
 				</div>
-				<span class="text-center text-[10.5px] text-wb-ink-soft">
+				<span class="text-center text-[11px] text-wb-ink-soft">
 					Merges automatically once every requirement passes
 				</span>
 			{/if}

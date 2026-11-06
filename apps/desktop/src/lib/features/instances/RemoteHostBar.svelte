@@ -41,10 +41,10 @@
 	{/if}
 	{#each [session.accountError, update.error] as error, i (i)}
 		{#if error}
-			<p role="alert" class="px-3 pt-1.5 text-[10.5px] text-wb-err">{error}</p>
+			<p role="alert" class="px-3 pt-1.5 text-[11px] text-wb-err">{error}</p>
 		{/if}
 	{/each}
-	<div class="flex h-7 items-center gap-2 px-2 font-mono text-[10.5px] text-wb-ink-mute">
+	<div class="flex h-7 items-center gap-2 px-2 font-mono text-[11px] text-wb-ink-mute">
 		<DropdownMenu.Root>
 			<DropdownMenu.Trigger
 				class="flex min-w-0 items-center gap-1 rounded px-1 py-0.5 transition-colors hover:bg-wb-panel2 hover:text-wb-ink"
@@ -67,7 +67,7 @@
 					</DropdownMenu.Item>
 				{/each}
 				<DropdownMenu.Separator />
-				<p class="px-2 py-1 text-[10.5px] text-wb-ink-soft">
+				<p class="px-2 py-1 text-[11px] text-wb-ink-soft">
 					Add accounts or log in on the host itself.
 				</p>
 			</DropdownMenu.Content>

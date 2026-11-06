@@ -97,5 +97,5 @@
 			<ExternalLinkIcon class="size-3.5" />
 		</button>
 	</div>
-	<p class="text-[13.5px] leading-[1.35] font-semibold text-wb-ink">{pr.title}</p>
+	<p class="text-[13px] leading-[1.35] font-semibold text-wb-ink">{pr.title}</p>
 </div>

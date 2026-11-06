@@ -117,7 +117,7 @@
 				<div class="flex flex-col gap-1.5">
 					<Label
 						for="branch-name"
-						class="text-[10.5px] font-medium tracking-wide text-wb-ink-soft uppercase"
+						class="text-[10px] font-medium tracking-wide text-wb-ink-soft uppercase"
 					>
 						Branch name
 					</Label>
@@ -133,7 +133,7 @@
 				</div>
 			{:else}
 				<div class="flex flex-col gap-1.5">
-					<Label class="text-[10.5px] font-medium tracking-wide text-wb-ink-soft uppercase">
+					<Label class="text-[10px] font-medium tracking-wide text-wb-ink-soft uppercase">
 						Branch
 					</Label>
 					<Select.Root
@@ -162,13 +162,13 @@
 
 			{#if worktreePath}
 				<div class="flex flex-col gap-1.5">
-					<Label class="text-[10.5px] font-medium tracking-wide text-wb-ink-soft uppercase">
+					<Label class="text-[10px] font-medium tracking-wide text-wb-ink-soft uppercase">
 						Worktree path
 					</Label>
 					<Input
 						value={worktreePath}
 						readonly
-						class="border-wb-hair bg-wb-bg font-mono text-[11.5px] text-wb-ink-mute"
+						class="border-wb-hair bg-wb-bg font-mono text-[12px] text-wb-ink-mute"
 					/>
 					<span class="text-[11px] text-wb-ink-soft">
 						If that folder exists, the host adds -2, -3, … to the name.
@@ -178,7 +178,7 @@
 
 			<!-- Copy options -->
 			<div class="flex flex-col gap-3 rounded-md border border-wb-hair bg-wb-bg/60 p-3">
-				<span class="text-[10.5px] font-medium tracking-wide text-wb-ink-soft uppercase">
+				<span class="text-[10px] font-medium tracking-wide text-wb-ink-soft uppercase">
 					Copy untracked workspace files
 				</span>
 				<div class="flex items-center justify-between gap-3">

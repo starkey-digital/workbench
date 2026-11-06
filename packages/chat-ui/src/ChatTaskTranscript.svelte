@@ -57,7 +57,7 @@
 		<div class="flex flex-wrap gap-1">
 			{#each block.tools as tool (tool.id)}
 				<span
-					class="max-w-full truncate rounded-md border border-wb-hair px-1.5 py-0.5 font-mono text-[10.5px] text-wb-ink-mute"
+					class="max-w-full truncate rounded-md border border-wb-hair px-1.5 py-0.5 font-mono text-[11px] text-wb-ink-mute"
 					title={toolDetail(tool, cwd)}
 				>
 					{tool.name} <span class="text-wb-ink">{toolDetail(tool, cwd)}</span>
@@ -88,7 +88,7 @@
 		</span>
 	{:else}
 		{#if poll.value.start > 0}
-			<p class="text-center text-[10.5px] text-wb-ink-soft">Earlier steps aren't shown.</p>
+			<p class="text-center text-[11px] text-wb-ink-soft">Earlier steps aren't shown.</p>
 		{/if}
 		{#each blocks as block (block.kind === 'item' ? block.item.id : block.id)}
 			{#if block.kind === 'steps'}

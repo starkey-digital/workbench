@@ -115,7 +115,7 @@
 						{#each access as col (col.title)}
 							<div class="rounded-md border border-wb-hair bg-wb-bg px-2.5 py-2">
 								<h3 class="mb-1 text-[11px] font-semibold text-wb-ink-mute">{col.title}</h3>
-								<p class="text-[11.5px] leading-relaxed text-wb-ink">{col.body}</p>
+								<p class="text-[12px] leading-relaxed text-wb-ink">{col.body}</p>
 							</div>
 						{/each}
 					</div>

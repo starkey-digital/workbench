@@ -86,7 +86,7 @@
 					<span class={['size-1.5 shrink-0 rounded-full', tone ? TONE_BG[tone] : 'bg-wb-hair']}
 					></span>
 					<span class="min-w-0 flex-1 truncate">{other.title}</span>
-					<span class="shrink-0 font-mono text-[10.5px] text-wb-ink-soft">#{other.number}</span>
+					<span class="shrink-0 font-mono text-[11px] text-wb-ink-soft">#{other.number}</span>
 				</button>
 			{/each}
 		</SidebarSection>

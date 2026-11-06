@@ -65,7 +65,7 @@
 		{#if instance.status === 'offline' && !instance.hostUpdate.updating}
 			<div class="flex-1 px-3 py-8 text-center">
 				<p class="font-mono text-[11px] text-wb-err">Offline</p>
-				<p class="mt-1 font-mono text-[10.5px] break-all text-wb-ink-mute">
+				<p class="mt-1 font-mono text-[11px] break-all text-wb-ink-mute">
 					Can't reach {instance.config.url}
 				</p>
 			</div>

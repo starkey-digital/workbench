@@ -69,7 +69,7 @@
 	<div class="flex items-center gap-1.5">
 		<Popover.Root bind:open={pickerOpen}>
 			<Popover.Trigger
-				class="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md border border-wb-hair bg-wb-bg px-2 font-mono text-[12.5px] font-semibold text-wb-ink hover:border-wb-ink-soft data-[state=open]:border-wb-accent"
+				class="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md border border-wb-hair bg-wb-bg px-2 font-mono text-[12px] font-semibold text-wb-ink hover:border-wb-ink-soft data-[state=open]:border-wb-accent"
 				aria-label="Switch branch, current {status.branch}"
 			>
 				<GitBranchIcon class="size-3.5 shrink-0 text-wb-accent" />
@@ -115,7 +115,7 @@
 		{#if buttonLabel}
 			<button
 				type="button"
-				class={cn(primaryButton, 'h-[26px] rounded-md px-2.5 text-[11.5px]')}
+				class={cn(primaryButton, 'h-[26px] rounded-md px-2.5 text-[12px]')}
 				disabled={syncing}
 				onclick={runSync}
 			>

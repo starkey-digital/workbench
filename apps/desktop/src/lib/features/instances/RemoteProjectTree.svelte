@@ -92,7 +92,7 @@
 {/if}
 
 {#if store.error}
-	<p class="mx-2 mt-1 rounded bg-wb-err/10 px-2 py-1 font-mono text-[10.5px] text-wb-err">
+	<p class="mx-2 mt-1 rounded bg-wb-err/10 px-2 py-1 font-mono text-[11px] text-wb-err">
 		{store.error}
 	</p>
 {/if}
@@ -124,7 +124,7 @@
 							<ChevronDownIcon class="size-3 shrink-0 text-wb-ink-mute" />
 						{/if}
 						<span
-							class="truncate text-[10.5px] font-semibold tracking-wider text-wb-ink-mute uppercase"
+							class="truncate text-[10px] font-semibold tracking-wider text-wb-ink-mute uppercase"
 							>{section.title}</span
 						>
 						<span class="ml-auto font-mono text-[10px] text-wb-ink-mute"
@@ -256,7 +256,7 @@
 		active?.projectPath === project.path && (active.worktreePath ?? undefined) === worktree?.path}
 	<div
 		class={[
-			'group flex h-[26px] items-center gap-1.5 pr-1.5 pl-2.5 font-mono text-[11.5px] transition-colors',
+			'group flex h-[26px] items-center gap-1.5 pr-1.5 pl-2.5 font-mono text-[12px] transition-colors',
 			isActive
 				? 'bg-wb-accent-soft text-wb-ink'
 				: 'text-wb-ink-mute hover:bg-wb-panel2/60 hover:text-wb-ink'

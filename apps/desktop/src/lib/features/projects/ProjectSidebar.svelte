@@ -153,9 +153,7 @@
 				{:else if projectStore.projects.length === 0}
 					<div class="px-3 py-8 text-center">
 						<p class="font-mono text-[11px] text-wb-ink-mute">No projects yet.</p>
-						<p class="mt-1 font-mono text-[10.5px] text-wb-ink-mute">
-							Add a folder to get started.
-						</p>
+						<p class="mt-1 font-mono text-[11px] text-wb-ink-mute">Add a folder to get started.</p>
 					</div>
 				{:else if sections.length === 0}
 					<p class="px-3 py-4 text-center font-mono text-[11px] text-wb-ink-mute">No matches.</p>
@@ -179,7 +177,7 @@
 									<StarIcon class="size-2.5 shrink-0 fill-wb-warn text-wb-warn" />
 								{/if}
 								<span
-									class="truncate text-[10.5px] font-semibold tracking-wider text-wb-ink-mute uppercase"
+									class="truncate text-[10px] font-semibold tracking-wider text-wb-ink-mute uppercase"
 									>{section.title}</span
 								>
 								<span class="ml-auto font-mono text-[10px] text-wb-ink-mute"
@@ -397,7 +395,7 @@
 		<ContextMenu.Trigger>
 			<div
 				class={[
-					'group flex h-[26px] items-center gap-1.5 pr-1.5 pl-2.5 font-mono text-[11.5px] transition-colors',
+					'group flex h-[26px] items-center gap-1.5 pr-1.5 pl-2.5 font-mono text-[12px] transition-colors',
 					row.isActive
 						? 'bg-wb-accent-soft text-wb-ink'
 						: 'text-wb-ink-mute hover:bg-wb-panel2/60 hover:text-wb-ink'

@@ -72,7 +72,7 @@
 		<header class="flex shrink-0 items-start gap-4 border-b border-wb-hair-soft px-7 pt-5.5 pb-4">
 			<div class="min-w-0 flex-1">
 				<h1 class="text-[17px] font-semibold tracking-tight">{page.title ?? page.label}</h1>
-				<p class="mt-1 text-[12.5px] leading-relaxed text-wb-ink-mute">{page.description}</p>
+				<p class="mt-1 text-[12px] leading-relaxed text-wb-ink-mute">{page.description}</p>
 			</div>
 			{#if isClaudePage}
 				<div class="flex shrink-0 flex-col items-end gap-2">
@@ -166,12 +166,12 @@
 
 		<footer class="flex h-12 shrink-0 items-center gap-2 border-t border-wb-hair pr-4 pl-7">
 			{#if page.store === 'immediate'}
-				<span class="flex flex-1 items-center gap-2 text-[11.5px] text-wb-ink-mute">
+				<span class="flex flex-1 items-center gap-2 text-[11px] text-wb-ink-mute">
 					<InfoIcon class="size-3.5" />
 					Changes on this page apply immediately.
 				</span>
 			{:else}
-				<span class="flex min-w-0 flex-1 items-center gap-2 text-[11.5px] text-wb-ink-mute">
+				<span class="flex min-w-0 flex-1 items-center gap-2 text-[11px] text-wb-ink-mute">
 					{#if activeStore.dirty}
 						<span class="size-1.5 shrink-0 rounded-full bg-wb-warn"></span>
 						<span class="text-wb-warn">Unsaved changes</span>

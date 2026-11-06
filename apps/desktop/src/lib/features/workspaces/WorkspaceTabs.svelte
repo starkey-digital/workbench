@@ -108,7 +108,7 @@
 					{/if}
 					<button
 						class={[
-							'flex items-center gap-1.5 px-3.5 font-mono text-[11.5px] whitespace-nowrap',
+							'flex items-center gap-1.5 px-3.5 font-mono text-[12px] whitespace-nowrap',
 							isActive ? 'text-wb-ink' : 'text-wb-ink-mute'
 						]}
 						type="button"
