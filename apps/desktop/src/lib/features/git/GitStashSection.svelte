@@ -33,7 +33,7 @@
 				<span class="truncate text-xs text-wb-ink" title={stash.message}>
 					{stash.message || `stash@{${stash.index}}`}
 				</span>
-				<span class="text-[10.5px] text-wb-ink-soft">
+				<span class="text-[11px] text-wb-ink-soft">
 					<span class="font-mono">{`stash@{${stash.index}}`}</span> · {formatRelativeTime(
 						stash.date
 					)}

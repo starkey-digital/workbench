@@ -57,19 +57,19 @@
 					<PackageIcon class="size-4 text-wb-accent" />
 				</div>
 				<div class="flex min-w-0 flex-1 flex-col gap-0.5 font-mono">
-					<span class="text-[12.5px] font-semibold text-wb-ink"
+					<span class="text-[12px] font-semibold text-wb-ink"
 						>{info.manager}
 						{#if info.managerVersion}
 							<span class="font-normal text-wb-ink-mute">{info.managerVersion}</span>
 						{/if}
 					</span>
-					<span class="truncate text-[10.5px] text-wb-ink-mute"
+					<span class="truncate text-[11px] text-wb-ink-mute"
 						>{info.detectedFrom === 'default' ? 'no lockfile, using npm' : info.detectedFrom}</span
 					>
 				</div>
 				<button
 					type="button"
-					class="flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-wb-accent px-3 font-mono text-[11.5px] font-semibold text-wb-rail hover:opacity-90"
+					class="flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-wb-accent px-3 font-mono text-[12px] font-semibold text-wb-rail hover:opacity-90"
 					title={installCommand(info)}
 					onclick={() => run('install', installCommand(info))}
 				>
@@ -77,7 +77,7 @@
 					Install
 				</button>
 			</div>
-			<p class="truncate font-mono text-[10.5px] text-wb-ink-mute">
+			<p class="truncate font-mono text-[11px] text-wb-ink-mute">
 				{workspace.projectName}{branch ? ` / ${branch}` : ''}
 			</p>
 		</div>
@@ -113,7 +113,7 @@
 						>
 							<span class="flex min-w-0 flex-1 flex-col gap-0.5">
 								<span class="truncate text-[12px] text-wb-ink">{script.name}</span>
-								<span class="truncate text-[10.5px] text-wb-ink-mute">{script.command}</span>
+								<span class="truncate text-[11px] text-wb-ink-mute">{script.command}</span>
 							</span>
 							<span
 								class="grid size-[22px] shrink-0 place-items-center rounded-[5px] bg-wb-accent text-wb-rail opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
@@ -127,7 +127,7 @@
 		</ScrollArea>
 
 		<p
-			class="shrink-0 border-t border-wb-hair px-3 py-2.5 font-mono text-[10.5px] leading-relaxed text-wb-ink-mute"
+			class="shrink-0 border-t border-wb-hair px-3 py-2.5 font-mono text-[11px] leading-relaxed text-wb-ink-mute"
 		>
 			Each script opens in its own terminal tab in this workspace.
 		</p>

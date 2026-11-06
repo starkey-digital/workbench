@@ -156,7 +156,7 @@
 			>
 				{#if cloning}
 					<LoaderIcon class="size-3 animate-spin" />
-					Cloning...
+					Cloning…
 				{:else}
 					<DownloadIcon class="size-3" />
 					Clone

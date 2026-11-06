@@ -36,7 +36,7 @@
 		{#if updaterStore.status === 'checking'}
 			<div class="flex flex-col items-center gap-3 py-6">
 				<LoaderIcon class="size-8 animate-spin text-muted-foreground" />
-				<p class="text-sm text-muted-foreground">Checking for updates...</p>
+				<p class="text-sm text-muted-foreground">Checking for updates…</p>
 			</div>
 		{:else if updaterStore.status === 'available'}
 			<Dialog.Header>
@@ -64,7 +64,7 @@
 					{#if progressPercent !== null}
 						{progressPercent}% complete
 					{:else}
-						Downloading...
+						Downloading…
 					{/if}
 				</Dialog.Description>
 			</Dialog.Header>

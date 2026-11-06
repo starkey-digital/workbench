@@ -67,7 +67,7 @@
 				</div>
 				<div class="flex flex-1 flex-col items-start text-left">
 					<span class="text-[13px] font-medium text-wb-ink">New Claude Session</span>
-					<span class="text-[11.5px] text-wb-ink-soft">AI coding assistant with full context</span>
+					<span class="text-[11px] text-wb-ink-soft">AI coding assistant with full context</span>
 				</div>
 				<span class="font-mono text-[11px] text-wb-ink-soft">claude</span>
 			</button>
@@ -85,7 +85,7 @@
 				</div>
 				<div class="flex flex-1 flex-col items-start text-left">
 					<span class="text-[13px] font-medium text-wb-ink">New Codex Session</span>
-					<span class="text-[11.5px] text-wb-ink-soft">OpenAI Codex agent in your terminal</span>
+					<span class="text-[11px] text-wb-ink-soft">OpenAI Codex agent in your terminal</span>
 				</div>
 				<span class="font-mono text-[11px] text-wb-ink-soft">codex</span>
 			</button>
@@ -105,7 +105,7 @@
 				</div>
 				<div class="flex flex-1 flex-col items-start text-left">
 					<span class="text-[13px] font-medium text-wb-ink">New Terminal</span>
-					<span class="text-[11.5px] text-wb-ink-soft">Plain interactive shell session</span>
+					<span class="text-[11px] text-wb-ink-soft">Plain interactive shell session</span>
 				</div>
 				<span class="font-mono text-[11px] text-wb-ink-soft">$</span>
 			</button>

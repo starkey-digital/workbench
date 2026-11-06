@@ -28,7 +28,7 @@
 		<GitBranchIcon class="size-3 shrink-0 text-wb-ink-soft" />
 		<DropdownMenu.Root>
 			<DropdownMenu.Trigger
-				class="flex min-w-0 items-center gap-1 font-mono text-[11.5px] text-wb-ink hover:text-wb-accent"
+				class="flex min-w-0 items-center gap-1 font-mono text-[12px] text-wb-ink hover:text-wb-accent"
 				aria-label="Choose branch to view, showing {target.branch}"
 			>
 				<span class="truncate">{target.branch}</span>
@@ -51,7 +51,7 @@
 					{#each prBranches as pr (pr.number)}
 						<DropdownMenu.Item onclick={() => show(pr.headRefName)}>
 							<span class="min-w-0 flex-1 truncate font-mono text-xs">{pr.headRefName}</span>
-							<span class="font-mono text-[10.5px] text-muted-foreground">#{pr.number}</span>
+							<span class="font-mono text-[11px] text-muted-foreground">#{pr.number}</span>
 						</DropdownMenu.Item>
 					{/each}
 				{/if}
@@ -61,13 +61,13 @@
 		{#if githubStore.sidebarOverridden}
 			<button
 				type="button"
-				class="h-[22px] shrink-0 rounded-[5px] bg-wb-accent-soft px-1.5 text-[10.5px] font-medium text-wb-accent hover:bg-wb-accent/25"
+				class="h-[22px] shrink-0 rounded-[5px] bg-wb-accent-soft px-1.5 text-[11px] font-medium text-wb-accent hover:bg-wb-accent/25"
 				onclick={() => githubStore.clearSidebarOverride()}
 			>
 				Back to active
 			</button>
 		{:else}
-			<span class="shrink-0 text-[10.5px] text-wb-ink-soft">active workspace</span>
+			<span class="shrink-0 text-[11px] text-wb-ink-soft">active workspace</span>
 		{/if}
 	</div>
 {/if}

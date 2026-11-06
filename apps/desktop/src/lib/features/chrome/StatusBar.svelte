@@ -50,7 +50,7 @@
 </script>
 
 <footer
-	class="flex h-[22px] flex-shrink-0 items-center gap-4 border-t border-wb-hair bg-wb-rail px-2.5 font-mono text-[10.5px] text-wb-ink-mute"
+	class="flex h-[22px] flex-shrink-0 items-center gap-4 border-t border-wb-hair bg-wb-rail px-2.5 font-mono text-[11px] text-wb-ink-mute"
 >
 	{#if branch}
 		<span class="flex items-center gap-1.5 text-wb-accent">

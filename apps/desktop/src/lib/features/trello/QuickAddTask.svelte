@@ -37,7 +37,7 @@
 	<div class="px-2 py-1">
 		<Input
 			class="h-7 text-xs"
-			placeholder="Card title..."
+			placeholder="Card title…"
 			bind:value={title}
 			onkeydown={handleKeydown}
 			disabled={submitting}

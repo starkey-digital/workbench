@@ -104,7 +104,7 @@
 					{/if}
 					<button
 						class={[
-							'flex items-center gap-1.5 px-2.5 font-mono text-[11.5px] whitespace-nowrap',
+							'flex items-center gap-1.5 px-2.5 font-mono text-[12px] whitespace-nowrap',
 							isActive ? 'text-wb-ink' : 'text-wb-ink-mute'
 						]}
 						type="button"
@@ -114,7 +114,7 @@
 						onclick={() => workspaceStore.setActiveTab(workspace.id, tab.id)}
 					>
 						<!-- Index number -->
-						<span class="text-[9.5px] text-wb-ink-soft">{idx + 1}</span>
+						<span class="text-[10px] text-wb-ink-soft">{idx + 1}</span>
 						{#if tab.type === 'claude' || tab.type === 'codex'}
 							<AgentIcon agent={tab.type} class="size-3.5" />
 							<span class="sr-only">{tab.type === 'claude' ? 'Claude' : 'Codex'}:</span>

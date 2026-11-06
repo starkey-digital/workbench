@@ -45,7 +45,7 @@
 	{:else}
 		<pre
 			{@attach followEnd}
-			class="scrollbar-thin max-h-56 overflow-auto rounded-md border border-wb-hair bg-wb-bg px-2.5 py-2 font-mono text-[10.5px] leading-relaxed whitespace-pre-wrap text-wb-ink-mute">{output.text}</pre>
+			class="scrollbar-thin max-h-56 overflow-auto rounded-md border border-wb-hair bg-wb-bg px-2.5 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-wb-ink-mute">{output.text}</pre>
 		{#if output.bytes > output.text.length}
 			<span class="text-[10px] text-wb-ink-soft">
 				Last {formatBytes(output.text.length)} of {formatBytes(output.bytes)}

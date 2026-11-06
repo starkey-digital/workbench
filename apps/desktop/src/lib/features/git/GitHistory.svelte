@@ -93,7 +93,7 @@
 						>
 							{entry.message}
 						</span>
-						<span class="truncate text-[10.5px] text-wb-ink-soft">
+						<span class="truncate text-[11px] text-wb-ink-soft">
 							<span class="font-mono">{entry.shortSha}</span>
 							· {entry.author} · {formatRelativeTime(entry.date)}
 							{#if isUnpushed}

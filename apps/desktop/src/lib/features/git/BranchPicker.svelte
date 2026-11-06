@@ -96,7 +96,7 @@
 		onclick={() => select({ kind: 'branch', option })}
 	>
 		<span class="min-w-0 flex-1 truncate font-mono">{option.name}</span>
-		<span class="shrink-0 text-[10.5px] text-wb-ink-soft">
+		<span class="shrink-0 text-[11px] text-wb-ink-soft">
 			{option.inWorktree ? 'in worktree' : option.sha}
 		</span>
 	</button>
@@ -160,7 +160,7 @@
 				<span class="min-w-0 flex-1 truncate">
 					Create <span class="font-mono text-wb-accent">{options.createName}</span>
 				</span>
-				<span class="max-w-[45%] shrink-0 truncate text-[10.5px] text-wb-ink-soft">
+				<span class="max-w-[45%] shrink-0 truncate text-[11px] text-wb-ink-soft">
 					from {currentBranch}
 				</span>
 			</button>
@@ -175,7 +175,7 @@
 		</button>
 	</div>
 
-	<div class="flex gap-3 border-t border-wb-hair px-2.5 py-1.5 text-[10.5px] text-wb-ink-soft">
+	<div class="flex gap-3 border-t border-wb-hair px-2.5 py-1.5 text-[11px] text-wb-ink-soft">
 		<span>↑↓ navigate</span>
 		<span>↵ switch</span>
 		<span>esc close</span>

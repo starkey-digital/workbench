@@ -34,10 +34,10 @@
 		</span>
 		<span class="flex-1">
 			<span class="block text-[13px] font-medium text-wb-ink">{label}</span>
-			<span class="mt-0.5 block text-[11.5px] text-wb-ink-soft">{sub}</span>
+			<span class="mt-0.5 block text-[11px] text-wb-ink-soft">{sub}</span>
 		</span>
 		{#if hint}
-			<span class="font-mono text-[10.5px] text-wb-ink-soft">{hint}</span>
+			<span class="font-mono text-[11px] text-wb-ink-soft">{hint}</span>
 		{/if}
 	</button>
 {/snippet}
@@ -50,7 +50,7 @@
 			W
 		</div>
 		<h2 class="text-2xl font-semibold text-wb-ink">Welcome to Workbench</h2>
-		<p class="mx-auto mt-1.5 text-[13.5px] leading-relaxed text-wb-ink-mute">
+		<p class="mx-auto mt-1.5 text-[13px] leading-relaxed text-wb-ink-mute">
 			Add a local project folder to get started. Each project gets its own tabbed workspace with
 			real shell terminals, Claude Code, Codex, and git worktree support.
 		</p>

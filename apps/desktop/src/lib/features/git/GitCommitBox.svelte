@@ -122,7 +122,7 @@
 			</DropdownMenu.Content>
 		</DropdownMenu.Root>
 	</div>
-	<div class="flex justify-between text-[10.5px] text-wb-ink-soft">
+	<div class="flex justify-between text-[11px] text-wb-ink-soft">
 		<span>{mod}↵ commit · {mod}⇧↵ commit & push</span>
 		<span class={['font-mono', subject > SUBJECT_LIMIT && 'text-wb-warn']}>
 			{subject}/{SUBJECT_LIMIT}

@@ -26,7 +26,7 @@
 	{#if items.length > 0}
 		<div class="flex flex-wrap gap-1.5">
 			{#each items as item, i (`${i}:${item}`)}
-				<Badge variant={badgeVariant} class="h-6 gap-1 pr-0.5 font-mono text-[11.5px]">
+				<Badge variant={badgeVariant} class="h-6 gap-1 pr-0.5 font-mono text-[12px]">
 					{item}
 					<button
 						type="button"

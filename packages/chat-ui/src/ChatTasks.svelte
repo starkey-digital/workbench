@@ -162,8 +162,7 @@
 						>
 							{@render status(task)}
 							<span class="min-w-0 flex-1 truncate">{task.description || title(task)}</span>
-							<span class="shrink-0 text-[10.5px] text-wb-ink-soft tabular-nums"
-								>{elapsed(task)}</span
+							<span class="shrink-0 text-[11px] text-wb-ink-soft tabular-nums">{elapsed(task)}</span
 							>
 						</button>
 					</li>

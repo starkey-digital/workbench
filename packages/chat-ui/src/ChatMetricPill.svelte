@@ -36,7 +36,7 @@
 				{title}
 				aria-label={title}
 				class={cn(
-					'metric-pill relative flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-wb-hair bg-wb-panel px-2.5 text-[11.5px] tabular-nums focus-visible:ring-1 focus-visible:ring-wb-accent focus-visible:outline-none',
+					'metric-pill relative flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-wb-hair bg-wb-panel px-2.5 text-[12px] tabular-nums focus-visible:ring-1 focus-visible:ring-wb-accent focus-visible:outline-none',
 					warning ? 'text-wb-warn' : 'text-wb-ink-soft',
 					className
 				)}

@@ -121,7 +121,7 @@
 		{/if}
 		<Item onclick={() => projectManager.promptNewGroup(project.path)}>
 			<PlusIcon class="size-3.5" />
-			New Group...
+			New Group…
 		</Item>
 		{#if project.group}
 			<Separator />

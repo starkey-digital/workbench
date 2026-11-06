@@ -44,7 +44,7 @@
 	<Label class="text-xs text-muted-foreground">Repositories</Label>
 	<div class="relative">
 		<SearchIcon class="absolute top-2 left-2.5 size-3.5 text-muted-foreground" />
-		<Input class="h-8 pl-8 text-xs" placeholder="Search repositories..." bind:value={search} />
+		<Input class="h-8 pl-8 text-xs" placeholder="Search repositories…" bind:value={search} />
 	</div>
 
 	{#if loading}
