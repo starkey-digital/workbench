@@ -245,7 +245,7 @@
 					(e.target as HTMLSelectElement).value = '';
 				}}
 			>
-				<option value="" disabled selected>Select a label...</option>
+				<option value="" disabled selected>Select a label…</option>
 				{#each available as lbl (lbl.id)}
 					<option value={lbl.id}>{lbl.name || lbl.color}</option>
 				{/each}

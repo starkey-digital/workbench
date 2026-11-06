@@ -10,13 +10,12 @@
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 	import FolderPlusIcon from '@lucide/svelte/icons/folder-plus';
 	import GitBranchIcon from '@lucide/svelte/icons/git-branch';
-	import PanelLeftOpenIcon from '@lucide/svelte/icons/panel-left-open';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import StarIcon from '@lucide/svelte/icons/star';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import XIcon from '@lucide/svelte/icons/x';
-	import InstanceSwitcher from '$features/instances/InstanceSwitcher.svelte';
+	import SidebarHeader, { headerActionClass } from '$features/chrome/SidebarHeader.svelte';
 	import type { RemoteInstance } from '$features/instances/instances.svelte';
 	import * as ContextMenu from '@workbench/ui/context-menu';
 	import * as DropdownMenu from '@workbench/ui/dropdown-menu';
@@ -101,22 +100,10 @@
 </script>
 
 <aside class="flex h-full w-full flex-col overflow-hidden border-r border-wb-hair bg-wb-panel">
-	<div class="flex h-[38px] shrink-0 items-center border-b border-wb-hair pr-2 pl-3">
-		{#if sidebarCollapsed}
-			<button
-				class="mx-auto flex size-[22px] items-center justify-center rounded text-wb-ink-mute transition-colors hover:bg-wb-panel2 hover:text-wb-ink"
-				type="button"
-				aria-label="Expand sidebar"
-				onclick={onToggleSidebar}
-			>
-				<PanelLeftOpenIcon class="size-3" />
-			</button>
-		{:else}
-			<InstanceSwitcher {onConnect} />
+	<SidebarHeader {sidebarCollapsed} {onToggleSidebar} {onConnect}>
+		{#snippet actions()}
 			<DropdownMenu.Root>
-				<DropdownMenu.Trigger
-					class="ml-auto flex h-6 items-center gap-1 rounded-md border border-wb-hair px-2 font-mono text-[11px] text-wb-ink-mute transition-colors hover:bg-wb-panel2 hover:text-wb-ink"
-				>
+				<DropdownMenu.Trigger class={headerActionClass} title="Add a project">
 					<PlusIcon class="size-3" />
 					Add
 				</DropdownMenu.Trigger>
@@ -131,8 +118,8 @@
 					</DropdownMenu.Item>
 				</DropdownMenu.Content>
 			</DropdownMenu.Root>
-		{/if}
-	</div>
+		{/snippet}
+	</SidebarHeader>
 
 	{#if !sidebarCollapsed}
 		{#if projectStore.projects.length > 0}
@@ -142,7 +129,7 @@
 				/>
 				<Input
 					bind:value={filterText}
-					placeholder="Filter projects..."
+					placeholder="Filter projects…"
 					aria-label="Filter projects"
 					class="h-[26px] border-wb-hair bg-wb-bg pr-6 pl-7 font-mono text-[11px] text-wb-ink placeholder:text-wb-ink-mute focus-visible:ring-wb-accent/40"
 				/>
@@ -162,7 +149,7 @@
 		<ScrollArea class="min-h-0 flex-1">
 			<div class="pt-1 pb-2">
 				{#if !projectStore.loaded}
-					<p class="px-3 py-8 text-center font-mono text-[11px] text-wb-ink-mute">Loading...</p>
+					<p class="px-3 py-8 text-center font-mono text-[11px] text-wb-ink-mute">Loading…</p>
 				{:else if projectStore.projects.length === 0}
 					<div class="px-3 py-8 text-center">
 						<p class="font-mono text-[11px] text-wb-ink-mute">No projects yet.</p>

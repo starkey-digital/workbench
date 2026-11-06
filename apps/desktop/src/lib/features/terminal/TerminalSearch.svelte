@@ -92,7 +92,7 @@
 		oninput={onInput}
 		onkeydown={onKeydown}
 		type="text"
-		placeholder="Search..."
+		placeholder="Search…"
 		class="h-6 w-48 rounded border border-border/40 bg-transparent px-1.5 text-xs text-foreground outline-none focus:border-primary/60"
 	/>
 

@@ -5,7 +5,7 @@
 	import type { ProjectConfig } from '$types/workbench';
 	import type { RemoteSession } from './remote-session.svelte';
 
-	/** The project's Claude account on the host: its own pick, or the host's (shown only on hover). */
+	/** The project's Claude account on the host: tinted when it has its own pick, else shown only on hover. */
 	let { project, session }: { project: ProjectConfig; session: RemoteSession } = $props();
 
 	const picked = $derived(project.claudeAccountId);
@@ -24,14 +24,15 @@
 <DropdownMenu.Root>
 	<DropdownMenu.Trigger
 		class={[
-			'flex h-5 max-w-24 shrink-0 items-center gap-1 rounded px-1 font-mono text-[10px] text-wb-ink-mute transition-opacity hover:bg-wb-panel2 hover:text-wb-ink focus-visible:opacity-100 data-[state=open]:opacity-100',
-			!pickedName && 'opacity-0 group-hover:opacity-100'
+			'flex size-5 shrink-0 items-center justify-center rounded transition-opacity hover:bg-wb-panel2 focus-visible:opacity-100 data-[state=open]:opacity-100',
+			pickedName ? 'text-wb-claude' : 'text-wb-ink-mute opacity-0 group-hover:opacity-100'
 		]}
 		aria-label="Claude account for {project.name}"
-		title="Claude account for new sessions in {project.name}"
+		title={pickedName
+			? `New sessions in ${project.name} use ${pickedName}`
+			: `New sessions in ${project.name} use the host's account`}
 	>
-		<AgentIcon agent="claude" class="size-2.5 shrink-0" />
-		{#if pickedName}<span class="truncate">{pickedName}</span>{/if}
+		<AgentIcon agent="claude" class="size-2.5" />
 	</DropdownMenu.Trigger>
 	<DropdownMenu.Content class="min-w-52" align="end">
 		<DropdownMenu.Label class="text-xs text-wb-ink-soft">

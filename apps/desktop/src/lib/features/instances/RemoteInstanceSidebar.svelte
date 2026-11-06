@@ -1,8 +1,10 @@
 <script lang="ts">
-	import PanelLeftOpenIcon from '@lucide/svelte/icons/panel-left-open';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
-	import InstanceSwitcher from './InstanceSwitcher.svelte';
+	import SidebarHeader, {
+		headerActionClass,
+		headerIconClass
+	} from '$features/chrome/SidebarHeader.svelte';
 	import RemoteNewProjectDialog from './RemoteNewProjectDialog.svelte';
 	import { NewProjectFlow } from '@workbench/control-plane-ui';
 	import RemoteHostBar from './RemoteHostBar.svelte';
@@ -31,42 +33,33 @@
 </script>
 
 <aside class="flex h-full w-full flex-col overflow-hidden border-r border-wb-hair bg-wb-panel">
-	<div class="flex h-[38px] shrink-0 items-center border-b border-wb-hair pr-2 pl-3">
-		{#if sidebarCollapsed}
+	<SidebarHeader {sidebarCollapsed} {onToggleSidebar} {onConnect}>
+		{#snippet actions()}
 			<button
-				class="mx-auto flex size-[22px] items-center justify-center rounded text-wb-ink-mute transition-colors hover:bg-wb-panel2 hover:text-wb-ink"
+				class={headerActionClass}
 				type="button"
-				aria-label="Expand sidebar"
-				onclick={onToggleSidebar}
-			>
-				<PanelLeftOpenIcon class="size-3" />
-			</button>
-		{:else}
-			<InstanceSwitcher {onConnect} />
-			<button
-				class="ml-auto flex h-6 items-center gap-1 rounded-md border border-wb-hair px-2 font-mono text-[11px] text-wb-ink-mute transition-colors hover:bg-wb-panel2 hover:text-wb-ink disabled:opacity-50"
-				type="button"
-				title="New project on this server"
+				title="Add a project on this server"
 				disabled={instance.status !== 'online'}
 				onclick={() =>
 					(newProject = new NewProjectFlow(instance.store, instance.config.copyFolder))}
 			>
 				<PlusIcon class="size-3" />
-				Project
+				Add
 			</button>
 			<button
-				class="ml-1.5 flex h-6 items-center gap-1 rounded-md border border-wb-hair px-2 font-mono text-[11px] text-wb-ink-mute transition-colors hover:bg-wb-panel2 hover:text-wb-ink"
+				class={headerIconClass}
 				type="button"
+				title="Refresh"
+				aria-label="Refresh"
 				onclick={() => {
 					void instance.store.refresh();
 					void session.loadAccounts();
 				}}
 			>
 				<RefreshCwIcon class={['size-3', instance.store.loading && 'animate-spin']} />
-				Refresh
 			</button>
-		{/if}
-	</div>
+		{/snippet}
+	</SidebarHeader>
 
 	{#if !sidebarCollapsed}
 		{#if instance.status === 'offline' && !instance.hostUpdate.updating}

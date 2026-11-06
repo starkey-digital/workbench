@@ -74,7 +74,7 @@
 		/>
 		<Input
 			bind:value={filterText}
-			placeholder="Filter projects..."
+			placeholder="Filter projects…"
 			aria-label="Filter projects"
 			class="h-[26px] border-wb-hair bg-wb-bg pr-6 pl-7 font-mono text-[11px] text-wb-ink placeholder:text-wb-ink-mute focus-visible:ring-wb-accent/40"
 		/>
