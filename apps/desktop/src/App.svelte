@@ -81,6 +81,7 @@
 	/** The remote server the main area shows, or none for this machine's. */
 	const remote = $derived(instancesStore.activeIsLocal ? undefined : instancesStore.activeRemote);
 	const local = $derived(!remote);
+	const showRightSidebar = $derived(local && workspaceStore.workspaces.length > 0);
 	new NotificationStore(workspaceStore, claudeSessionStore);
 
 	let sidebarCollapsed = $state(false);
@@ -184,11 +185,12 @@
 	});
 
 	// Sync githubStore.sidebarOpen → pane expand/collapse (imperative DOM API).
-	// The pane too: it remounts collapsed after a remote instance was shown.
+	// The pane stays mounted, collapsed while it doesn't apply: adding or removing a
+	// pane makes paneforge reset every pane to its defaultSize.
 	watch(
-		() => [githubStore.sidebarOpen, githubSidebarPane] as const,
-		([open, pane]) => {
-			if (open) {
+		() => [githubStore.sidebarOpen, githubSidebarPane, showRightSidebar] as const,
+		([open, pane, show]) => {
+			if (open && show) {
 				pane?.expand();
 			} else {
 				pane?.collapse();
@@ -278,7 +280,7 @@
 				onOpenRemote={() => openConnect()}
 			/>
 			<div class="h-full min-w-0 flex-1">
-				<Resizable.PaneGroup direction="horizontal">
+				<Resizable.PaneGroup direction="horizontal" autoSaveId="workbench.main-layout">
 					<Resizable.Pane
 						bind:this={sidebarPane}
 						defaultSize={17}
@@ -323,22 +325,24 @@
 							{/if}
 						</main>
 					</Resizable.Pane>
-					{#if local && workspaceStore.workspaces.length > 0}
-						<Resizable.Handle withHandle class="cursor-col-resize" />
-						<Resizable.Pane
-							bind:this={githubSidebarPane}
-							defaultSize={0}
-							minSize={15}
-							maxSize={35}
-							collapsible
-							collapsedSize={0}
-							onCollapse={() => (githubStore.sidebarOpen = false)}
-							onExpand={() => (githubStore.sidebarOpen = true)}
-							class="h-full"
-						>
+					<Resizable.Handle withHandle class={showRightSidebar ? 'cursor-col-resize' : 'hidden'} />
+					<Resizable.Pane
+						bind:this={githubSidebarPane}
+						defaultSize={0}
+						minSize={15}
+						maxSize={35}
+						collapsible
+						collapsedSize={0}
+						onCollapse={() => {
+							if (showRightSidebar) githubStore.sidebarOpen = false;
+						}}
+						onExpand={() => (githubStore.sidebarOpen = true)}
+						class="h-full"
+					>
+						{#if showRightSidebar}
 							<RightSidebar onClose={() => githubStore.toggleSidebar()} />
-						</Resizable.Pane>
-					{/if}
+						{/if}
+					</Resizable.Pane>
 				</Resizable.PaneGroup>
 			</div>
 		</div>
