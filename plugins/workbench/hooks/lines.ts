@@ -73,6 +73,24 @@ export function slimResult(result: unknown): Line | undefined {
 	return kept.length ? Object.fromEntries(kept) : undefined;
 }
 
+/**
+ * A queued `SendFeedback` draft, said in the chat: its review card and `/feedback`
+ * are the terminal's only (no plugin API reads or sends a draft). Nothing when
+ * no draft was written (feedback off, a failed write).
+ */
+export function feedbackDraftLine(input: unknown, result: unknown, uuid: string): Line | undefined {
+	if ((result as { success?: unknown } | undefined)?.success !== true) return undefined;
+	const title = (input as { title?: unknown } | undefined)?.title;
+	const named = typeof title === 'string' && title.trim() ? `: "${title.trim()}"` : '';
+	return {
+		type: 'system',
+		subtype: 'local_command_output',
+		content: `Claude drafted feedback about Claude Code${named}. Review and send it in the terminal with /feedback.`,
+		workbench_in_terminal: true,
+		uuid
+	};
+}
+
 export function askLine(
 	requestId: string,
 	tool: string,
