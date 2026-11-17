@@ -1,5 +1,11 @@
 import { expect, test } from 'bun:test';
-import { askAnswer, commandRowOutput, feedbackDraftLine } from '../hooks/lines';
+import { askAnswer, asksAPerson, commandRowOutput, feedbackDraftLine } from '../hooks/lines';
+
+test("only auto mode's classifier and dontAsk keep core's ask from a person", () => {
+	for (const mode of ['default', 'acceptEdits', 'plan', 'bypassPermissions', undefined])
+		expect(asksAPerson(mode)).toBe(true);
+	for (const mode of ['auto', 'dontAsk']) expect(asksAPerson(mode)).toBe(false);
+});
 
 test('a queued feedback draft is pointed at the terminal, which alone reviews it', () => {
 	expect(

@@ -91,6 +91,11 @@ export function feedbackDraftLine(input: unknown, result: unknown, uuid: string)
 	};
 }
 
+/** Whether a mode puts core's ask to a person: auto mode's classifier answers first, dontAsk refuses. */
+export function asksAPerson(mode: string | undefined): boolean {
+	return mode !== 'auto' && mode !== 'dontAsk';
+}
+
 export function askLine(
 	requestId: string,
 	tool: string,

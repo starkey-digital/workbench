@@ -11,6 +11,7 @@ import { RUN_TOOL_SPEC, runInput, runResult } from './run';
 import { Titles, TITLE_SYSTEM } from './titles';
 import {
 	askLine,
+	asksAPerson,
 	attachedFiles,
 	commandRowOutput,
 	feedbackDraftLine,
@@ -44,6 +45,12 @@ let lastSettings = '';
 // The live permission mode, and the one the chat was last told.
 let liveMode: string | undefined;
 let reportedMode = '';
+// Whether a classic hook has reached this load. Claude Code's built-in
+// `cc-plugin-sec-default` (managed machines, Team and Enterprise orgs) passes
+// every classic event over a plugin the person installed, PermissionRequest
+// included, and refuses that plugin's `allow` at `tool.check`: approvals can
+// only be answered in the terminal, and the chat can only say so.
+let classicReached = false;
 // Minted ids carry this load's own prefix: Claude Code reloads a plugin
 // mid-session (its files change, a worktree switch), and a restarted count
 // alone would mint ids the session already used, replacing those chat items.
@@ -321,6 +328,7 @@ const elicitationKey = (e: { mcp_server_name: string; elicitation_id?: string })
  * the session was launched in or switched to.
  */
 export function notePermissionMode(mode: string | undefined) {
+	classicReached = true;
 	if (!mode) return;
 	liveMode = mode;
 	if (!server.current() || mode === reportedMode) return;
@@ -1368,6 +1376,24 @@ export const register: Register = (on) => {
 			e.tool !== ASKED_IN_CALL
 		) {
 			pendingAsks.note(e.tool, e.input, { id: e.tool_use_id, reason: verdict.reason });
+			// No PermissionRequest will come to ask in chat: the card shows the
+			// terminal's dialog waiting, and the call's result settles it.
+			if (
+				!classicReached &&
+				e.approver === 'person' &&
+				e.tool !== 'ExitPlanMode' &&
+				asksAPerson(liveMode) &&
+				!askedInTerminal.has(e.tool_use_id)
+			) {
+				const requestId = `wbmod-ask-${load}-${++askSeq}`;
+				askedInTerminal.set(e.tool_use_id, { requestId, main: !e.agentId });
+				await server.askInTerminal(
+					(u, i) => $.http.fetch(u, i),
+					(ms, fn) => $.clock.after(ms, fn),
+					requestId,
+					askLine(requestId, e.tool, e.input, e.tool_use_id, verdict.reason)
+				);
+			}
 		}
 		return verdict;
 	});
@@ -1384,6 +1410,13 @@ export const register: Register = (on) => {
 		// dialog does that (a hook's allow doesn't dismiss it): it stays the
 		// terminal's, and the chat says where to answer it.
 		const pending = pendingAsks.take(e.tool_name, e.tool_input);
+		// Shown as the terminal's at `tool.check` before any classic hook arrived
+		// (a reload): it is the chat's to ask after all.
+		const shown = pending && askedInTerminal.get(pending.id);
+		if (pending && shown) {
+			askedInTerminal.delete(pending.id);
+			emit({ type: 'control_cancel_request', request_id: shown.requestId });
+		}
 		if (e.tool_name === 'ExitPlanMode') {
 			const requestId = `wbmod-ask-${load}-${++askSeq}`;
 			emit({
