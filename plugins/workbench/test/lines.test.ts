@@ -1,10 +1,22 @@
 import { expect, test } from 'bun:test';
-import { askAnswer, asksAPerson, commandRowOutput, feedbackDraftLine } from '../hooks/lines';
+import { askAnswer, asksInTerminalOnly, commandRowOutput, feedbackDraftLine } from '../hooks/lines';
 
-test("only auto mode's classifier and dontAsk keep core's ask from a person", () => {
+test("where no classic hook reaches the mod, a person's ask shows as the terminal's", () => {
 	for (const mode of ['default', 'acceptEdits', 'plan', 'bypassPermissions', undefined])
-		expect(asksAPerson(mode)).toBe(true);
-	for (const mode of ['auto', 'dontAsk']) expect(asksAPerson(mode)).toBe(false);
+		expect(asksInTerminalOnly({ classicReached: false, approver: 'person', mode })).toBe(true);
+});
+
+test('PermissionRequest asks in chat where classic hooks reach the mod', () => {
+	expect(asksInTerminalOnly({ classicReached: true, approver: 'person', mode: 'default' })).toBe(
+		false
+	);
+});
+
+test("auto mode's classifier, dontAsk, a host's callback or nobody answer it instead", () => {
+	for (const mode of ['auto', 'dontAsk'])
+		expect(asksInTerminalOnly({ classicReached: false, approver: 'person', mode })).toBe(false);
+	for (const approver of ['host', undefined])
+		expect(asksInTerminalOnly({ classicReached: false, approver, mode: 'default' })).toBe(false);
 });
 
 test('a queued feedback draft is pointed at the terminal, which alone reviews it', () => {

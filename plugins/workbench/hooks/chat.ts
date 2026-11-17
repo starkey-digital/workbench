@@ -11,7 +11,7 @@ import { RUN_TOOL_SPEC, runInput, runResult } from './run';
 import { Titles, TITLE_SYSTEM } from './titles';
 import {
 	askLine,
-	asksAPerson,
+	asksInTerminalOnly,
 	attachedFiles,
 	commandRowOutput,
 	feedbackDraftLine,
@@ -45,12 +45,14 @@ let lastSettings = '';
 // The live permission mode, and the one the chat was last told.
 let liveMode: string | undefined;
 let reportedMode = '';
-// Whether a classic hook has reached this load. Claude Code's built-in
+// Whether a classic hook has ever reached the mod for this login (kept in
+// `$.store`, so a reload doesn't forget it). Claude Code's built-in
 // `cc-plugin-sec-default` (managed machines, Team and Enterprise orgs) passes
 // every classic event over a plugin the person installed, PermissionRequest
 // included, and refuses that plugin's `allow` at `tool.check`: approvals can
 // only be answered in the terminal, and the chat can only say so.
 let classicReached = false;
+const CLASSIC_REACHED_KEY = 'classic-hooks-reached';
 // Minted ids carry this load's own prefix: Claude Code reloads a plugin
 // mid-session (its files change, a worktree switch), and a restarted count
 // alone would mint ids the session already used, replacing those chat items.
@@ -327,13 +329,57 @@ const elicitationKey = (e: { mcp_server_name: string; elicitation_id?: string })
  * `/config` row holds only the settings default (`defaultMode`), not a mode
  * the session was launched in or switched to.
  */
-export function notePermissionMode(mode: string | undefined) {
-	classicReached = true;
+function notePermissionMode(mode: string | undefined) {
 	if (!mode) return;
 	liveMode = mode;
 	if (!server.current() || mode === reportedMode) return;
 	reportedMode = mode;
 	emit({ type: 'permission-mode', permissionMode: mode });
+}
+
+/**
+ * A classic hook reached the mod: called from each `classic.*` hook, and
+ * nowhere else. `remember` is `$.store.set`, spelled in the hook.
+ */
+export function noteClassicHook(
+	mode: string | undefined,
+	remember: (key: string, value: true) => Promise<unknown>
+) {
+	if (!classicReached) {
+		classicReached = true;
+		void remember(CLASSIC_REACHED_KEY, true).catch(() => {});
+	}
+	notePermissionMode(mode);
+}
+
+/**
+ * Show a call's ask in the chat as the terminal's dialog, waiting there: the
+ * call's result, or its cancel as it starts, settles it. `id` is the call's,
+ * where known.
+ */
+async function showInTerminal(
+	fetch: server.Fetch,
+	after: server.After,
+	tool: string,
+	input: unknown,
+	ask: { id?: string; main: boolean; reason?: string }
+) {
+	const requestId = `wbmod-ask-${load}-${++askSeq}`;
+	if (tool === 'ExitPlanMode')
+		emit({
+			type: 'system',
+			subtype: 'local_command_output',
+			content: 'Claude has a plan for you to review. Approve it in the terminal.',
+			workbench_in_terminal: true,
+			uuid: `wbmod-plan-${requestId}`
+		});
+	if (ask.id) askedInTerminal.set(ask.id, { requestId, main: ask.main });
+	await server.askInTerminal(
+		fetch,
+		after,
+		requestId,
+		askLine(requestId, tool, input, ask.id, ask.reason)
+	);
 }
 
 /** Report background jobs that finished; called from the Stop hook with its job list. */
@@ -626,6 +672,7 @@ export const register: Register = (on) => {
 		// No hook has named the live mode yet: the one Workbench started `claude`
 		// in beats the settings default.
 		liveMode ??= (await $.env.get('WORKBENCH_PERMISSION_MODE')) || undefined;
+		classicReached ||= (await $.store.get(CLASSIC_REACHED_KEY).catch(() => undefined)) === true;
 		const rows = await $.config.list().catch(() => []);
 		const configMode = rows.find((r) => r.key === 'permissionMode')?.value;
 		const permissionMode = liveMode ?? (typeof configMode === 'string' ? configMode : undefined);
@@ -1022,7 +1069,7 @@ export const register: Register = (on) => {
 
 	// Fires when auto mode's classifier denies a call.
 	on('classic.PermissionDenied', ($, e, next) => {
-		notePermissionMode(e.permission_mode);
+		noteClassicHook(e.permission_mode, (k, v) => $.store.set(k, v));
 		pendingAsks.drop(e.tool_use_id);
 		if (server.current() && !e.agent_id)
 			emit({
@@ -1377,23 +1424,42 @@ export const register: Register = (on) => {
 		) {
 			pendingAsks.note(e.tool, e.input, { id: e.tool_use_id, reason: verdict.reason });
 			// No PermissionRequest will come to ask in chat: the card shows the
-			// terminal's dialog waiting, and the call's result settles it.
+			// terminal's dialog waiting. Awaited, so it is posted before the call's
+			// cancel or result can settle it.
 			if (
-				!classicReached &&
-				e.approver === 'person' &&
-				e.tool !== 'ExitPlanMode' &&
-				asksAPerson(liveMode) &&
+				asksInTerminalOnly({ classicReached, approver: e.approver, mode: liveMode }) &&
 				!askedInTerminal.has(e.tool_use_id)
-			) {
-				const requestId = `wbmod-ask-${load}-${++askSeq}`;
-				askedInTerminal.set(e.tool_use_id, { requestId, main: !e.agentId });
-				await server.askInTerminal(
+			)
+				await showInTerminal(
 					(u, i) => $.http.fetch(u, i),
 					(ms, fn) => $.clock.after(ms, fn),
-					requestId,
-					askLine(requestId, e.tool, e.input, e.tool_use_id, verdict.reason)
+					e.tool,
+					e.input,
+					{ id: e.tool_use_id, main: !e.agentId, reason: verdict.reason }
 				);
-			}
+		}
+		return verdict;
+	});
+
+	// Auto mode's classifier, after `tool.check`: where classic hooks don't
+	// reach the mod, its `ask` (no verdict) goes to the terminal's dialog, and
+	// its allow answers a card a stale mode put up (a Shift+Tab into auto that
+	// no classic hook reported). Its deny's refused result settles one.
+	on('tool.judge', async ($, e, next) => {
+		const verdict = await next(e);
+		if (classicReached || !server.current() || e.tool === ASKED_IN_CALL) return verdict;
+		const shown = askedInTerminal.get(e.tool_use_id);
+		if (verdict.decision === 'ask' && !shown && e.approver === 'person')
+			await showInTerminal(
+				(u, i) => $.http.fetch(u, i),
+				(ms, fn) => $.clock.after(ms, fn),
+				e.tool,
+				e.input,
+				{ id: e.tool_use_id, main: !e.agentId, reason: verdict.reason }
+			);
+		else if (verdict.decision === 'allow' && shown) {
+			askedInTerminal.delete(e.tool_use_id);
+			emit({ type: 'control_cancel_request', request_id: shown.requestId });
 		}
 		return verdict;
 	});
@@ -1404,35 +1470,23 @@ export const register: Register = (on) => {
 	// terminal's dialog asks instead. A held request in flight doesn't spend the
 	// hook's time budget, however long the person takes.
 	on('classic.PermissionRequest', async ($, e, next) => {
-		notePermissionMode(e.permission_mode);
+		noteClassicHook(e.permission_mode, (k, v) => $.store.set(k, v));
 		if (!server.current() || e.tool_name === ASKED_IN_CALL) return next(e);
+		const pending = pendingAsks.take(e.tool_name, e.tool_input);
+		// Already shown as the terminal's at `tool.check` (before this login's
+		// first classic hook): the card stands, and the terminal answers it.
+		if (pending && askedInTerminal.has(pending.id)) return next(e);
 		// Approving a plan is what leaves plan mode, and since 2.1.292 only the
 		// dialog does that (a hook's allow doesn't dismiss it): it stays the
 		// terminal's, and the chat says where to answer it.
-		const pending = pendingAsks.take(e.tool_name, e.tool_input);
-		// Shown as the terminal's at `tool.check` before any classic hook arrived
-		// (a reload): it is the chat's to ask after all.
-		const shown = pending && askedInTerminal.get(pending.id);
-		if (pending && shown) {
-			askedInTerminal.delete(pending.id);
-			emit({ type: 'control_cancel_request', request_id: shown.requestId });
-		}
 		if (e.tool_name === 'ExitPlanMode') {
-			const requestId = `wbmod-ask-${load}-${++askSeq}`;
-			emit({
-				type: 'system',
-				subtype: 'local_command_output',
-				content: 'Claude has a plan for you to review. Approve it in the terminal.',
-				workbench_in_terminal: true,
-				uuid: `wbmod-plan-${requestId}`
-			});
-			await server.askInTerminal(
+			await showInTerminal(
 				(u, i) => $.http.fetch(u, i),
 				(ms, fn) => $.clock.after(ms, fn),
-				requestId,
-				askLine(requestId, e.tool_name, e.tool_input, pending?.id)
+				e.tool_name,
+				e.tool_input,
+				{ id: pending?.id, main: !e.agent_id }
 			);
-			if (pending) askedInTerminal.set(pending.id, { requestId, main: !e.agent_id });
 			return next(e);
 		}
 		const requestId = `wbmod-ask-${load}-${++askSeq}`;
