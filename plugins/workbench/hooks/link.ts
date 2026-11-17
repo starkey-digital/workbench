@@ -15,7 +15,7 @@ import { askAnswer, type Answer, type Line } from './lines';
 // The numbering is this worker's (`epoch`): a restarted worker (a hot reload)
 // starts again at 1 and the server counts afresh from its hello.
 
-type Fetch = EngineInterface['http']['fetch'];
+export type Fetch = EngineInterface['http']['fetch'];
 /** `$.clock.after`, spelled in the hook: a bound that holds without the session's timer. */
 export type After = (ms: number, fn: () => void) => Timer;
 

@@ -1,7 +1,7 @@
 import type { EngineInterface, Register } from 'claude-code';
 import {
 	noteBackgroundTasks,
-	notePermissionMode,
+	noteClassicHook,
 	noteTitle,
 	promptTitle,
 	register as registerChat
@@ -29,7 +29,7 @@ async function forward<R>(
 	e: { permission_mode?: string; [field: string]: unknown },
 	next: () => Promise<R>
 ): Promise<R> {
-	notePermissionMode(e.permission_mode);
+	noteClassicHook(e.permission_mode, (k, v) => $.store.set(k, v));
 	const socket = await $.env.get('WORKBENCH_HOOK_SOCKET');
 	const paneId = await $.env.get('WORKBENCH_PANE_ID');
 	if (socket && paneId) {
@@ -81,7 +81,7 @@ export const register: Register = (on, options) => {
 	// Approvals and MCP forms reach both devices through the mod link (the
 	// desktop isn't sent Notification).
 	on('classic.Notification', ($, e, next) => {
-		notePermissionMode(e.permission_mode);
+		noteClassicHook(e.permission_mode, (k, v) => $.store.set(k, v));
 		return next(e);
 	});
 	// The bridge only needs the tool and a Bash command; a Write's input and any

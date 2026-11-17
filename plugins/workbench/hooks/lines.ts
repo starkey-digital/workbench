@@ -91,6 +91,21 @@ export function feedbackDraftLine(input: unknown, result: unknown, uuid: string)
 	};
 }
 
+/**
+ * Whether `tool.check`'s ask shows in chat as the terminal's dialog: only where
+ * no classic hook has reached the mod (no PermissionRequest will ask in chat),
+ * a person answers it, and the mode puts core's ask to them (core's verdict
+ * already holds bypass and acceptEdits; auto mode's classifier answers first,
+ * at `tool.judge`; dontAsk refuses).
+ */
+export function asksInTerminalOnly(a: {
+	classicReached: boolean;
+	approver?: string;
+	mode?: string;
+}): boolean {
+	return !a.classicReached && a.approver === 'person' && a.mode !== 'auto' && a.mode !== 'dontAsk';
+}
+
 export function askLine(
 	requestId: string,
 	tool: string,
