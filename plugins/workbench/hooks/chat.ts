@@ -13,6 +13,7 @@ import {
 	askLine,
 	attachedFiles,
 	commandRowOutput,
+	feedbackDraftLine,
 	KEEPALIVE_PROMPT,
 	midTurn,
 	modelOption,
@@ -1311,6 +1312,10 @@ export const register: Register = (on) => {
 				is_backgrounded: true,
 				uuid: `wbmod-bg-${bg}`
 			});
+		}
+		if (e.tool === 'SendFeedback' && id) {
+			const notice = feedbackDraftLine(e, result.result, `wbmod-feedback-${id}`);
+			if (notice) emit(notice);
 		}
 		if (main) {
 			callsRunning.delete(main);
