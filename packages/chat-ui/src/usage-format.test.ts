@@ -184,5 +184,8 @@ it('formats reset countdowns and uses the actual context window', () => {
 	expect(contextUsage({ contextTokens: 100000, model: 'opus[1m]' } as TranscriptMeta)?.limit).toBe(
 		1000000
 	);
+	expect(
+		contextUsage({ contextTokens: 100000, model: 'claude-opus-5-5' } as TranscriptMeta)
+	).toBeNull();
 	expect(contextUsage({ contextWindow: 0 } as TranscriptMeta)).toBeNull();
 });

@@ -227,7 +227,9 @@ export function contextUsage(
 ): { used: number; limit: number; percent: number } | null {
 	if (!meta) return null;
 	const used = Math.max(0, meta.contextTokens ?? 0);
-	const limit = meta.contextWindow ?? (meta.model?.endsWith('[1m]') ? 1_000_000 : 200_000);
-	if (!Number.isFinite(limit) || limit <= 0 || !Number.isFinite(used)) return null;
+	// Since CLI 2.1.311 a natively 1M model has no `[1m]`, so a bare id says
+	// nothing about its window: no guess until one is reported.
+	const limit = meta.contextWindow ?? (meta.model?.endsWith('[1m]') ? 1_000_000 : undefined);
+	if (!limit || !Number.isFinite(limit) || limit <= 0 || !Number.isFinite(used)) return null;
 	return { used, limit, percent: Math.min(100, (used / limit) * 100) };
 }

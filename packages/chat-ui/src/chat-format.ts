@@ -640,7 +640,7 @@ export function formatBytes(n: number): string {
 /**
  * How full the context window is, 0–1. Both CLIs report their window; while
  * Claude's isn't known (before a turn ends on the current model), `[1m]` on
- * the model means 1M, else 200k.
+ * the model means 1M, else it reads 0 (unknown).
  */
 export function contextUsed(meta: TranscriptMeta | null): number {
 	return (contextUsage(meta)?.percent ?? 0) / 100;

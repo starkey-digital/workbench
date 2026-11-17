@@ -1372,7 +1372,8 @@ impl Transcript {
         }
     }
 
-    /// Messages carry the bare API id; keep init's `[1m]`, the only sign of the 1M context window.
+    /// Messages carry the bare API id; keep init's `[1m]`, which marks a 1M window on a model
+    /// that isn't natively 1M (CLI 2.1.311+ drops it from models that are).
     fn note_model(&mut self, model: &str) {
         if !model.starts_with('<')
             && self
