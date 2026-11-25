@@ -2,7 +2,8 @@
 //! long polling keeps the native Android service independent of the WebView.
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
@@ -28,8 +29,9 @@ struct FeedState {
     tracker: AttentionTracker,
     events: VecDeque<(u64, Attention)>,
     sessions: std::collections::HashMap<String, (u64, AgentSummary)>,
-    /// When the pending timer for a held turn end fires.
+    /// When the pending timer for a held turn end fires, on `clock`.
     timer_at: Option<u64>,
+    clock: Instant,
 }
 
 #[derive(Serialize)]
@@ -51,6 +53,7 @@ impl Default for AttentionFeed {
                 events: VecDeque::new(),
                 sessions: std::collections::HashMap::new(),
                 timer_at: None,
+                clock: Instant::now(),
             })),
             changed: broadcast::channel(64).0,
             listed: Default::default(),
@@ -140,30 +143,8 @@ impl AttentionFeed {
         self.record(&mut state);
     }
 
-    /// Run the tracker, wake clients on news, and time the next held turn end.
     fn record(&self, state: &mut FeedState) {
-        let before = state.sequence;
-        state.record_sessions(crate::agent::now_ms());
-        if state.sequence != before {
-            let _ = self.changed.send(());
-        }
-        let Some(due) = state.tracker.next_deadline() else {
-            return;
-        };
-        if state.timer_at.is_some_and(|at| at <= due) {
-            return;
-        }
-        state.timer_at = Some(due);
-        let feed = self.clone();
-        std::thread::spawn(move || {
-            let wait = due.saturating_sub(crate::agent::now_ms());
-            std::thread::sleep(std::time::Duration::from_millis(wait));
-            let mut state = feed.state.lock().unwrap_or_else(|e| e.into_inner());
-            if state.timer_at == Some(due) {
-                state.timer_at = None;
-                feed.record(&mut state);
-            }
-        });
+        state.record(&self.changed, &Arc::downgrade(&self.state));
     }
 
     #[cfg(test)]
@@ -181,6 +162,41 @@ impl AttentionFeed {
 }
 
 impl FeedState {
+    /// Run the tracker, wake clients on news, and time the next held turn end.
+    /// The timer holds the feed weakly, so it never outlives it.
+    fn record(&mut self, changed: &broadcast::Sender<()>, feed: &Weak<Mutex<FeedState>>) {
+        let before = self.sequence;
+        self.record_sessions(self.now());
+        if self.sequence != before {
+            let _ = changed.send(());
+        }
+        let Some(due) = self.tracker.next_deadline() else {
+            return;
+        };
+        if self.timer_at.is_some_and(|at| at <= due) {
+            return;
+        }
+        self.timer_at = Some(due);
+        let wait = Duration::from_millis(due.saturating_sub(self.now()));
+        let (feed, changed) = (feed.clone(), changed.downgrade());
+        std::thread::spawn(move || {
+            std::thread::sleep(wait);
+            let (Some(state), Some(changed)) = (feed.upgrade(), changed.upgrade()) else {
+                return;
+            };
+            let mut state = state.lock().unwrap_or_else(|e| e.into_inner());
+            if state.timer_at == Some(due) {
+                state.timer_at = None;
+                state.record(&changed, &feed);
+            }
+        });
+    }
+
+    /// Monotonic, so a sleep or a clock change can't move a hold.
+    fn now(&self) -> u64 {
+        self.clock.elapsed().as_millis() as u64
+    }
+
     fn record_sessions(&mut self, now: u64) {
         let sessions: Vec<_> = self
             .sessions

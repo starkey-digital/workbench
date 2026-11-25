@@ -44,12 +44,20 @@ pub struct Attention {
 /// shell's result to start the next turn. A dev server never ends, so the
 /// alert can't wait for it.
 pub const SHELL_HOLD_MS: u64 = 120_000;
+/// The same for a background agent, whose result always wakes the next turn:
+/// the cap only covers an end that was never reported.
+pub const AGENT_HOLD_MS: u64 = 30 * 60_000;
+/// What is left of a hold once nothing runs in the background: the wake its
+/// result starts is on the way, or none comes (a killed shell).
+pub const WAKE_GRACE_MS: u64 = 10_000;
 
 struct Seen {
     waiting: Option<String>,
     turn_ended_at: Option<u64>,
-    /// A turn end held for a background shell, alerted at this time.
+    /// A turn end held for a background task, alerted at this time.
     held_until: Option<u64>,
+    /// Background shells running as the last turn ended, less those ended since.
+    shells_at_end: u32,
     /// As last listed, to report it resolved should it go while waiting.
     last: AgentSummary,
 }
@@ -80,8 +88,15 @@ impl AttentionTracker {
             let waiting = s.waiting.as_ref().map(|w| w.id.clone());
             let idle = waiting.is_none() && !s.busy && !s.exited;
             let ended = old.is_some_and(|o| s.turn_ended_at > o.turn_ended_at);
+            let shells = s.running_tasks.tasks;
+            // A shell already running as the last turn ended (a dev server) holds
+            // no later one: only a shell this turn started may be waking it.
+            let shells_seen = old.map_or(shells, |o| o.shells_at_end.min(shells));
             // A wake or a question takes a held end over.
             let mut held_until = old.and_then(|o| o.held_until).filter(|_| idle && !ended);
+            if shells == 0 && !s.awaiting_wake {
+                held_until = held_until.map(|at| at.min(now + WAKE_GRACE_MS));
+            }
             if previous.is_some() {
                 let kind = if waiting.is_some() && waiting != old.and_then(|o| o.waiting.clone()) {
                     Some(AttentionKind::Waiting)
@@ -94,8 +109,10 @@ impl AttentionTracker {
                     out.push(attention(kind, s));
                 }
                 // The next turn's end is reported instead.
-                if ended && idle && !s.awaiting_wake {
-                    if s.running_tasks.tasks > 0 {
+                if ended && idle {
+                    if s.awaiting_wake {
+                        held_until = Some(now + AGENT_HOLD_MS);
+                    } else if shells > shells_seen {
                         held_until = Some(now + SHELL_HOLD_MS);
                     } else {
                         out.push(attention(AttentionKind::TurnEnded, s));
@@ -111,6 +128,7 @@ impl AttentionTracker {
                     waiting,
                     turn_ended_at: s.turn_ended_at,
                     held_until,
+                    shells_at_end: if ended { shells } else { shells_seen },
                     last: s.clone(),
                 },
             );
@@ -312,7 +330,48 @@ mod tests {
             kinds(t.update(10 + SHELL_HOLD_MS, &[s.clone()])),
             [AttentionKind::TurnEnded]
         );
-        assert!(t.update(10 + 3 * SHELL_HOLD_MS, &[s]).is_empty(), "once");
+        assert!(
+            t.update(10 + 3 * SHELL_HOLD_MS, &[s.clone()]).is_empty(),
+            "once"
+        );
         assert_eq!(t.next_deadline(), None);
+        s.turn_ended_at = Some(9);
+        assert_eq!(
+            kinds(t.update(10 + 4 * SHELL_HOLD_MS, &[s])),
+            [AttentionKind::TurnEnded],
+            "a shell from an earlier turn (a dev server) holds no later end"
+        );
+    }
+
+    #[test]
+    fn a_held_end_alerts_soon_after_its_shell_ends_with_no_wake() {
+        let mut t = AttentionTracker::default();
+        let mut s = summary("a");
+        t.update(0, &[s.clone()]);
+        s.turn_ended_at = Some(5);
+        s.running_tasks.tasks = 1;
+        assert!(t.update(10, &[s.clone()]).is_empty());
+        s.running_tasks.tasks = 0;
+        assert!(t.update(20, &[s.clone()]).is_empty());
+        assert_eq!(t.next_deadline(), Some(20 + WAKE_GRACE_MS));
+        assert_eq!(
+            kinds(t.update(20 + WAKE_GRACE_MS, &[s])),
+            [AttentionKind::TurnEnded]
+        );
+    }
+
+    #[test]
+    fn an_agent_whose_end_never_comes_holds_only_until_the_cap() {
+        let mut t = AttentionTracker::default();
+        let mut s = summary("a");
+        t.update(0, &[s.clone()]);
+        s.turn_ended_at = Some(5);
+        s.awaiting_wake = true;
+        assert!(t.update(10, &[s.clone()]).is_empty());
+        assert!(t.update(10 + SHELL_HOLD_MS, &[s.clone()]).is_empty());
+        assert_eq!(
+            kinds(t.update(10 + AGENT_HOLD_MS, &[s])),
+            [AttentionKind::TurnEnded]
+        );
     }
 }

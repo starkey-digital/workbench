@@ -382,6 +382,20 @@ async function showInTerminal(
 	);
 }
 
+/**
+ * A task's agent runs on after the call: its result wakes the next turn, so a
+ * turn's end alerts no one until then (`wakes_parent`).
+ */
+function markBackground(task: string) {
+	emit({
+		type: 'system',
+		subtype: 'task_updated',
+		task_id: task,
+		patch: { is_backgrounded: true },
+		uuid: `wbmod-bg-agent-${task}`
+	});
+}
+
 /** Report background jobs that finished; called from the Stop hook with its job list. */
 export function noteBackgroundTasks(tasks: readonly { id: string; status: string }[] = []) {
 	if (server.current()) emit(...stoppedJobs(tasks));
@@ -1326,8 +1340,10 @@ export const register: Register = (on) => {
 			const guessed = taskAgents.get(id);
 			if (guessed && guessed !== forked) unlinkTask(id);
 			if (forked && guessed !== forked) startSkillTask(id, forked);
-			if (forked && launched?.background) asyncAgents.add(forked);
-			else if (taskAgents.has(id) || guessed) {
+			if (forked && launched?.background) {
+				asyncAgents.add(forked);
+				markBackground(id);
+			} else if (taskAgents.has(id) || guessed) {
 				unlinkTask(id);
 				emit({
 					type: 'system',
@@ -1345,16 +1361,8 @@ export const register: Register = (on) => {
 			asyncAgents.add(launched.agentId);
 			if (teammate) teammates.add(launched.agentId);
 			linkAgent(launched.agentId, id);
-			// Its result wakes the next turn: until then a turn's end alerts no one
-			// (`wakes_parent`). A teammate may never end, as a dev server.
-			if (!teammate)
-				emit({
-					type: 'system',
-					subtype: 'task_updated',
-					task_id: id,
-					patch: { is_backgrounded: true },
-					uuid: `wbmod-bg-agent-${id}`
-				});
+			// A teammate may never end, as a dev server.
+			if (!teammate) markBackground(id);
 		} else if (isAgent && id) {
 			unlinkTask(id);
 			emit({
