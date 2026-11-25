@@ -2,7 +2,8 @@
 //! long polling keeps the native Android service independent of the WebView.
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
@@ -28,6 +29,9 @@ struct FeedState {
     tracker: AttentionTracker,
     events: VecDeque<(u64, Attention)>,
     sessions: std::collections::HashMap<String, (u64, AgentSummary)>,
+    /// When the pending timer for a held turn end fires, on `clock`.
+    timer_at: Option<u64>,
+    clock: Instant,
 }
 
 #[derive(Serialize)]
@@ -39,7 +43,7 @@ pub struct AttentionBatch {
 impl Default for AttentionFeed {
     fn default() -> Self {
         let mut tracker = AttentionTracker::default();
-        tracker.update(&[]);
+        tracker.update(0, &[]);
         Self {
             state: Arc::new(Mutex::new(FeedState {
                 epoch: uuid::Uuid::new_v4().to_string(),
@@ -48,6 +52,8 @@ impl Default for AttentionFeed {
                 tracker,
                 events: VecDeque::new(),
                 sessions: std::collections::HashMap::new(),
+                timer_at: None,
+                clock: Instant::now(),
             })),
             changed: broadcast::channel(64).0,
             listed: Default::default(),
@@ -86,7 +92,8 @@ impl AttentionFeed {
     }
 
     /// Called synchronously when the plugin or app-server changes a session.
-    /// No polling, timers or attached chat UI are involved in producing alerts.
+    /// No polling or attached chat UI is involved in producing alerts; the one
+    /// timer is a turn end held for a background shell (`SHELL_HOLD_MS`).
     pub(crate) fn observe(&self, source: u64, mut session: AgentSummary) {
         if session.session_id.is_empty() {
             return;
@@ -119,11 +126,7 @@ impl AttentionFeed {
         state
             .sessions
             .insert(session.session_id.clone(), (source, session));
-        let before = state.sequence;
-        state.record_sessions();
-        if state.sequence != before {
-            let _ = self.changed.send(());
-        }
+        self.record(&mut state);
     }
 
     pub(crate) fn forget(&self, source: u64, id: &str) {
@@ -137,11 +140,11 @@ impl AttentionFeed {
         }
         self.listed.notify();
         state.sessions.remove(id);
-        let before = state.sequence;
-        state.record_sessions();
-        if state.sequence != before {
-            let _ = self.changed.send(());
-        }
+        self.record(&mut state);
+    }
+
+    fn record(&self, state: &mut FeedState) {
+        state.record(&self.changed, &Arc::downgrade(&self.state));
     }
 
     #[cfg(test)]
@@ -159,13 +162,48 @@ impl AttentionFeed {
 }
 
 impl FeedState {
-    fn record_sessions(&mut self) {
+    /// Run the tracker, wake clients on news, and time the next held turn end.
+    /// The timer holds the feed weakly, so it never outlives it.
+    fn record(&mut self, changed: &broadcast::Sender<()>, feed: &Weak<Mutex<FeedState>>) {
+        let before = self.sequence;
+        self.record_sessions(self.now());
+        if self.sequence != before {
+            let _ = changed.send(());
+        }
+        let Some(due) = self.tracker.next_deadline() else {
+            return;
+        };
+        if self.timer_at.is_some_and(|at| at <= due) {
+            return;
+        }
+        self.timer_at = Some(due);
+        let wait = Duration::from_millis(due.saturating_sub(self.now()));
+        let (feed, changed) = (feed.clone(), changed.downgrade());
+        std::thread::spawn(move || {
+            std::thread::sleep(wait);
+            let (Some(state), Some(changed)) = (feed.upgrade(), changed.upgrade()) else {
+                return;
+            };
+            let mut state = state.lock().unwrap_or_else(|e| e.into_inner());
+            if state.timer_at == Some(due) {
+                state.timer_at = None;
+                state.record(&changed, &feed);
+            }
+        });
+    }
+
+    /// Monotonic, so a sleep or a clock change can't move a hold.
+    fn now(&self) -> u64 {
+        self.clock.elapsed().as_millis() as u64
+    }
+
+    fn record_sessions(&mut self, now: u64) {
         let sessions: Vec<_> = self
             .sessions
             .values()
             .map(|(_, summary)| summary.clone())
             .collect();
-        for event in self.tracker.update(&sessions) {
+        for event in self.tracker.update(now, &sessions) {
             self.push(event);
         }
     }

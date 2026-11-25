@@ -220,7 +220,9 @@ async fn list_folders(Query(q): Query<OptionalPathQuery>) -> ApiResult<Json<Valu
 
 /// A new project's empty folder; answers its path. The client then adds it.
 async fn create_folder(Json(req): Json<CreateFolderRequest>) -> ApiResult<Json<String>> {
-    Ok(Json(blocking(move || new_project::create_folder(req)).await?))
+    Ok(Json(
+        blocking(move || new_project::create_folder(req)).await?,
+    ))
 }
 
 /// Clones a repository on this host and registers it.
