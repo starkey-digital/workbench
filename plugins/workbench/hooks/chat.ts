@@ -1345,6 +1345,16 @@ export const register: Register = (on) => {
 			asyncAgents.add(launched.agentId);
 			if (teammate) teammates.add(launched.agentId);
 			linkAgent(launched.agentId, id);
+			// Its result wakes the next turn: until then a turn's end alerts no one
+			// (`wakes_parent`). A teammate may never end, as a dev server.
+			if (!teammate)
+				emit({
+					type: 'system',
+					subtype: 'task_updated',
+					task_id: id,
+					patch: { is_backgrounded: true },
+					uuid: `wbmod-bg-agent-${id}`
+				});
 		} else if (isAgent && id) {
 			unlinkTask(id);
 			emit({
