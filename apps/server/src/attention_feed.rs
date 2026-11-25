@@ -28,6 +28,8 @@ struct FeedState {
     tracker: AttentionTracker,
     events: VecDeque<(u64, Attention)>,
     sessions: std::collections::HashMap<String, (u64, AgentSummary)>,
+    /// When the pending timer for a held turn end fires.
+    timer_at: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -39,7 +41,7 @@ pub struct AttentionBatch {
 impl Default for AttentionFeed {
     fn default() -> Self {
         let mut tracker = AttentionTracker::default();
-        tracker.update(&[]);
+        tracker.update(0, &[]);
         Self {
             state: Arc::new(Mutex::new(FeedState {
                 epoch: uuid::Uuid::new_v4().to_string(),
@@ -48,6 +50,7 @@ impl Default for AttentionFeed {
                 tracker,
                 events: VecDeque::new(),
                 sessions: std::collections::HashMap::new(),
+                timer_at: None,
             })),
             changed: broadcast::channel(64).0,
             listed: Default::default(),
@@ -86,7 +89,8 @@ impl AttentionFeed {
     }
 
     /// Called synchronously when the plugin or app-server changes a session.
-    /// No polling, timers or attached chat UI are involved in producing alerts.
+    /// No polling or attached chat UI is involved in producing alerts; the one
+    /// timer is a turn end held for a background shell (`SHELL_HOLD_MS`).
     pub(crate) fn observe(&self, source: u64, mut session: AgentSummary) {
         if session.session_id.is_empty() {
             return;
@@ -119,11 +123,7 @@ impl AttentionFeed {
         state
             .sessions
             .insert(session.session_id.clone(), (source, session));
-        let before = state.sequence;
-        state.record_sessions();
-        if state.sequence != before {
-            let _ = self.changed.send(());
-        }
+        self.record(&mut state);
     }
 
     pub(crate) fn forget(&self, source: u64, id: &str) {
@@ -137,11 +137,33 @@ impl AttentionFeed {
         }
         self.listed.notify();
         state.sessions.remove(id);
+        self.record(&mut state);
+    }
+
+    /// Run the tracker, wake clients on news, and time the next held turn end.
+    fn record(&self, state: &mut FeedState) {
         let before = state.sequence;
-        state.record_sessions();
+        state.record_sessions(crate::agent::now_ms());
         if state.sequence != before {
             let _ = self.changed.send(());
         }
+        let Some(due) = state.tracker.next_deadline() else {
+            return;
+        };
+        if state.timer_at.is_some_and(|at| at <= due) {
+            return;
+        }
+        state.timer_at = Some(due);
+        let feed = self.clone();
+        std::thread::spawn(move || {
+            let wait = due.saturating_sub(crate::agent::now_ms());
+            std::thread::sleep(std::time::Duration::from_millis(wait));
+            let mut state = feed.state.lock().unwrap_or_else(|e| e.into_inner());
+            if state.timer_at == Some(due) {
+                state.timer_at = None;
+                feed.record(&mut state);
+            }
+        });
     }
 
     #[cfg(test)]
@@ -159,13 +181,13 @@ impl AttentionFeed {
 }
 
 impl FeedState {
-    fn record_sessions(&mut self) {
+    fn record_sessions(&mut self, now: u64) {
         let sessions: Vec<_> = self
             .sessions
             .values()
             .map(|(_, summary)| summary.clone())
             .collect();
-        for event in self.tracker.update(&sessions) {
+        for event in self.tracker.update(now, &sessions) {
             self.push(event);
         }
     }

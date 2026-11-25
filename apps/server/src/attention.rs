@@ -40,9 +40,16 @@ pub struct Attention {
     pub terminal_only: bool,
 }
 
+/// How long a turn's end that left a background shell running waits for the
+/// shell's result to start the next turn. A dev server never ends, so the
+/// alert can't wait for it.
+pub const SHELL_HOLD_MS: u64 = 120_000;
+
 struct Seen {
     waiting: Option<String>,
     turn_ended_at: Option<u64>,
+    /// A turn end held for a background shell, alerted at this time.
+    held_until: Option<u64>,
     /// As last listed, to report it resolved should it go while waiting.
     last: AgentSummary,
 }
@@ -55,7 +62,7 @@ pub struct AttentionTracker {
 }
 
 impl AttentionTracker {
-    pub fn update(&mut self, list: &[AgentSummary]) -> Vec<Attention> {
+    pub fn update(&mut self, now: u64, list: &[AgentSummary]) -> Vec<Attention> {
         let previous = self.seen.take();
         let mut next = HashMap::new();
         let mut out = Vec::new();
@@ -71,6 +78,10 @@ impl AttentionTracker {
             }
             let old = old.map(|(_, seen)| seen);
             let waiting = s.waiting.as_ref().map(|w| w.id.clone());
+            let idle = waiting.is_none() && !s.busy && !s.exited;
+            let ended = old.is_some_and(|o| s.turn_ended_at > o.turn_ended_at);
+            // A wake or a question takes a held end over.
+            let mut held_until = old.and_then(|o| o.held_until).filter(|_| idle && !ended);
             if previous.is_some() {
                 let kind = if waiting.is_some() && waiting != old.and_then(|o| o.waiting.clone()) {
                     Some(AttentionKind::Waiting)
@@ -82,9 +93,15 @@ impl AttentionTracker {
                 if let Some(kind) = kind {
                     out.push(attention(kind, s));
                 }
-                let ended = old.is_some_and(|o| s.turn_ended_at > o.turn_ended_at);
                 // The next turn's end is reported instead.
-                if ended && waiting.is_none() && !s.busy && !s.exited && !s.awaiting_wake {
+                if ended && idle && !s.awaiting_wake {
+                    if s.running_tasks.tasks > 0 {
+                        held_until = Some(now + SHELL_HOLD_MS);
+                    } else {
+                        out.push(attention(AttentionKind::TurnEnded, s));
+                    }
+                } else if held_until.is_some_and(|at| now >= at) {
+                    held_until = None;
                     out.push(attention(AttentionKind::TurnEnded, s));
                 }
             }
@@ -93,6 +110,7 @@ impl AttentionTracker {
                 Seen {
                     waiting,
                     turn_ended_at: s.turn_ended_at,
+                    held_until,
                     last: s.clone(),
                 },
             );
@@ -109,6 +127,15 @@ impl AttentionTracker {
         }
         self.seen = Some(next);
         out
+    }
+
+    /// When the earliest held turn end is due.
+    pub fn next_deadline(&self) -> Option<u64> {
+        self.seen
+            .as_ref()?
+            .values()
+            .filter_map(|s| s.held_until)
+            .min()
     }
 }
 
@@ -177,25 +204,25 @@ mod tests {
         let mut s = summary("a");
         s.waiting = waiting("r1");
         s.turn_ended_at = Some(5);
-        assert!(t.update(&[s.clone()]).is_empty());
-        assert!(t.update(&[s]).is_empty(), "nothing changed");
+        assert!(t.update(0, &[s.clone()]).is_empty());
+        assert!(t.update(0, &[s]).is_empty(), "nothing changed");
     }
 
     #[test]
     fn approvals_and_turn_ends_are_reported_once() {
         let mut t = AttentionTracker::default();
         let mut s = summary("a");
-        t.update(&[s.clone()]);
+        t.update(0, &[s.clone()]);
         s.busy = true;
         s.waiting = waiting("r1");
-        assert_eq!(kinds(t.update(&[s.clone()])), [AttentionKind::Waiting]);
-        assert!(t.update(&[s.clone()]).is_empty());
+        assert_eq!(kinds(t.update(0, &[s.clone()])), [AttentionKind::Waiting]);
+        assert!(t.update(0, &[s.clone()]).is_empty());
         s.waiting = None;
-        assert_eq!(kinds(t.update(&[s.clone()])), [AttentionKind::Resolved]);
+        assert_eq!(kinds(t.update(0, &[s.clone()])), [AttentionKind::Resolved]);
         s.busy = false;
         s.turn_ended_at = Some(10);
-        assert_eq!(kinds(t.update(&[s.clone()])), [AttentionKind::TurnEnded]);
-        assert!(t.update(&[s]).is_empty());
+        assert_eq!(kinds(t.update(0, &[s.clone()])), [AttentionKind::TurnEnded]);
+        assert!(t.update(0, &[s]).is_empty());
     }
 
     #[test]
@@ -203,24 +230,24 @@ mod tests {
         let mut t = AttentionTracker::default();
         let mut s = summary("a");
         s.waiting = waiting("r1");
-        t.update(&[s, summary("b")]);
-        let out = t.update(&[summary("b")]);
+        t.update(0, &[s, summary("b")]);
+        let out = t.update(0, &[summary("b")]);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].kind, AttentionKind::Resolved);
         assert_eq!(out[0].session_id, "a");
-        assert!(t.update(&[]).is_empty(), "b wasn't waiting");
+        assert!(t.update(0, &[]).is_empty(), "b wasn't waiting");
     }
 
     #[test]
     fn a_new_session_alerts_only_when_it_already_waits() {
         let mut t = AttentionTracker::default();
-        t.update(&[]);
+        t.update(0, &[]);
         let mut s = summary("a");
         s.turn_ended_at = Some(3);
-        assert!(t.update(&[s.clone()]).is_empty());
+        assert!(t.update(0, &[s.clone()]).is_empty());
         let mut w = summary("b");
         w.waiting = waiting("r1");
-        assert_eq!(kinds(t.update(&[s, w])), [AttentionKind::Waiting]);
+        assert_eq!(kinds(t.update(0, &[s, w])), [AttentionKind::Waiting]);
     }
 
     #[test]
@@ -228,35 +255,64 @@ mod tests {
         let mut t = AttentionTracker::default();
         let mut s = summary("old");
         s.turn_ended_at = Some(3);
-        t.update(&[s.clone()]);
+        t.update(0, &[s.clone()]);
         s.session_id = "new".into();
         s.previous_ids = vec!["old".into()];
-        assert!(t.update(&[s.clone()]).is_empty());
+        assert!(t.update(0, &[s.clone()]).is_empty());
         s.turn_ended_at = Some(4);
-        assert_eq!(kinds(t.update(&[s])), [AttentionKind::TurnEnded]);
+        assert_eq!(kinds(t.update(0, &[s])), [AttentionKind::TurnEnded]);
     }
 
     #[test]
     fn a_turn_ending_before_a_background_agent_waits_for_the_next() {
         let mut t = AttentionTracker::default();
         let mut s = summary("a");
-        t.update(&[s.clone()]);
+        t.update(0, &[s.clone()]);
         s.turn_ended_at = Some(5);
         s.awaiting_wake = true;
-        assert!(t.update(&[s.clone()]).is_empty());
+        assert!(t.update(0, &[s.clone()]).is_empty());
         s.awaiting_wake = false;
-        assert!(t.update(&[s.clone()]).is_empty(), "no turn ended since");
+        assert!(t.update(0, &[s.clone()]).is_empty(), "no turn ended since");
         s.turn_ended_at = Some(9);
-        assert_eq!(kinds(t.update(&[s])), [AttentionKind::TurnEnded]);
+        assert_eq!(kinds(t.update(0, &[s])), [AttentionKind::TurnEnded]);
     }
 
     #[test]
-    fn other_background_tasks_dont_hold_a_turn_end() {
+    fn a_background_shell_holds_a_turn_end_until_it_wakes_the_next() {
         let mut t = AttentionTracker::default();
         let mut s = summary("a");
-        t.update(&[s.clone()]);
+        t.update(0, &[s.clone()]);
         s.turn_ended_at = Some(5);
         s.running_tasks.tasks = 1;
-        assert_eq!(kinds(t.update(&[s])), [AttentionKind::TurnEnded]);
+        assert!(t.update(10, &[s.clone()]).is_empty());
+        assert_eq!(t.next_deadline(), Some(10 + SHELL_HOLD_MS));
+        s.running_tasks.tasks = 0;
+        assert!(
+            t.update(20, &[s.clone()]).is_empty(),
+            "its result is on the way"
+        );
+        s.busy = true;
+        assert!(t.update(30, &[s.clone()]).is_empty());
+        assert_eq!(t.next_deadline(), None, "the wake took it over");
+        s.busy = false;
+        s.turn_ended_at = Some(40);
+        assert_eq!(kinds(t.update(40, &[s])), [AttentionKind::TurnEnded]);
+    }
+
+    #[test]
+    fn a_shell_that_never_ends_alerts_once_the_hold_runs_out() {
+        let mut t = AttentionTracker::default();
+        let mut s = summary("a");
+        t.update(0, &[s.clone()]);
+        s.turn_ended_at = Some(5);
+        s.running_tasks.tasks = 1;
+        assert!(t.update(10, &[s.clone()]).is_empty());
+        assert!(t.update(10 + SHELL_HOLD_MS - 1, &[s.clone()]).is_empty());
+        assert_eq!(
+            kinds(t.update(10 + SHELL_HOLD_MS, &[s.clone()])),
+            [AttentionKind::TurnEnded]
+        );
+        assert!(t.update(10 + 3 * SHELL_HOLD_MS, &[s]).is_empty(), "once");
+        assert_eq!(t.next_deadline(), None);
     }
 }
